@@ -197,10 +197,15 @@ export class ScoreTracker {
    * Computes the full breakdown once the run ends. `finished` = crossed the
    * finish line (completion/time/position bonuses apply); false = wiped out
    * (event points only kept — §4.7). `position` is still included either way
-   * for display, just unrewarded on a wipeout.
+   * for display, just unrewarded on a wipeout. `elapsedRaceMs` MUST be
+   * race-elapsed time (e.g. `time - raceStartMs`) — it's compared against the
+   * fixed `PAR_TIME` constant below, so a caller passing Phaser's raw
+   * `update(time, ...)` clock (shared globally across every scene, never
+   * reset on a scene restart) would silently zero the time bonus after the
+   * very first race.
    */
-  finalize(finished: boolean, finishTimeMs: number, position: number): ScoreBreakdown {
-    const finishTimeSeconds = finishTimeMs / 1000;
+  finalize(finished: boolean, elapsedRaceMs: number, position: number): ScoreBreakdown {
+    const finishTimeSeconds = elapsedRaceMs / 1000;
     const completionBonus = finished ? POINTS.COMPLETION_BONUS : 0;
     const timeBonus = finished ? Math.max(0, PAR_TIME - finishTimeSeconds) * POINTS.TIME_BONUS_PER_SECOND_UNDER_PAR : 0;
     const positionBonus = finished ? (POSITION_BONUS_BY_PLACE[position] ?? 0) : 0;

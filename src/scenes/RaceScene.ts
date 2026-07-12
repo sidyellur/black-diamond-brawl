@@ -97,6 +97,13 @@ export class RaceScene extends Phaser.Scene {
    *  frame this same scene instance might still process. */
   private raceOver = false;
   private prevWorldZ = 0;
+  /** `this.time.now` at the instant this race started (design-spec §4.7's
+   *  finish time is race-elapsed time, not wall-clock time since the game
+   *  booted) — Phaser's `update(time, delta)` `time` argument is the GLOBAL
+   *  game clock shared by every scene, never reset on a scene restart, so
+   *  finish time must be computed as `time - raceStartMs`, never `time`
+   *  directly (see `endRace`). */
+  private raceStartMs = 0;
 
   constructor() {
     super({ key: 'RaceScene' });
@@ -108,6 +115,7 @@ export class RaceScene extends Phaser.Scene {
     // `= 0`) only ever runs once, at construction — NOT on every `create()`.
     this.raceOver = false;
     this.prevWorldZ = 0;
+    this.raceStartMs = this.time.now;
 
     // Static sky/backdrop (design-spec §3.6 step 1): a flat camera
     // background color repaints behind everything each frame for free.
@@ -304,9 +312,15 @@ export class RaceScene extends Phaser.Scene {
       // render — not that ResultScene needs it, but keeps worldZ sane.
       this.player.worldZ = Math.max(0, this.finishSegment!.z - FINISH_HOLD_BACK);
     }
+    // `computePlayerPosition` only ever compares `finishTimeMs` values against
+    // EACH OTHER (relative order, never against a fixed constant), so the raw
+    // (wall-clock-since-boot) `nowMs`/`rider.finishTimeMs` pairing is fine
+    // there. `ScoreTracker.finalize`'s time bonus is different: it compares
+    // finish time against the fixed `PAR_TIME` constant, so it needs the
+    // RACE-elapsed duration, not time-since-game-booted — see `raceStartMs`.
     const playerFinishTimeMs = finished ? nowMs : null;
     const position = computePlayerPosition(this.player, this.aiRiders, playerFinishTimeMs);
-    const breakdown = this.scoreTracker.finalize(finished, nowMs, position);
+    const breakdown = this.scoreTracker.finalize(finished, nowMs - this.raceStartMs, position);
     const { best, isNewBest } = recordScore(breakdown.total);
 
     this.scene.start('ResultScene', { seed: this.seed, breakdown, bestScore: best, isNewBest });
