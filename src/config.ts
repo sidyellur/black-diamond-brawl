@@ -5,7 +5,7 @@ export const SEGMENT_LENGTH = 200;
 export const COURSE_LENGTH_SEGMENTS = 1500;
 export const MAX_SPEED = 3000;
 export const DRAW_DISTANCE = 100;
-export const CAMERA_DEPTH = 400; // FOV 100°
+export const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180); // Derived from FOV 100°
 
 // Lanes
 export const LANES = [-0.8, -0.4, 0, 0.4, 0.8];
