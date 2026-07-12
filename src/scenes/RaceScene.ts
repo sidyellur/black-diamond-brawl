@@ -157,6 +157,12 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    // Stamps this frame's clock BEFORE player.update() — a lane-shift press
+    // can synchronously resolve a shove via `Player.shoveInterceptor`, which
+    // needs a fresh `nowMs` even though `CombatSystem.update()` itself must
+    // run later, after every rider's collision pass (see its own doc).
+    this.combat.beginFrame(time);
+
     const prevZ = this.prevWorldZ;
     this.player.update(delta);
 

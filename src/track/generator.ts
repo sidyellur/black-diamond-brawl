@@ -5,7 +5,7 @@ import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { placeObstacles } from './placement';
 import { placePickups } from './pickupPlacement';
-import { mulberry32, Prng } from './prng';
+import { mulberry32, Prng, randInt } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
 import { Segment } from './segment';
 
@@ -80,8 +80,6 @@ const WEIGHTS_END: Record<SectionType, number> = {
 };
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-const randInt = (prng: Prng, min: number, max: number): number => Math.floor(min + prng() * (max - min + 1));
 
 function pickSectionType(prng: Prng, t: number): SectionType {
   const types = Object.keys(WEIGHTS_START) as SectionType[];

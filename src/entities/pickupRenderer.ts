@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { LANES } from '../config';
 import { Camera, projectEntity } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
+import { laneFraction } from './obstacle';
 import { PICKUP_FRAME, PICKUP_FRAME_SIZE, PICKUP_TEXTURE_KEY } from './pickupSprite';
 import { Pickup } from './pickup';
 
@@ -35,7 +35,7 @@ export class PickupRenderer {
       if (pickup.collected) {
         continue;
       }
-      const projected = projectEntity(LANES[pickup.lane], pickup.z, track, drawnSegments, camera);
+      const projected = projectEntity(laneFraction(pickup.lane), pickup.z, track, drawnSegments, camera);
       if (!projected) {
         continue; // behind camera, beyond draw distance, or crest-clipped
       }

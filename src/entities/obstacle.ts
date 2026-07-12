@@ -34,7 +34,15 @@ export function segmentCentreZ(segIndex: number): number {
   return segIndex * SEGMENT_LENGTH + SEGMENT_LENGTH / 2;
 }
 
+/** Lateral offset fraction (of road half-width) of a lane index — the single
+ *  source of truth every entity (obstacles, pickups, riders) converts a lane
+ *  index through, so a future change to `LANES`' semantics only needs to be
+ *  handled here. */
+export function laneFraction(lane: number): number {
+  return LANES[lane];
+}
+
 /** Lateral offset fraction (of road half-width) of an obstacle's lane. */
 export function obstacleLaneFraction(obstacle: Obstacle): number {
-  return LANES[obstacle.lane];
+  return laneFraction(obstacle.lane);
 }

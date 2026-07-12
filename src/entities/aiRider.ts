@@ -1,6 +1,5 @@
 import {
   AI_BUMP_CHECK_INTERVAL_MS,
-  BUMP_Z_WINDOW,
   LANE_TWEEN_MS,
   LANES,
   MAX_SPEED,
@@ -10,7 +9,8 @@ import {
   ROCK_IMMUNITY_MS,
   ROCK_SPEED_FACTOR,
   ROCK_TUMBLE_MS,
-  SEGMENT_LENGTH
+  SEGMENT_LENGTH,
+  SHOVE_Z_WINDOW
 } from '../config';
 import { Collidable } from './collision';
 import { Obstacle } from './obstacle';
@@ -63,7 +63,7 @@ export class AIRider implements Collidable {
   wipedOut = false;
   readonly airborne = false;
 
-  private laneIndex_: number;
+  private _laneIndex: number;
   private tween: LaneTween | null = null;
 
   // Same temporary-collision timers as Player (design-spec §4.4), so a rock/
@@ -81,7 +81,7 @@ export class AIRider implements Collidable {
   private shovedByPlayerAtMs: number | null = null;
 
   constructor(readonly params: AIRiderParams) {
-    this.laneIndex_ = params.startLane;
+    this._laneIndex = params.startLane;
     this.worldZ = params.startZOffset;
   }
 
@@ -136,7 +136,7 @@ export class AIRider implements Collidable {
    *  `CombatSystem` for lateral-adjacency checks and by this rider's own
    *  bump behavior for lane-diff comparisons. */
   get laneIndex(): number {
-    return this.laneIndex_;
+    return this._laneIndex;
   }
 
   /** Current lane-offset fraction of road half-width — mirrors
@@ -144,7 +144,7 @@ export class AIRider implements Collidable {
    *  treat this rider identically to the player. */
   get laneOffsetFraction(): number {
     if (!this.tween) {
-      return LANES[this.laneIndex_];
+      return LANES[this._laneIndex];
     }
     const t = smoothstep(Math.min(1, this.tween.elapsedMs / LANE_TWEEN_MS));
     const from = LANES[this.tween.fromLane];
@@ -217,7 +217,7 @@ export class AIRider implements Collidable {
    */
   private maybeDodge(obstacles: Obstacle[]): boolean {
     const lookaheadZ = this.worldZ + this.params.reactionDistanceSegments * SEGMENT_LENGTH;
-    const currentLane = this.laneIndex_;
+    const currentLane = this._laneIndex;
     const laneHasObstacleAhead = (lane: number): boolean =>
       obstacles.some((o) => o.lane === lane && o.z > this.worldZ && o.z <= lookaheadZ);
 
@@ -238,7 +238,7 @@ export class AIRider implements Collidable {
   /**
    * Bump behavior (design-spec §4.5 behavior 3): on an aggression-weighted
    * runtime-random timer (NOT the seeded PRNG — §4.2), a rider adjacent to
-   * the player and within `BUMP_Z_WINDOW` occasionally drifts into the
+   * the player and within `SHOVE_Z_WINDOW` occasionally drifts into the
    * player's lane to attempt a shove. This only ever MOVES the rider — the
    * actual exchange resolves generically once the rider shares the player's
    * lane, via `CombatSystem`'s same-lane trigger (§4.6), the identical path
@@ -247,6 +247,13 @@ export class AIRider implements Collidable {
    * "whiffs, no effect on either rider" outcome for free (§4.3/§4.6) —
    * `CombatSystem` simply never resolves an exchange against an airborne
    * target, so the rider just ends up parked alongside with no consequence.
+   *
+   * Gated on `SHOVE_Z_WINDOW`, not a wider "bump range": the ~150ms lane
+   * tween only moves the rider LATERALLY, not along Z — at similar cruise
+   * speeds the Z-gap barely changes during the drift, so initiating from any
+   * farther out than the window `CombatSystem` actually resolves against
+   * would just strand the rider parked in the player's lane with the
+   * exchange perpetually failing to fire.
    */
   private maybeBump(player: Player): void {
     if (this.bumpCooldownMs > 0) {
@@ -257,17 +264,17 @@ export class AIRider implements Collidable {
     if (player.wipedOut) {
       return;
     }
-    const laneDiff = player.laneIndex - this.laneIndex_;
+    const laneDiff = player.laneIndex - this._laneIndex;
     if (Math.abs(laneDiff) !== 1) {
       return; // must be laterally adjacent, not already sharing a lane or 2+ away
     }
-    if (Math.abs(player.worldZ - this.worldZ) > BUMP_Z_WINDOW) {
+    if (Math.abs(player.worldZ - this.worldZ) > SHOVE_Z_WINDOW) {
       return;
     }
     if (Math.random() >= this.params.aggression) {
       return; // aggression-weighted chance; runtime randomness, deliberately unseeded
     }
-    this.tween = { fromLane: this.laneIndex_, toLane: this.laneIndex_ + laneDiff, elapsedMs: 0 };
+    this.tween = { fromLane: this._laneIndex, toLane: this._laneIndex + laneDiff, elapsedMs: 0 };
   }
 
   /**
@@ -281,11 +288,11 @@ export class AIRider implements Collidable {
       return;
     }
     this.speed *= 1 - speedLossFactor;
-    if (targetLaneIndex === this.laneIndex_) {
+    if (targetLaneIndex === this._laneIndex) {
       this.tween = null; // clamped: no lane change, speed loss only
       return;
     }
-    this.tween = { fromLane: this.laneIndex_, toLane: targetLaneIndex, elapsedMs: 0 };
+    this.tween = { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0 };
   }
 
   /** Records that this rider just lost a shove exchange to the player, for
@@ -308,7 +315,7 @@ export class AIRider implements Collidable {
     if (this.tween.elapsedMs < LANE_TWEEN_MS) {
       return;
     }
-    this.laneIndex_ = this.tween.toLane;
+    this._laneIndex = this.tween.toLane;
     this.tween = null;
   }
 }

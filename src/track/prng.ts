@@ -18,3 +18,10 @@ export function mulberry32(seed: number): Prng {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** Draws a random integer in `[min, max]` inclusive from a `Prng`. Shared by
+ *  every placement pass (geometry sections, obstacles, pickups) so the
+ *  seeded-draw formula lives in exactly one place. */
+export function randInt(prng: Prng, min: number, max: number): number {
+  return Math.floor(min + prng() * (max - min + 1));
+}

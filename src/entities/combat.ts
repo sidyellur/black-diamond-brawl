@@ -65,6 +65,21 @@ export class CombatSystem {
   }
 
   /**
+   * Stamps this frame's `nowMs` for `attemptPlayerShove` to use. Called by
+   * `RaceScene` as the very FIRST thing each frame — before `Player.update()`
+   * runs — because a lane-shift press can synchronously call
+   * `attemptPlayerShove` from inside `Player.update()`/`updateLaneTween`,
+   * which happens before this class's own `update()` (that must instead run
+   * LAST, after every rider's collision pass — see `update()`'s doc).
+   * Without this separate stamp, the very first shove of a race would record
+   * `nowMs = 0` (before `update()` ever ran), and every later shove would be
+   * timestamped one frame stale.
+   */
+  beginFrame(nowMs: number): void {
+    this.lastFrameNowMs = nowMs;
+  }
+
+  /**
    * Call once per frame, AFTER every rider's own `update()`/collision pass
    * has run (so this frame's `wipedOut` transitions are final) but BEFORE
    * anything reads `events` for scoring.
@@ -86,10 +101,11 @@ export class CombatSystem {
 
   /**
    * Player pressed a lane-shift direction (§4.6 trigger 1: lateral shove).
-   * Returns true if a rival occupies the target lane within the shove
-   * window — the caller (`Player.startLaneTween`) must treat this as
-   * "resolved as combat" and skip the actual lane change, even if the
-   * exchange itself no-ops internally (e.g. the rival is still immune).
+   * Returns true only if an exchange actually resolved — the caller
+   * (`Player.startLaneTween`) treats that as "resolved as combat, skip the
+   * lane change." If a rival is there but the exchange no-ops (e.g. still
+   * pair-immune from a shove moments ago), this returns false so the
+   * lane-shift proceeds normally instead of silently eating the input.
    */
   attemptPlayerShove(direction: -1 | 1): boolean {
     if (this.player.wipedOut || this.player.airborne) {
@@ -100,8 +116,7 @@ export class CombatSystem {
     if (!rival) {
       return false;
     }
-    this.resolveExchange(rival, this.lastFrameNowMs);
-    return true;
+    return this.resolveExchange(rival, this.lastFrameNowMs);
   }
 
   private findRiderInLane(lane: number, zWindow: number): AIRider | undefined {
@@ -113,12 +128,20 @@ export class CombatSystem {
     );
   }
 
-  /** Trigger 2 (§4.6): player and a rival already occupy the same lane
-   *  within the shove Z-window, regardless of how either got there. */
+  /**
+   * Trigger 2 (§4.6): player and a rival already occupy the same lane within
+   * the shove Z-window, regardless of how either got there. Every exchange is
+   * player-vs-one-rival (§4.5: no AI-vs-AI), so at most ONE exchange resolves
+   * per frame even if two riders both qualify simultaneously (plausible since
+   * rivals never avoid each other, §4.5) — stop at the first, matching the
+   * class's own "always player-vs-one-rival" invariant instead of letting the
+   * player take multiple stacked knockbacks for what reads as one contact.
+   */
   private checkSameLaneContacts(nowMs: number): void {
     if (this.player.wipedOut || this.player.airborne) {
       return;
     }
+    const playerFraction = this.player.laneOffsetFraction;
     for (const rider of this.riders) {
       if (rider.wipedOut) {
         continue;
@@ -129,10 +152,12 @@ export class CombatSystem {
       if (Math.abs(rider.worldZ - this.player.worldZ) > SHOVE_Z_WINDOW) {
         continue;
       }
-      if (Math.abs(rider.laneOffsetFraction - this.player.laneOffsetFraction) > COLLISION_LANE_FRACTION) {
+      if (Math.abs(rider.laneOffsetFraction - playerFraction) > COLLISION_LANE_FRACTION) {
         continue;
       }
-      this.resolveExchange(rider, nowMs);
+      if (this.resolveExchange(rider, nowMs)) {
+        return;
+      }
     }
   }
 
@@ -152,15 +177,19 @@ export class CombatSystem {
     }
   }
 
-  private resolveExchange(rider: AIRider, nowMs: number): void {
+  /** Resolves a shove exchange, if eligible. Returns whether it actually
+   *  resolved (false if either side is wiped out/airborne/collision-immune,
+   *  or this specific pair is still within its shove-immunity window) — the
+   *  caller uses this to distinguish a genuine exchange from a no-op. */
+  private resolveExchange(rider: AIRider, nowMs: number): boolean {
     if (this.player.wipedOut || rider.wipedOut || this.player.airborne) {
-      return;
+      return false;
     }
     if (this.player.collisionImmune || rider.collisionImmune) {
-      return; // mid rock-tumble on either side: not a valid combat participant
+      return false; // mid rock-tumble on either side: not a valid combat participant
     }
     if ((this.pairImmunityMs.get(rider) ?? 0) > 0) {
-      return;
+      return false;
     }
 
     const playerWins = this.player.armed || this.player.speed >= rider.speed;
@@ -171,16 +200,18 @@ export class CombatSystem {
     const loserLane = playerWins ? rider.laneIndex : this.player.laneIndex;
     const loserZ = playerWins ? rider.worldZ : this.player.worldZ;
 
-    const laneDiff = loserLane - winnerLane;
     // Same-lane contact has no inherent side to knock toward — pick one via
-    // runtime randomness and allow falling back to the other side if it's
-    // blocked; a genuine lateral shove already has a clear direction (the
-    // side the loser was standing on) and only that direction is tried, per
-    // spec's knockback-clamp wording.
-    const ambiguous = laneDiff === 0;
-    const direction: -1 | 1 = ambiguous ? (Math.random() < 0.5 ? 1 : -1) : laneDiff > 0 ? 1 : -1;
+    // runtime randomness; a genuine lateral shove already has a clear
+    // direction (the side the loser was standing on). Either way only ONE
+    // direction is ever tried — the spec's road-edge clamp ("a loser already
+    // in the edge lane takes the speed loss only — no lane change is
+    // possible") has no carve-out for retrying the opposite side, so an
+    // edge-lane loser must be able to end up merely speed-lossed even in the
+    // ambiguous case, not bounced to the only lane that happened to be open.
+    const laneDiff = loserLane - winnerLane;
+    const direction: -1 | 1 = laneDiff === 0 ? (Math.random() < 0.5 ? 1 : -1) : laneDiff > 0 ? 1 : -1;
 
-    const targetLane = this.resolveKnockbackLane(loserLane, direction, maxShift, loserZ, ambiguous);
+    const targetLane = this.resolveKnockbackLane(loserLane, direction, maxShift, loserZ);
 
     if (playerWins) {
       rider.applyKnockback(targetLane, speedLossFactor);
@@ -194,40 +225,29 @@ export class CombatSystem {
     }
 
     this.pairImmunityMs.set(rider, SHOVE_IMMUNITY_MS);
+    return true;
   }
 
   /**
    * Knockback clamps (§4.6): tries the destination `maxShift` lanes away in
    * `direction` first (the "farthest tree-free lane" for an armed 2-lane
    * knockback), then closer, rejecting any lane out of road bounds or with a
-   * tree within `TREE_CLAMP_SEGMENTS` downstream of `fromZ`. If `direction`
-   * is fully blocked and `tryOppositeDirection` is set (only true for the
-   * ambiguous same-lane case — a genuine lateral shove only ever tries its
-   * one true direction), tries the opposite side the same way. Falls back to
-   * `fromLane` itself (no lane change, speed loss only) — the road-edge and
-   * tree clamps unified into one rule.
+   * tree within `TREE_CLAMP_SEGMENTS` downstream of `fromZ`. Falls back to
+   * `fromLane` itself (no lane change, speed loss only) if every shift in
+   * `direction` is blocked — the road-edge and tree clamps unified into one
+   * rule, matching spec exactly (no opposite-direction retry).
    */
-  private resolveKnockbackLane(
-    fromLane: number,
-    direction: -1 | 1,
-    maxShift: number,
-    fromZ: number,
-    tryOppositeDirection: boolean
-  ): number {
-    const tryDirection = (dir: -1 | 1): number | null => {
-      for (let shift = maxShift; shift >= 1; shift--) {
-        const target = fromLane + dir * shift;
-        if (target < 0 || target >= LANE_COUNT) {
-          continue;
-        }
-        if (!this.hasTreeDownstream(target, fromZ)) {
-          return target;
-        }
+  private resolveKnockbackLane(fromLane: number, direction: -1 | 1, maxShift: number, fromZ: number): number {
+    for (let shift = maxShift; shift >= 1; shift--) {
+      const target = fromLane + direction * shift;
+      if (target < 0 || target >= LANE_COUNT) {
+        continue;
       }
-      return null;
-    };
-
-    return tryDirection(direction) ?? (tryOppositeDirection ? tryDirection(direction === 1 ? -1 : 1) : null) ?? fromLane;
+      if (!this.hasTreeDownstream(target, fromZ)) {
+        return target;
+      }
+    }
+    return fromLane;
   }
 
   private hasTreeDownstream(lane: number, fromZ: number): boolean {

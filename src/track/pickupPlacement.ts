@@ -1,12 +1,10 @@
 import { LANES, PICKUP_MAX_GAP_SEGMENTS, PICKUP_MIN_GAP_SEGMENTS } from '../config';
 import { Obstacle, segmentCentreZ } from '../entities/obstacle';
 import { Pickup } from '../entities/pickup';
-import { Prng } from './prng';
+import { Prng, randInt } from './prng';
 
 const LANE_COUNT = LANES.length;
 const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
-
-const randInt = (prng: Prng, min: number, max: number): number => Math.floor(min + prng() * (max - min + 1));
 
 export interface PickupPlacementInput {
   /** The FINAL placed obstacle field, so pickups can prefer a lane the

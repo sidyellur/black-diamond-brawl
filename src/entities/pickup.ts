@@ -1,4 +1,5 @@
-import { COLLISION_LANE_FRACTION, COLLISION_Z_WINDOW, LANES } from '../config';
+import { COLLISION_LANE_FRACTION, COLLISION_Z_WINDOW } from '../config';
+import { laneFraction } from './obstacle';
 import { Player } from './player';
 
 /**
@@ -32,7 +33,7 @@ export function collectPickups(player: Player, pickups: Pickup[]): void {
     if (Math.abs(pickup.z - player.worldZ) > COLLISION_Z_WINDOW) {
       continue;
     }
-    if (Math.abs(LANES[pickup.lane] - player.laneOffsetFraction) > COLLISION_LANE_FRACTION) {
+    if (Math.abs(laneFraction(pickup.lane) - player.laneOffsetFraction) > COLLISION_LANE_FRACTION) {
       continue;
     }
     pickup.collected = true;

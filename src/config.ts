@@ -90,9 +90,6 @@ export const AI_START_Z_OFFSETS_SEGMENTS = [-2, -1, 1, 2];
 // many segments of world-Z, whether lateral (steer-in) or same-lane (rear
 // approach / a rival drifting in).
 export const SHOVE_Z_WINDOW = SEGMENT_LENGTH * 1;
-// AI bump-initiation range (spec §4.5 behavior 3): a rider only considers
-// drifting into the player's lane within this many segments.
-export const BUMP_Z_WINDOW = SEGMENT_LENGTH * 2;
 // Per-attacker-pair immunity window after an exchange resolves, so the same
 // pairing can't machine-gun re-trigger (spec §4.6).
 export const SHOVE_IMMUNITY_MS = 500;

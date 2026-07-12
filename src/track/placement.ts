@@ -8,7 +8,7 @@ import {
   OBSTACLE_ROWS_PER_100_START
 } from '../config';
 import { Obstacle, ObstacleKind, segmentCentreZ } from '../entities/obstacle';
-import { Prng } from './prng';
+import { Prng, randInt } from './prng';
 
 const LANE_COUNT = LANES.length;
 const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
@@ -27,8 +27,6 @@ const KIND_WEIGHTS: Record<ObstacleKind, number> = {
 };
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-const randInt = (prng: Prng, min: number, max: number): number =>
-  Math.floor(min + prng() * (max - min + 1));
 
 /** Fisher–Yates shuffle driven by the seeded PRNG (in place). */
 function shuffle<T>(arr: T[], prng: Prng): T[] {
