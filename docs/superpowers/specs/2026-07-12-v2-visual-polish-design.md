@@ -11,9 +11,9 @@ scenery at all (flat sky-blue color), the HUD is unstyled monospace text, and th
 "juice" (no screen shake, particles, or camera feedback on hits/speed).
 
 v2's goal is to close that visual gap: real pixel-art sprites, a parallax mountain
-background, hit/speed feedback effects, and a styled UI — without touching v1's game
-logic (rendering math, collision, AI, combat, scoring all stay as-is). Audio is explicitly
-out of scope for v2 (may become a v3).
+background, a snow-textured track surface, hit/speed feedback effects, and a styled UI —
+without touching v1's game logic (rendering math, collision, AI, combat, scoring all stay
+as-is). Audio is explicitly out of scope for v2 (may become a v3).
 
 ## 2. Architecture change
 
@@ -34,6 +34,27 @@ switches these to real image-based sprites:
   horizontally at a different fraction of the camera's speed, and shifting with the same
   accumulated curve offset the road uses (scaled down per layer by a "depth" factor) so
   the background doesn't look pasted-on during turns.
+
+### Road surface texture (added per developer request)
+
+The road itself is currently drawn as flat-shaded `Graphics` trapezoids (alternating solid
+color bands) — the segment-based renderer (`RoadRenderer.ts`) built in v1 is explicitly a
+custom polygon renderer, not a textured mesh, and true perspective-correct texture-mapped
+trapezoids (sampling a snow texture with correct per-pixel perspective inside each
+dynamically-shaped polygon) is a meaningfully bigger technical lift than a sprite swap —
+Phaser's `Graphics` API doesn't support arbitrary texture-mapped polygon fills natively;
+that needs either a custom WebGL shader or a per-strip texture-mapping trick.
+
+**Recommended pragmatic approach for v2** (keeps the existing trapezoid renderer intact):
+replace the flat alternating-color bands with alternating **snow-pattern colors/subtle
+noise** sampled from the winter asset packs' texture swatches (still cheap `Graphics`
+fills, just snow-toned instead of flat colors), OR overlay a single tiled snow-texture
+`TileSprite` across the whole visible road area, masked to the road's silhouette each
+frame using the same edge points `RoadRenderer` already computes. Either approach reads
+as "the track is snow" without rewriting the renderer into a textured-mesh system. True
+per-trapezoid perspective texture-mapping is noted as a possible stretch goal but is NOT
+required for v2 — the pragmatic approach is the target; the implementation task will pick
+between the two pragmatic options based on how it actually looks once tried.
 
 ## 3. Asset packs (all CC0 — verified via a broad multi-source research pass; no
 free/open-license snowboarder-specific character pack exists anywhere, confirmed across
@@ -99,12 +120,17 @@ technique v1 already used for placeholder sprites), not sourced from a pack.
 3. **Phase 2 — Obstacle + pickup + finish banner sprites.** Swap tree/rock/mogul sprites
    to Tiny Ski/Platformer Art Winter equivalents; the ski-pole pickup gets a custom
    procedural icon (see §3 gap); finish banner uses the pipeline proven in Phase 0.
-4. **Phase 3 — Parallax background.** Multi-layer scrolling scenery from Pixel Art
+4. **Phase 3 — Road surface texture.** Retexture `RoadRenderer.ts`'s trapezoid fills from
+   flat alternating colors to a snow-toned look (see the pragmatic approach in §2) —
+   either snow-pattern-sampled `Graphics` fills or a `TileSprite` masked to the road's
+   silhouette. Curves/hills/crest-clipping behavior is unchanged; this only touches how
+   the road is *filled*, not its geometry.
+5. **Phase 4 — Parallax background.** Multi-layer scrolling scenery from Pixel Art
    Mountains Parallax, shifting horizontally with the road's curve offset per layer at a
    depth-scaled fraction, so it reads as behind the road rather than static wallpaper.
-5. **Phase 4 — Juice/VFX.** Screen shake, particle effects (snow spray, impact, combat
+6. **Phase 5 — Juice/VFX.** Screen shake, particle effects (snow spray, impact, combat
    hit spark, trick sparkle), speed-line overlay, camera lean on lane-shift/jump.
-6. **Phase 5 — UI/HUD polish.** Title screen, race HUD, and result screen restyled with
+7. **Phase 6 — UI/HUD polish.** Title screen, race HUD, and result screen restyled with
    the UI pack.
 
 Each phase is independently verifiable in the browser before moving to the next,
