@@ -1,15 +1,16 @@
 import Phaser from 'phaser';
 import { CAMERA_HEIGHT, MAX_SPEED, SEGMENT_LENGTH } from '../config';
 import { RoadRenderer } from '../render/RoadRenderer';
-import { Segment } from '../track/segment';
-import { buildTestTrack } from '../track/testTrack';
+import { roadElevationAt, Segment } from '../track/segment';
+import { buildSamplerTrack } from '../track/testTrack';
 
 const SKY_COLOR = '#8fd0ff';
 
 /**
- * Task 2 scope: render the static straight/flat test track and auto-advance
- * the camera down it at a constant speed, looping back to the start. No
- * player entity or input yet (Task 4).
+ * Task 3 scope: render the curved/hilly sampler track and auto-advance the
+ * camera down it at a constant speed, looping back to the start. The camera's
+ * elevation follows the road under it plus a fixed height so the horizon
+ * rises and falls through hills. No player entity or input yet (Task 4).
  */
 export class RaceScene extends Phaser.Scene {
   private track: Segment[] = [];
@@ -25,7 +26,7 @@ export class RaceScene extends Phaser.Scene {
     // background color repaints behind everything each frame for free.
     this.cameras.main.setBackgroundColor(SKY_COLOR);
 
-    this.track = buildTestTrack();
+    this.track = buildSamplerTrack();
     this.roadRenderer = new RoadRenderer(this);
   }
 
@@ -35,6 +36,10 @@ export class RaceScene extends Phaser.Scene {
 
     this.camZ = (this.camZ + MAX_SPEED * deltaSeconds) % trackLength;
 
-    this.roadRenderer.render(this.track, 0, CAMERA_HEIGHT, this.camZ);
+    // Camera elevation follows the road surface under the camera plus a fixed
+    // height (§3.4), so the horizon rises and falls as hills are crested.
+    const camY = roadElevationAt(this.track, this.camZ) + CAMERA_HEIGHT;
+
+    this.roadRenderer.render(this.track, 0, camY, this.camZ);
   }
 }
