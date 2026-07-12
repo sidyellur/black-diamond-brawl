@@ -21,7 +21,7 @@ export class BootScene extends Phaser.Scene {
     generateObstacleSpriteSheet(this);
     generatePickupSpriteSheet(this);
 
-    // Transition straight into the race scene.
-    this.scene.start('RaceScene');
+    // Transition to the title screen (design-spec §2/§4.8 scene structure).
+    this.scene.start('TitleScene');
   }
 }

@@ -43,6 +43,13 @@ export class CollisionSystem {
     this.hit.clear();
   }
 
+  /** Whether this rider actually collided with `obstacle` (as opposed to
+   *  passing near it without contact) — read by `ScoreTracker`'s near-miss
+   *  scoring (§4.7) to exclude a real hit from counting as a "near miss". */
+  wasHit(obstacle: Obstacle): boolean {
+    return this.hit.has(obstacle);
+  }
+
   update(rider: Collidable, obstacles: Obstacle[]): void {
     if (rider.wipedOut) {
       return;

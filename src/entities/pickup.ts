@@ -37,11 +37,6 @@ export function collectPickups(player: Player, pickups: Pickup[]): void {
       continue;
     }
     pickup.collected = true;
-    player.armWeapon();
-    // Temporary stand-in (same convention as the other phases' console logs)
-    // until Task 9's real HUD/scoring reads this — the `weaponText` HUD
-    // field already shows the charge count live.
-    // eslint-disable-next-line no-console
-    console.log(`[BDB] picked up ski pole — armed with ${player.weaponCharges} charges`);
+    player.armWeapon(); // RaceScene's `weaponText` HUD reflects the new charge count live
   }
 }

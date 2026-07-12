@@ -66,11 +66,11 @@ export class Player implements Collidable {
   /** Airtime of the CURRENT/most-recent jump (§4.3): normal or extended. */
   private jumpAirtimeMs = JUMP_AIRTIME_MS;
   /** Whether the current/most-recent jump was an extended (trick) launch off a
-   *  mogul or crest. Exposed for Task 9's trick scoring; not scored here. */
+   *  mogul or crest — read by `ScoreTracker` to score only trick landings. */
   extendedJump = false;
 
   /** Run-ending wipeout latch (tree collision, §4.4). Freezes the player;
-   *  real game-over/restart is Task 9. */
+   *  `RaceScene` detects this transition to end the run and show `ResultScene`. */
   wipedOut = false;
 
   /** Ski-pole charges (design-spec §4.6): 0 = baseline bump, >0 = armed.
@@ -87,7 +87,7 @@ export class Player implements Collidable {
 
   update(deltaMs: number): void {
     if (this.wipedOut) {
-      return; // run-ending wipeout: frozen until Task 9's restart flow
+      return; // run-ending wipeout: frozen until the result screen restarts the race
     }
 
     const deltaSeconds = deltaMs / 1000;
@@ -161,8 +161,8 @@ export class Player implements Collidable {
     return this.tumbleMsRemaining > 0;
   }
 
-  /** Tree collision (§4.4): run-ending wipeout — freeze the player. Real
-   *  game-over/restart is Task 9; here it just latches and logs. */
+  /** Tree collision (§4.4): run-ending wipeout — freeze the player;
+   *  `RaceScene` picks up the `wipedOut` transition to end the run. */
   crashIntoTree(): void {
     if (this.wipedOut) {
       return;
@@ -172,10 +172,8 @@ export class Player implements Collidable {
     this.airborne = false;
     // A run-ending wipeout clears the pole regardless of remaining charges
     // (§4.6) — the run is over either way, but this keeps state consistent
-    // for Task 9's restart flow (a fresh Player starts unarmed too).
+    // for the restart flow (a fresh Player starts unarmed too).
     this.weaponCharges = 0;
-    // eslint-disable-next-line no-console
-    console.log('[BDB] WIPEOUT: hit a tree — run over (real game-over is Task 9)');
   }
 
   /** Rock collision (§4.4): temporary wipeout — speed drops to ~30%, ~1s

@@ -63,6 +63,13 @@ export class AIRider implements Collidable {
   wipedOut = false;
   readonly airborne = false;
 
+  /** Set once this rider crosses the finish line (design-spec §4.7/§4.8), so
+   *  `computePlayerPosition` can rank finishers by actual finish
+   *  order instead of the frozen "held at the line" worldZ they all end up
+   *  sharing (see `RaceScene`'s per-rider finish handling). `null` while
+   *  still racing or if they wiped out before ever finishing. */
+  finishTimeMs: number | null = null;
+
   private _laneIndex: number;
   private tween: LaneTween | null = null;
 

@@ -17,6 +17,14 @@ export function resolveSeed(search: string = typeof window !== 'undefined' ? win
     return hashString(raw);
   }
 
+  return randomSeed();
+}
+
+/** A fresh random seed, ignoring any `?seed=` URL param — used for the
+ *  Result screen's "new seed" restart option (design-spec §4.3/§4.8), which
+ *  must always produce a genuinely new course regardless of how THIS run
+ *  itself was seeded. */
+export function randomSeed(): number {
   return Math.floor(Math.random() * 0xffffffff) >>> 0;
 }
 

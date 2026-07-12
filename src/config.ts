@@ -112,6 +112,13 @@ export const WEAPON_CHARGES = 3;
 export const PICKUP_MIN_GAP_SEGMENTS = 300;
 export const PICKUP_MAX_GAP_SEGMENTS = 450;
 
+// Near-miss (design-spec §4.7): a one-shot check per entity, evaluated when
+// the entity's world-Z crosses the player's. Only counts a genuinely close
+// pass — within this many lanes of the entity, at or above this fraction of
+// MAX_SPEED.
+export const NEAR_MISS_MAX_LANE_DISTANCE = 1;
+export const NEAR_MISS_MIN_SPEED_FACTOR = 0.7;
+
 // Point values (from spec §4.7)
 export const POINTS = {
   COMBAT_HIT: 250,

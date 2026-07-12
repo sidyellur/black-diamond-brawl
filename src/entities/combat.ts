@@ -16,7 +16,7 @@ import { Player } from './player';
 const LANE_COUNT = LANES.length;
 
 /**
- * Combat event, drained by whatever owns scoring (Task 9 — combat hit 250,
+ * Combat event, drained each frame by `ScoreTracker` (combat hit 250,
  * knockout 500 ON TOP of the hit, §4.7). `'hit'` fires the instant an
  * exchange resolves in the player's favor; `'knockout'` fires separately
  * (later, possibly never) if that same rival then trees within
