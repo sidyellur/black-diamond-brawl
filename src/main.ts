@@ -1,17 +1,18 @@
 import Phaser from 'phaser';
+import { SCREEN_H, SCREEN_W } from './config';
 import { BootScene } from './scenes/BootScene';
-import { PlaceholderScene } from './scenes/PlaceholderScene';
+import { RaceScene } from './scenes/RaceScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 960,
-  height: 540,
+  width: SCREEN_W,
+  height: SCREEN_H,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
   pixelArt: true,
-  scene: [BootScene, PlaceholderScene]
+  scene: [BootScene, RaceScene]
 };
 
 new Phaser.Game(config);

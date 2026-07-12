@@ -7,6 +7,12 @@ export const MAX_SPEED = 3000;
 export const DRAW_DISTANCE = 100;
 export const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180); // Derived from FOV 100°
 
+// Camera & screen (design-spec §3.2)
+export const SCREEN_W = 960;
+export const SCREEN_H = 540;
+export const ROAD_WIDTH = 2000; // world-space road half-width
+export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surface
+
 // Lanes
 export const LANES = [-0.8, -0.4, 0, 0.4, 0.8];
 

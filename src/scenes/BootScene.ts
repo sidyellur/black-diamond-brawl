@@ -11,7 +11,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Transition to the placeholder scene
-    this.scene.start('PlaceholderScene');
+    // Transition straight into the race scene.
+    this.scene.start('RaceScene');
   }
 }
