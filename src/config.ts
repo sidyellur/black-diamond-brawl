@@ -16,6 +16,11 @@ export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surf
 // Lanes
 export const LANES = [-0.8, -0.4, 0, 0.4, 0.8];
 
+// Player movement (design-spec §4.1/§4.3)
+export const PLAYER_ACCEL = 1500; // units/sec^2; reaches MAX_SPEED in ~2s from a stop
+export const LANE_TWEEN_MS = 150; // lane-shift tween duration
+export const JUMP_AIRTIME_MS = 600; // constant airtime regardless of speed
+
 // Timing
 export const PAR_TIME = 130;
 
