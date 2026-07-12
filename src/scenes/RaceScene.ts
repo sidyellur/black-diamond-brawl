@@ -176,7 +176,14 @@ export class RaceScene extends Phaser.Scene {
     this.speedText = this.add.text(HUD_X, HUD_Y + HUD_LINE_HEIGHT * 2, '', { fontSize: '14px', color: '#ffffff' });
     this.weaponText = this.add.text(HUD_X, HUD_Y + HUD_LINE_HEIGHT * 3, '', { fontSize: '14px', color: '#ffffff' });
 
+    // The bar's background never changes for the whole race — drawn once
+    // here rather than every frame in updateHud(), unlike progressBarFill's
+    // width, which genuinely does change every frame.
+    const barY = HUD_Y + HUD_LINE_HEIGHT * 4;
     this.progressBarBg = this.add.graphics();
+    this.progressBarBg.fillStyle(0x1a1a1a, 0.6);
+    this.progressBarBg.fillRect(HUD_X, barY, PROGRESS_BAR_W, PROGRESS_BAR_H);
+
     this.progressBarFill = this.add.graphics();
   }
 
@@ -334,10 +341,6 @@ export class RaceScene extends Phaser.Scene {
     const courseLength = COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH;
     const progress = courseLength > 0 ? Phaser.Math.Clamp(this.player.worldZ / courseLength, 0, 1) : 0;
     const barY = HUD_Y + HUD_LINE_HEIGHT * 4;
-
-    this.progressBarBg.clear();
-    this.progressBarBg.fillStyle(0x1a1a1a, 0.6);
-    this.progressBarBg.fillRect(HUD_X, barY, PROGRESS_BAR_W, PROGRESS_BAR_H);
 
     this.progressBarFill.clear();
     this.progressBarFill.fillStyle(0xffcc33, 1);
