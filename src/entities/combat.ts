@@ -124,7 +124,11 @@ export class CombatSystem {
       return undefined;
     }
     return this.riders.find(
-      (r) => !r.wipedOut && r.laneIndex === lane && Math.abs(r.worldZ - this.player.worldZ) <= zWindow
+      (r) =>
+        !r.wipedOut &&
+        r.finishTimeMs === null &&
+        r.laneIndex === lane &&
+        Math.abs(r.worldZ - this.player.worldZ) <= zWindow
     );
   }
 
@@ -143,7 +147,7 @@ export class CombatSystem {
     }
     const playerFraction = this.player.laneOffsetFraction;
     for (const rider of this.riders) {
-      if (rider.wipedOut) {
+      if (rider.wipedOut || rider.finishTimeMs !== null) {
         continue;
       }
       if ((this.pairImmunityMs.get(rider) ?? 0) > 0) {
@@ -179,10 +183,11 @@ export class CombatSystem {
 
   /** Resolves a shove exchange, if eligible. Returns whether it actually
    *  resolved (false if either side is wiped out/airborne/collision-immune,
-   *  or this specific pair is still within its shove-immunity window) — the
-   *  caller uses this to distinguish a genuine exchange from a no-op. */
+   *  the rider has already finished, or this specific pair is still within
+   *  its shove-immunity window) — the caller uses this to distinguish a
+   *  genuine exchange from a no-op. */
   private resolveExchange(rider: AIRider, nowMs: number): boolean {
-    if (this.player.wipedOut || rider.wipedOut || this.player.airborne) {
+    if (this.player.wipedOut || rider.wipedOut || this.player.airborne || rider.finishTimeMs !== null) {
       return false;
     }
     if (this.player.collisionImmune || rider.collisionImmune) {

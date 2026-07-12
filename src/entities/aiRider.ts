@@ -111,6 +111,9 @@ export class AIRider implements Collidable {
     if (this.wipedOut) {
       return; // tree wipeout: frozen, same as Player.wipedOut
     }
+    if (this.finishTimeMs !== null) {
+      return; // already finished: RaceScene holds worldZ at the line; no more race/dodge/bump behavior needed
+    }
 
     const deltaSeconds = deltaMs / 1000;
 

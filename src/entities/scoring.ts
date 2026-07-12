@@ -178,11 +178,18 @@ export class ScoreTracker {
     this.eventPoints += POINTS.NEAR_MISS;
   }
 
-  /** Trick jump = 150 base, +50 per extra 0.25s of airtime beyond a normal
-   *  jump's ~600ms (§4.7) — only extended (mogul/crest) launches qualify. */
+  /**
+   * Trick jump = 150 base, +50 per extra 0.25s of airtime beyond a normal
+   * jump's ~600ms (§4.7) — only extended (mogul/crest) launches qualify.
+   * Excludes `wipedOut`: a tree hits even mid-air (§4.4), and
+   * `Player.crashIntoTree()` sets `airborne = false` as part of latching the
+   * wipeout — without this guard, a mid-air tree crash during an extended
+   * jump would trip the exact same airborne→grounded transition and get
+   * scored as a landed trick instead of a run-ending crash.
+   */
   private checkTrickJumpLanding(): void {
     const airborne = this.player.airborne;
-    if (this.previousAirborne && !airborne && this.player.extendedJump) {
+    if (this.previousAirborne && !airborne && this.player.extendedJump && !this.player.wipedOut) {
       this.trickJumpCount++;
       const extraAirtimeMs = Math.max(0, JUMP_AIRTIME_EXTENDED_MS - JUMP_AIRTIME_MS);
       const extraQuarterSeconds = Math.floor(extraAirtimeMs / 250);
@@ -237,6 +244,7 @@ interface StandingEntry {
   worldZ: number;
   /** null = still racing or wiped out before finishing. */
   finishTimeMs: number | null;
+  wipedOut: boolean;
 }
 
 function compareStandings(a: StandingEntry, b: StandingEntry): number {
@@ -248,21 +256,35 @@ function compareStandings(a: StandingEntry, b: StandingEntry): number {
   if (aFinished) {
     return a.finishTimeMs! - b.finishTimeMs!; // earlier finish = better
   }
-  return b.worldZ - a.worldZ; // both still racing/DNF: further along = better
+  // Neither has finished: a still-racing entry outranks a wiped-out one
+  // regardless of how far the wiped-out one got before crashing (a DNF
+  // never counts as "ahead" of someone still actively racing toward the
+  // line) — only compare raw world-Z within the same wipedOut/still-racing
+  // tier.
+  if (a.wipedOut !== b.wipedOut) {
+    return a.wipedOut ? 1 : -1;
+  }
+  return b.worldZ - a.worldZ; // further along = better
 }
 
 /**
  * Race position (1st-5th) among the player + 4 rivals (§4.7), by actual
- * finish order for anyone who's finished, falling back to raw progress
- * (world-Z) for anyone who hasn't (still racing, or wiped out before ever
- * reaching the line). Call this exactly once, at the instant the player's own
- * run ends (finish or wipeout) — the position is "frozen" simply because
- * nothing else in the world keeps moving after `RaceScene` stops simulating.
+ * finish order for anyone who's finished; for anyone who hasn't, a
+ * still-racing entry outranks a wiped-out (DNF) one, and ties within each of
+ * those tiers break by raw progress (world-Z). Call this exactly once, at the
+ * instant the player's own run ends (finish or wipeout) — the position is
+ * "frozen" simply because nothing else in the world keeps moving after
+ * `RaceScene` stops simulating.
  */
 export function computePlayerPosition(player: Player, riders: AIRider[], playerFinishTimeMs: number | null): number {
   const entries: StandingEntry[] = [
-    { isPlayer: true, worldZ: player.worldZ, finishTimeMs: playerFinishTimeMs },
-    ...riders.map((rider) => ({ isPlayer: false, worldZ: rider.worldZ, finishTimeMs: rider.finishTimeMs }))
+    { isPlayer: true, worldZ: player.worldZ, finishTimeMs: playerFinishTimeMs, wipedOut: player.wipedOut },
+    ...riders.map((rider) => ({
+      isPlayer: false,
+      worldZ: rider.worldZ,
+      finishTimeMs: rider.finishTimeMs,
+      wipedOut: rider.wipedOut
+    }))
   ];
   entries.sort(compareStandings);
   return entries.findIndex((entry) => entry.isPlayer) + 1;
