@@ -93,6 +93,16 @@ export interface PlacementInput {
  * `JUMP_REACH_EXTENDED` segments downstream of it, and every lane obstacle-free
  * for `BLIND_LANDING_SEGMENTS` after each crest apex (which, being ≥ 18, also
  * covers the crest jump-reach rule).
+ *
+ * Crest steering-lock (safety-critical): crossing a jumpable crest apex
+ * auto-launches the player into an extended, *steering-locked* airborne span of
+ * ~`JUMP_REACH_EXTENDED` segments (see `RaceScene` crest auto-launch and
+ * `Player.requestLaneShift` dropping input while `airborne`). The reachability
+ * DP must NOT credit the player with lane-change distance across those locked
+ * segments — they cannot steer at all there — so a gap that traverses a lock
+ * span only offers its *non-locked* segments' worth of steering. Modelling this
+ * makes the safety guarantee correct by construction rather than relying on the
+ * blind-landing buffer incidentally absorbing the lock.
  */
 export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
   const { crestApexes, placeableStart, placeableEnd } = input;
@@ -112,6 +122,24 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
         forbidden[s] = true;
       }
     }
+  }
+
+  // Segments during which STEERING is locked: the auto-launch airborne span of
+  // each crest apex, [apex, apex + JUMP_REACH_EXTENDED]. Derived from
+  // JUMP_REACH_EXTENDED independently of BLIND_LANDING_SEGMENTS, so the DP stays
+  // correct even if the blind buffer is later shrunk below the lock length. The
+  // apex segment itself is included (conservative — it can only *reduce* the
+  // credited steering distance, which is the safe direction).
+  const lockedPrefix = new Array<number>(placeableEnd + 1).fill(0);
+  const isLocked = new Array<boolean>(placeableEnd).fill(false);
+  for (const apex of crestApexes) {
+    const end = Math.min(placeableEnd - 1, apex + JUMP_REACH_EXTENDED);
+    for (let s = Math.max(0, apex); s <= end; s++) {
+      isLocked[s] = true;
+    }
+  }
+  for (let s = 0; s < placeableEnd; s++) {
+    lockedPrefix[s + 1] = lockedPrefix[s] + (isLocked[s] ? 1 : 0);
   }
 
   // Reachability DP state: lanes the player could be in at the current row.
@@ -142,7 +170,12 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
     }
 
     const gapSeg = seg - prevRowSeg;
-    const maxShift = Math.floor(gapSeg / LANE_CHANGE_SEGMENTS);
+    // Steering is impossible across any crest lock span this gap traverses, so
+    // the player can only use the NON-locked portion of the gap to change
+    // lanes. Count locked segments in (prevRowSeg, seg] and subtract them.
+    const lockedInGap = lockedPrefix[seg + 1] - lockedPrefix[prevRowSeg + 1];
+    const steerableGap = Math.max(0, gapSeg - lockedInGap);
+    const maxShift = Math.floor(steerableGap / LANE_CHANGE_SEGMENTS);
     const arrival = dilate(reachable, maxShift);
 
     // A guaranteed-clear lane, chosen from the lanes actually reachable here.
