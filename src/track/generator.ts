@@ -1,4 +1,6 @@
 import { COURSE_LENGTH_SEGMENTS } from '../config';
+import { Obstacle } from '../entities/obstacle';
+import { placeObstacles } from './placement';
 import { mulberry32, Prng } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
 import { Segment } from './segment';
@@ -119,31 +121,43 @@ function capLengths(enter: number, hold: number, leave: number, maxTotal: number
   return [e, h, l];
 }
 
+/**
+ * Result of appending one section: how many segments it added, and — only for
+ * a `crest` — the segment index of its apex (peak of the up-ramp, where the
+ * jumpable auto-launch fires in §4.3 and after which the blind landing zone
+ * begins in §4.2). `undefined` for every non-crest section.
+ */
+interface SectionResult {
+  added: number;
+  crestApex?: number;
+}
+
 /** Appends one section of `type`, capped to fit within `maxTotal` segments,
- *  and returns how many segments it actually added. */
-function appendSection(builder: TrackBuilder, type: SectionType, t: number, prng: Prng, maxTotal: number): number {
+ *  and returns how many segments it actually added (plus a crest apex index
+ *  for crest sections). */
+function appendSection(builder: TrackBuilder, type: SectionType, t: number, prng: Prng, maxTotal: number): SectionResult {
   switch (type) {
     case 'straight': {
       // Straights shrink from ~45-70 segments at t=0 down to ~15-30 at t=1.
       const long = randInt(prng, 45, 70);
       const short = randInt(prng, 15, 30);
-      return addStraight(builder, Math.min(maxTotal, Math.round(lerp(long, short, t))));
+      return { added: addStraight(builder, Math.min(maxTotal, Math.round(lerp(long, short, t)))) };
     }
     case 'curveGentleL': {
       const [e, h, l] = capLengths(randInt(prng, 15, 22), randInt(prng, 20, 30), randInt(prng, 15, 22), maxTotal);
-      return addCurve(builder, -CURVE_GENTLE, e, h, l);
+      return { added: addCurve(builder, -CURVE_GENTLE, e, h, l) };
     }
     case 'curveGentleR': {
       const [e, h, l] = capLengths(randInt(prng, 15, 22), randInt(prng, 20, 30), randInt(prng, 15, 22), maxTotal);
-      return addCurve(builder, CURVE_GENTLE, e, h, l);
+      return { added: addCurve(builder, CURVE_GENTLE, e, h, l) };
     }
     case 'curveSharpL': {
       const [e, h, l] = capLengths(randInt(prng, 12, 18), randInt(prng, 18, 26), randInt(prng, 12, 18), maxTotal);
-      return addCurve(builder, -CURVE_SHARP, e, h, l);
+      return { added: addCurve(builder, -CURVE_SHARP, e, h, l) };
     }
     case 'curveSharpR': {
       const [e, h, l] = capLengths(randInt(prng, 12, 18), randInt(prng, 18, 26), randInt(prng, 12, 18), maxTotal);
-      return addCurve(builder, CURVE_SHARP, e, h, l);
+      return { added: addCurve(builder, CURVE_SHARP, e, h, l) };
     }
     case 'sCurve': {
       const direction = prng() < 0.5 ? 1 : -1;
@@ -153,47 +167,64 @@ function appendSection(builder: TrackBuilder, type: SectionType, t: number, prng
       const [e2, h2, l2] = capLengths(randInt(prng, 12, 18), randInt(prng, 16, 22), randInt(prng, 12, 18), maxTotal - halfBudget);
       const first = addCurve(builder, direction * magnitude, e1, h1, l1);
       const second = addCurve(builder, -direction * magnitude, e2, h2, l2);
-      return first + second;
+      return { added: first + second };
     }
     case 'hillUp': {
       const height = randInt(prng, Math.round(HILL_HEIGHT * 0.6), Math.round(HILL_HEIGHT * 1.2));
       const [e, h, l] = capLengths(randInt(prng, 18, 24), randInt(prng, 20, 28), randInt(prng, 18, 24), maxTotal);
-      return addHill(builder, height, e, h, l);
+      return { added: addHill(builder, height, e, h, l) };
     }
     case 'hillDown': {
       const height = randInt(prng, Math.round(HILL_HEIGHT * 0.6), Math.round(HILL_HEIGHT * 1.2));
       const [e, h, l] = capLengths(randInt(prng, 18, 24), randInt(prng, 20, 28), randInt(prng, 18, 24), maxTotal);
-      return addHill(builder, -height, e, h, l);
+      return { added: addHill(builder, -height, e, h, l) };
     }
     case 'crest': {
       const halfBudget = Math.floor(maxTotal / 2);
       const [e1, h1, l1] = capLengths(randInt(prng, 12, 16), randInt(prng, 6, 10), randInt(prng, 12, 16), halfBudget);
       const [e2, h2, l2] = capLengths(randInt(prng, 12, 16), randInt(prng, 6, 10), randInt(prng, 12, 16), maxTotal - halfBudget);
       const up = addHill(builder, CREST_HEIGHT, e1, h1, l1);
+      // The apex is the last (highest) segment of the up-ramp — the very
+      // segment index just written by `addHill(+CREST_HEIGHT)`.
+      const crestApex = builder.segments.length - 1;
       const down = addHill(builder, -CREST_HEIGHT, e2, h2, l2);
-      return up + down;
+      return { added: up + down, crestApex };
     }
   }
+}
+
+/**
+ * Output of the geometry pass: the segment array plus the metadata the
+ * placement pass needs — the jumpable-crest apex indices (§4.3) and the
+ * segment range obstacles may occupy (between the warm-up and the tail).
+ */
+export interface GeometryResult {
+  segments: Segment[];
+  crestApexes: number[];
+  /** First segment index obstacles may occupy (end of the warm-up). */
+  placeableStart: number;
+  /** One past the last placeable segment index (start of the return-to-flat
+   *  wind-down / run-out / finish tail). */
+  placeableEnd: number;
 }
 
 /**
  * Runs the full geometry pass (section layout, curves, hills — design-spec
  * §4.2) against an already-constructed `prng`, drawing from it start to
  * finish before returning. Exported separately from `generateTrack` (rather
- * than folding `mulberry32(seed)` in here) so Tasks 6-8 can run this pass,
- * then keep drawing from that exact same `prng` instance for their
- * placement pass (obstacles, pickups, AI parameters) — genuinely the "two
- * strictly ordered passes over the seeded PRNG" the spec calls for, not two
- * separately-seeded generators. This task adds no placement logic itself,
- * not even a stub, to keep that boundary clean for those tasks to slot
- * into: they call this function once, then own everything drawn from
- * `prng` afterward.
+ * than folding `mulberry32(seed)` in here) so the placement pass — and Tasks
+ * 7-8's pickup/AI passes — can run this pass, then keep drawing from that exact
+ * same `prng` instance afterward — genuinely the "two strictly ordered passes
+ * over the seeded PRNG" the spec calls for, not two separately-seeded
+ * generators.
  */
-export function buildGeometry(prng: Prng): Segment[] {
+export function buildGeometry(prng: Prng): GeometryResult {
   const builder = createBuilder();
+  const crestApexes: number[] = [];
 
   // Warm-up: flat, straight, obstacle-free (§4.2).
   addStraight(builder, WARMUP_SEGMENTS);
+  const placeableStart = builder.segments.length;
 
   // Reserve the tail budget (wind-down + run-out + the finish segment
   // itself) up front so the geometry loop below can never overshoot it.
@@ -207,8 +238,15 @@ export function buildGeometry(prng: Prng): Segment[] {
     }
     const t = builder.segments.length / COURSE_LENGTH_SEGMENTS;
     const type = pickSectionType(prng, t);
-    appendSection(builder, type, t, prng, remaining);
+    const result = appendSection(builder, type, t, prng, remaining);
+    if (result.crestApex !== undefined) {
+      crestApexes.push(result.crestApex);
+    }
   }
+
+  // Everything from here on (return-to-flat wind-down, run-out, finish) is
+  // obstacle-free (§4.2), so the placeable range ends at the current length.
+  const placeableEnd = builder.segments.length;
 
   // Ease elevation back to 0 so the course is level at both ends.
   const enter = Math.round(RETURN_TO_FLAT_SEGMENTS * 0.35);
@@ -220,15 +258,35 @@ export function buildGeometry(prng: Prng): Segment[] {
   addStraight(builder, RUNOUT_SEGMENTS);
   pushSegment(builder, 0, builder.lastY, true);
 
-  return builder.segments;
+  return { segments: builder.segments, crestApexes, placeableStart, placeableEnd };
 }
 
 /**
- * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: the
- * convenience entry point this task's `RaceScene` uses, when there's no
- * placement pass to chain afterward yet. Just seeds a `prng` and runs the
- * geometry pass to completion.
+ * The full generated course for a seed: geometry + obstacles + the crest-apex
+ * list the runtime needs for auto-launch (§4.3).
  */
-export function generateTrack(seed: number): Segment[] {
-  return buildGeometry(mulberry32(seed));
+export interface GeneratedTrack {
+  segments: Segment[];
+  obstacles: Obstacle[];
+  crestApexes: number[];
+}
+
+/**
+ * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: the two
+ * strictly-ordered passes over ONE seeded PRNG (§4.2). Seeds a `prng`, runs the
+ * geometry pass to completion, then runs the obstacle placement pass drawing
+ * from that same `prng` — never a second, separately-seeded generator.
+ */
+export function generateTrack(seed: number): GeneratedTrack {
+  const prng = mulberry32(seed);
+  const geometry = buildGeometry(prng);
+  const obstacles = placeObstacles(
+    {
+      crestApexes: geometry.crestApexes,
+      placeableStart: geometry.placeableStart,
+      placeableEnd: geometry.placeableEnd
+    },
+    prng
+  );
+  return { segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes };
 }

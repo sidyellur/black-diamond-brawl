@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import { COURSE_LENGTH_SEGMENTS, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
+import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
 import { bindPlayerInput } from '../entities/input';
+import { Obstacle } from '../entities/obstacle';
+import { ObstacleRenderer } from '../entities/obstacleRenderer';
 import { Player } from '../entities/player';
 import { PLAYER_FRAMES, PLAYER_TEXTURE_KEY } from '../entities/playerSprite';
 import { RoadRenderer } from '../render/RoadRenderer';
@@ -10,6 +13,13 @@ import { resolveSeed } from '../track/seed';
 import { Segment } from '../track/segment';
 
 const SKY_COLOR = '#8fd0ff';
+
+// Depths keep the render order of §3.6: road (bottom) < finish banner <
+// obstacle sprites (own far-to-near depths, all negative but above these) <
+// player sprite (always on top).
+const ROAD_DEPTH = -1_000_000_000;
+const BANNER_DEPTH = -900_000_000;
+const PLAYER_DEPTH = 1_000_000_000;
 
 // Player sprite is drawn at a FIXED screen position (design-spec §3.5) — it
 // does NOT go through project(); only its frame/sway/bob react to state.
@@ -40,9 +50,13 @@ const PROGRESS_BAR_H = 10;
  */
 export class RaceScene extends Phaser.Scene {
   private track: Segment[] = [];
+  private obstacles: Obstacle[] = [];
+  private crestApexZs: number[] = [];
   private finishSegment: Segment | undefined;
   private roadRenderer!: RoadRenderer;
   private finishBanner!: FinishBanner;
+  private obstacleRenderer!: ObstacleRenderer;
+  private collisions = new CollisionSystem();
   private player!: Player;
   private playerSprite!: Phaser.GameObjects.Sprite;
 
@@ -51,6 +65,7 @@ export class RaceScene extends Phaser.Scene {
   private progressBarFill!: Phaser.GameObjects.Graphics;
 
   private finished = false;
+  private prevWorldZ = 0;
 
   constructor() {
     super({ key: 'RaceScene' });
@@ -62,19 +77,35 @@ export class RaceScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(SKY_COLOR);
 
     this.seed = resolveSeed();
-    this.track = generateTrack(this.seed);
+    const generated = generateTrack(this.seed);
+    this.track = generated.segments;
+    this.obstacles = generated.obstacles;
+    // Precompute world-Z of each jumpable crest apex (centre of the apex
+    // segment) for the auto-launch crossing test (§4.3).
+    this.crestApexZs = generated.crestApexes.map((i) => i * SEGMENT_LENGTH + SEGMENT_LENGTH / 2);
     this.finishSegment = this.track.find((segment) => segment.isFinish);
-    console.log(`[BDB] course seed: ${this.seed} (${this.track.length} segments)`);
+    console.log(
+      `[BDB] course seed: ${this.seed} (${this.track.length} segments, ${this.obstacles.length} obstacles, ${generated.crestApexes.length} crests)`
+    );
 
     this.roadRenderer = new RoadRenderer(this);
+    this.roadRenderer.setDepth(ROAD_DEPTH);
     this.finishBanner = new FinishBanner(this);
+    this.finishBanner.setDepth(BANNER_DEPTH);
+    this.obstacleRenderer = new ObstacleRenderer(this);
+    this.collisions.reset();
 
     this.player = new Player();
-    bindPlayerInput(this, this.player);
+    // Jump routes through here so a press on/just before a mogul becomes an
+    // extended trick launch (§4.3); otherwise it's a normal jump.
+    bindPlayerInput(this, this.player, () => {
+      this.player.jump(isMogulLaunchAvailable(this.player, this.obstacles));
+    });
 
     this.playerSprite = this.add.sprite(SCREEN_W / 2, PLAYER_SPRITE_BASE_Y, PLAYER_TEXTURE_KEY, PLAYER_FRAMES.CENTER);
     this.playerSprite.setOrigin(0.5, 1);
     this.playerSprite.setScale(PLAYER_SPRITE_SCALE);
+    this.playerSprite.setDepth(PLAYER_DEPTH);
 
     // Minimal, temporary seed display + progress bar (Task 9 owns real UI).
     this.add.text(PROGRESS_BAR_X, PROGRESS_BAR_Y + PROGRESS_BAR_H + 6, `seed: ${this.seed}`, {
@@ -86,7 +117,24 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    const prevZ = this.prevWorldZ;
     this.player.update(delta);
+
+    // Crest auto-launch (§4.3): crossing a jumpable crest's apex fires an
+    // extended trick jump with NO jump press — the crest acts as a ramp. No
+    // speed threshold (spec §4.3 note 14). `jump()` no-ops if already airborne
+    // (e.g. launched off a mogul just before the crest) or wiped out.
+    if (!this.finished) {
+      for (const apexZ of this.crestApexZs) {
+        if (prevZ < apexZ && this.player.worldZ >= apexZ) {
+          this.player.jump(true);
+          break;
+        }
+      }
+    }
+
+    // Player-vs-obstacle collision (§4.4).
+    this.collisions.update(this.player, this.obstacles);
 
     // The course is a fixed, non-looping length (design-spec §4.2) — once
     // the player reaches the finish line their world-Z is held there
@@ -117,10 +165,19 @@ export class RaceScene extends Phaser.Scene {
     const camX = this.player.worldX;
     const camY = this.player.camY(this.track);
 
-    this.roadRenderer.render(this.track, camX, camY, camZ);
+    const result = this.roadRenderer.render(this.track, camX, camY, camZ);
     this.finishBanner.render(this.finishSegment, camX, camY, camZ);
+    // Obstacles project with the SAME frame's offset-walk / crest-clip data so
+    // they slide through curves and vanish behind crests exactly like the road.
+    this.obstacleRenderer.render(this.obstacles, this.track, result.drawnSegments, {
+      x: camX,
+      y: camY,
+      z: camZ
+    });
     this.updatePlayerSprite();
     this.updateProgressBar();
+
+    this.prevWorldZ = this.player.worldZ;
   }
 
   private updateProgressBar(): void {
@@ -138,19 +195,24 @@ export class RaceScene extends Phaser.Scene {
 
   private updatePlayerSprite(): void {
     const lean = this.player.leanDirection;
-    const frame = this.player.airborne
-      ? PLAYER_FRAMES.JUMP
-      : lean < 0
-        ? PLAYER_FRAMES.LEAN_LEFT
-        : lean > 0
-          ? PLAYER_FRAMES.LEAN_RIGHT
-          : PLAYER_FRAMES.CENTER;
+    const frame =
+      this.player.wipedOut || this.player.tumbling
+        ? PLAYER_FRAMES.TUMBLE // tree wipeout or rock knockdown
+        : this.player.airborne
+          ? PLAYER_FRAMES.JUMP
+          : lean < 0
+            ? PLAYER_FRAMES.LEAN_LEFT
+            : lean > 0
+              ? PLAYER_FRAMES.LEAN_RIGHT
+              : PLAYER_FRAMES.CENTER;
     this.playerSprite.setFrame(frame);
 
     // Subtle horizontal sway across the lane-offset span (lean effect only —
     // NOT how lane position feeds the camera; that's player.worldX -> camX
-    // above) and a vertical bob during the jump arc.
-    const swayX = SCREEN_W / 2 + this.player.laneOffsetFraction * PLAYER_LEAN_SWAY_PX;
+    // above) and a vertical bob during the jump arc. A mogul stumble adds a
+    // brief cosmetic shimmy on top.
+    const stumbleShimmy = this.player.stumbling ? Math.sin(this.time.now / 30) * 6 : 0;
+    const swayX = SCREEN_W / 2 + this.player.laneOffsetFraction * PLAYER_LEAN_SWAY_PX + stumbleShimmy;
     const bobY = PLAYER_SPRITE_BASE_Y - this.player.jumpArcHeight * PLAYER_JUMP_RISE_PX;
     this.playerSprite.setPosition(swayX, bobY);
   }

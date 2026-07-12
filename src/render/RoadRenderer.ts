@@ -19,13 +19,33 @@ const RUMBLE_DARK = 0xffffff;
 const RUMBLE_WIDTH_RATIO = 1.1;
 
 /**
+ * Per-drawn-segment horizontal offset walk data (design-spec §3.3), recorded so
+ * entity projection (§3.5) can interpolate an entity's curve offset between the
+ * exact near-edge (`nearOffsetX`) and far-edge (`farOffsetX`) offsets this
+ * segment's road trapezoid was drawn with — NOT a single snapped per-segment
+ * value, which would stair-step entities across segment boundaries.
+ */
+export interface DrawnSegment {
+  /** Accumulated curve offset at the segment's near edge (its world-X). */
+  nearOffsetX: number;
+  /** Accumulated curve offset at the segment's far edge (`x + dx`). */
+  farOffsetX: number;
+  /** True if this segment's road was hidden behind a crest this frame (§3.4). */
+  clipped: boolean;
+}
+
+/**
  * Result of a single `render()` pass. `clippedSegments` holds the track-array
  * indices whose road was hidden behind a crest this frame (design-spec §3.4).
- * Task 6 reuses this exact clip decision to hide obstacle/entity sprites that
- * sit on clipped segments, so it is exposed here rather than kept as a local.
+ * `drawnSegments` maps every segment index that was in front of the camera this
+ * frame (whether drawn or crest-clipped) to its offset-walk data, so entity
+ * projection can look up the exact near/far offsets to interpolate between.
+ * Entities whose segment is absent (behind camera / beyond draw distance) or
+ * flagged `clipped` must be hidden (§3.5).
  */
 export interface RenderResult {
   clippedSegments: Set<number>;
+  drawnSegments: Map<number, DrawnSegment>;
 }
 
 /**
@@ -41,8 +61,17 @@ export class RoadRenderer {
    *  so Task 6 can reuse the same clip decision for entity/sprite hiding. */
   public clippedSegments: Set<number> = new Set();
 
+  /** Offset-walk data for every in-front-of-camera segment this frame (§3.5),
+   *  so entity projection can interpolate near/far curve offsets. */
+  public drawnSegments: Map<number, DrawnSegment> = new Map();
+
   constructor(scene: Phaser.Scene) {
     this.graphics = scene.add.graphics();
+  }
+
+  /** Sets the road graphics' render depth (design-spec §3.6 render order). */
+  setDepth(depth: number): void {
+    this.graphics.setDepth(depth);
   }
 
   render(track: Segment[], camX: number, camY: number, camZ: number): RenderResult {
@@ -50,9 +79,11 @@ export class RoadRenderer {
 
     const clippedSegments = new Set<number>();
     this.clippedSegments = clippedSegments;
+    const drawnSegments = new Map<number, DrawnSegment>();
+    this.drawnSegments = drawnSegments;
 
     if (track.length === 0) {
-      return { clippedSegments };
+      return { clippedSegments, drawnSegments };
     }
 
     const len = track.length;
@@ -93,8 +124,10 @@ export class RoadRenderer {
 
       // §3.3: project the NEAR edge with the current `x`, the FAR edge with
       // `x + dx`. The curve offset is added to the edge's world-X.
-      const near = project(x, nearElev, nearZ, camX, camY, camZ);
-      const far = project(x + dx, farElev, farZ, camX, camY, camZ);
+      const nearOffsetX = x;
+      const farOffsetX = x + dx;
+      const near = project(nearOffsetX, nearElev, nearZ, camX, camY, camZ);
+      const far = project(farOffsetX, farElev, farZ, camX, camY, camZ);
 
       // §3.3: advance the walk ONLY after both edges are projected. The next
       // segment's near edge then reuses exactly this segment's far offset
@@ -104,15 +137,20 @@ export class RoadRenderer {
 
       // Behind-camera clamp (§3.4 / Task 2): skip if either edge is at or
       // behind the camera. The walk was already advanced above, so the
-      // accumulation stays correct even for skipped segments.
+      // accumulation stays correct even for skipped segments. Nothing is
+      // recorded for these — entities on them are hidden by absence (§3.5).
       if (!near || !far) {
         continue;
       }
 
       // Crest clip (§3.4): skip any segment whose far edge would draw at or
       // below the highest line drawn so far (far-edge screen-Y numerically
-      // >= running minimum). Record it so Task 6 can hide sprites on it.
-      if (far.screenY >= minScreenY) {
+      // >= running minimum). Record the offsets either way (so an entity on a
+      // clipped segment is recognised and hidden via `clipped`, not left to
+      // float because its segment was simply absent from the map).
+      const clipped = far.screenY >= minScreenY;
+      drawnSegments.set(segIndex, { nearOffsetX, farOffsetX, clipped });
+      if (clipped) {
         clippedSegments.add(segIndex);
         continue;
       }
@@ -143,7 +181,7 @@ export class RoadRenderer {
       );
     }
 
-    return { clippedSegments };
+    return { clippedSegments, drawnSegments };
   }
 
   private fillTrapezoid(

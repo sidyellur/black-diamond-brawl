@@ -25,6 +25,11 @@ export class FinishBanner {
     this.graphics = scene.add.graphics();
   }
 
+  /** Sets the banner graphics' render depth (design-spec §3.6 render order). */
+  setDepth(depth: number): void {
+    this.graphics.setDepth(depth);
+  }
+
   render(finishSegment: Segment | undefined, camX: number, camY: number, camZ: number): void {
     this.graphics.clear();
     if (!finishSegment) {

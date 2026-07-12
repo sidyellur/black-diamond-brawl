@@ -7,7 +7,7 @@ import { Player } from './player';
  * has exactly two actions, and Phaser's `keydown-*` events already give us
  * one-fire-per-press for free (no manual "just pressed" debouncing needed).
  */
-export function bindPlayerInput(scene: Phaser.Scene, player: Player): void {
+export function bindPlayerInput(scene: Phaser.Scene, player: Player, onJump?: () => void): void {
   const keyboard = scene.input.keyboard;
   if (!keyboard) {
     return;
@@ -18,6 +18,9 @@ export function bindPlayerInput(scene: Phaser.Scene, player: Player): void {
   keyboard.on('keydown-RIGHT', () => player.requestLaneShift(1));
   keyboard.on('keydown-D', () => player.requestLaneShift(1));
 
-  keyboard.on('keydown-SPACE', () => player.requestJump());
-  keyboard.on('keydown-UP', () => player.requestJump());
+  // Jump routes through `onJump` when supplied so the scene can upgrade a press
+  // near a mogul into an extended launch (§4.3); otherwise a plain normal jump.
+  const jump = onJump ?? (() => player.requestJump());
+  keyboard.on('keydown-SPACE', jump);
+  keyboard.on('keydown-UP', jump);
 }

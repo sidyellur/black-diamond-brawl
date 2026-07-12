@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { generateObstacleSpriteSheet } from '../entities/obstacleSprites';
 import { generatePlayerSpriteSheet } from '../entities/playerSprite';
 
 export class BootScene extends Phaser.Scene {
@@ -15,6 +16,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generatePlayerSpriteSheet(this);
+    generateObstacleSpriteSheet(this);
 
     // Transition straight into the race scene.
     this.scene.start('RaceScene');
