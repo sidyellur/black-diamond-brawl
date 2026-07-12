@@ -1,8 +1,10 @@
 import { COURSE_LENGTH_SEGMENTS } from '../config';
 import { AIRiderParams } from '../entities/aiRider';
 import { Obstacle } from '../entities/obstacle';
+import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { placeObstacles } from './placement';
+import { placePickups } from './pickupPlacement';
 import { mulberry32, Prng } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
 import { Segment } from './segment';
@@ -272,15 +274,17 @@ export interface GeneratedTrack {
   obstacles: Obstacle[];
   crestApexes: number[];
   aiRiders: AIRiderParams[];
+  pickups: Pickup[];
 }
 
 /**
- * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: three
- * strictly-ordered passes over ONE seeded PRNG (§4.2/§4.5). Seeds a `prng`,
- * runs the geometry pass to completion, then the obstacle placement pass,
+ * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: four
+ * strictly-ordered passes over ONE seeded PRNG (§4.2/§4.5/§4.6). Seeds a
+ * `prng`, runs the geometry pass to completion, then obstacle placement, then
+ * pickup placement (reading the final obstacle field to prefer clear lanes),
  * then draws the AI riders' per-rider parameters — every draw from that same
  * `prng` instance, never a second, separately-seeded generator, so a seed
- * fully determines geometry, obstacles, AND rivals together.
+ * fully determines geometry, obstacles, pickups, AND rivals together.
  */
 export function generateTrack(seed: number): GeneratedTrack {
   const prng = mulberry32(seed);
@@ -293,6 +297,14 @@ export function generateTrack(seed: number): GeneratedTrack {
     },
     prng
   );
+  const pickups = placePickups(
+    {
+      obstacles,
+      placeableStart: geometry.placeableStart,
+      placeableEnd: geometry.placeableEnd
+    },
+    prng
+  );
   const aiRiders = spawnAIRiders(prng);
-  return { segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders };
+  return { segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups };
 }

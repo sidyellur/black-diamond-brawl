@@ -86,6 +86,35 @@ export const AI_REACTION_DISTANCE_MAX_SEGMENTS = 12;
 export const AI_START_LANES = [0, 1, 3, 4];
 export const AI_START_Z_OFFSETS_SEGMENTS = [-2, -1, 1, 2];
 
+// Combat (design-spec §4.6). A shove trigger needs the two riders within this
+// many segments of world-Z, whether lateral (steer-in) or same-lane (rear
+// approach / a rival drifting in).
+export const SHOVE_Z_WINDOW = SEGMENT_LENGTH * 1;
+// AI bump-initiation range (spec §4.5 behavior 3): a rider only considers
+// drifting into the player's lane within this many segments.
+export const BUMP_Z_WINDOW = SEGMENT_LENGTH * 2;
+// Per-attacker-pair immunity window after an exchange resolves, so the same
+// pairing can't machine-gun re-trigger (spec §4.6).
+export const SHOVE_IMMUNITY_MS = 500;
+// Tree-clamp lookahead: a knockback destination lane is rejected if a tree
+// sits within this many segments downstream of the loser's world-Z (spec §4.6).
+export const TREE_CLAMP_SEGMENTS = 2;
+// A rival that trees within this many ms of losing a shove to the player
+// counts as the player's knockout (spec §4.6/§4.7).
+export const KNOCKOUT_WINDOW_MS = 2000;
+export const SHOVE_SPEED_LOSS_FACTOR = 0.2; // baseline ~20% loser speed loss
+export const ARMED_SHOVE_SPEED_LOSS_FACTOR = 0.4; // double loss on an armed win
+// How often (ms) each AI rider re-rolls whether to attempt a bump, gated by
+// its own `aggression` (runtime randomness — NOT the seeded PRNG, per §4.5).
+export const AI_BUMP_CHECK_INTERVAL_MS = 500;
+
+// Weapon pickup — ski pole (design-spec §4.6).
+export const WEAPON_CHARGES = 3;
+// Pickups spawn on a random clear lane roughly every 20-30s of travel
+// (~300-450 segments at MAX_SPEED), through the seeded RNG (§4.2).
+export const PICKUP_MIN_GAP_SEGMENTS = 300;
+export const PICKUP_MAX_GAP_SEGMENTS = 450;
+
 // Point values (from spec §4.7)
 export const POINTS = {
   COMBAT_HIT: 250,

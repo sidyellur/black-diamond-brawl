@@ -11,7 +11,8 @@ import {
   ROAD_WIDTH,
   ROCK_IMMUNITY_MS,
   ROCK_SPEED_FACTOR,
-  ROCK_TUMBLE_MS
+  ROCK_TUMBLE_MS,
+  WEAPON_CHARGES
 } from '../config';
 import { Collidable } from './collision';
 import { roadElevationAt, Segment } from '../track/segment';
@@ -47,9 +48,18 @@ export class Player implements Collidable {
   worldZ = 0;
   speed = 0;
 
-  private laneIndex = CENTER_LANE_INDEX;
+  private _laneIndex = CENTER_LANE_INDEX;
   private tween: LaneTween | null = null;
   private bufferedDirection: -1 | 1 | null = null;
+
+  /**
+   * Combat hook (Task 8, design-spec §4.6): when set, every attempted lane
+   * shift — fresh input or a buffered continuation, both funnel through
+   * `startLaneTween` — is offered to this callback first. Returning `true`
+   * means it resolved as a shove exchange instead; the lane shift is
+   * dropped. `RaceScene` wires this to `CombatSystem.attemptPlayerShove`.
+   */
+  shoveInterceptor: ((direction: -1 | 1) => boolean) | null = null;
 
   airborne = false;
   private jumpElapsedMs = 0;
@@ -62,6 +72,10 @@ export class Player implements Collidable {
   /** Run-ending wipeout latch (tree collision, §4.4). Freezes the player;
    *  real game-over/restart is Task 9. */
   wipedOut = false;
+
+  /** Ski-pole charges (design-spec §4.6): 0 = baseline bump, >0 = armed.
+   *  Cleared only by a run-ending wipeout or overwritten by a fresh pickup. */
+  weaponCharges = 0;
 
   // Temporary-collision timers (design-spec §4.4). While `tumbleMsRemaining`
   // > 0 the player can't steer (rock knockdown); `immunityMsRemaining` grants
@@ -156,6 +170,10 @@ export class Player implements Collidable {
     this.wipedOut = true;
     this.speed = 0;
     this.airborne = false;
+    // A run-ending wipeout clears the pole regardless of remaining charges
+    // (§4.6) — the run is over either way, but this keeps state consistent
+    // for Task 9's restart flow (a fresh Player starts unarmed too).
+    this.weaponCharges = 0;
     // eslint-disable-next-line no-console
     console.log('[BDB] WIPEOUT: hit a tree — run over (real game-over is Task 9)');
   }
@@ -178,11 +196,58 @@ export class Player implements Collidable {
     this.stumbleMsRemaining = MOGUL_STUMBLE_MS;
   }
 
+  /** Discrete lane index into `LANES` — read by `CombatSystem` to test
+   *  lateral adjacency (§4.6's "neighboring lane" is a discrete concept,
+   *  unlike the continuous `laneOffsetFraction` used for same-lane checks). */
+  get laneIndex(): number {
+    return this._laneIndex;
+  }
+
+  /** Whether the ski pole is currently armed (§4.6): auto-wins the next
+   *  exchange and consumes a charge. */
+  get armed(): boolean {
+    return this.weaponCharges > 0;
+  }
+
+  /** Driving over a pickup arms/refreshes the pole to full charges (§4.6). */
+  armWeapon(): void {
+    this.weaponCharges = WEAPON_CHARGES;
+  }
+
+  /** Every exchange the armed player wins consumes one charge (§4.6),
+   *  whether player- or AI-initiated. Reverts to baseline at 0. */
+  consumeWeaponCharge(): void {
+    this.weaponCharges = Math.max(0, this.weaponCharges - 1);
+  }
+
+  /**
+   * Combat knockback (§4.6): forces a lane change to `targetLaneIndex`
+   * (already clamped by the caller's tree/edge-safety logic — passing the
+   * player's own current lane index means "no lane change, speed loss
+   * only") and applies the loser's speed loss. Overrides any in-progress
+   * voluntary tween — a knockback always takes priority. No-ops once
+   * wiped out (a frozen player can't be knocked further) or airborne (never
+   * reachable in practice: an airborne player is never a valid combat
+   * target, but guarded defensively).
+   */
+  applyKnockback(targetLaneIndex: number, speedLossFactor: number): void {
+    if (this.wipedOut || this.airborne) {
+      return;
+    }
+    this.speed *= 1 - speedLossFactor;
+    this.bufferedDirection = null;
+    if (targetLaneIndex === this._laneIndex) {
+      this.tween = null; // clamped: no lane change, speed loss only
+      return;
+    }
+    this.tween = { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0 };
+  }
+
   /** Current lane-offset fraction of road half-width (one of LANES, or
    *  tweening between two of them). Feeds both camX and the sprite lean. */
   get laneOffsetFraction(): number {
     if (!this.tween) {
-      return LANES[this.laneIndex];
+      return LANES[this._laneIndex];
     }
     const t = smoothstep(Math.min(1, this.tween.elapsedMs / LANE_TWEEN_MS));
     const from = LANES[this.tween.fromLane];
@@ -226,11 +291,18 @@ export class Player implements Collidable {
   }
 
   private startLaneTween(direction: -1 | 1): void {
-    const target = clamp(this.laneIndex + direction, 0, LANES.length - 1);
-    if (target === this.laneIndex) {
+    const target = clamp(this._laneIndex + direction, 0, LANES.length - 1);
+    if (target === this._laneIndex) {
       return; // already at the road edge; nothing to do
     }
-    this.tween = { fromLane: this.laneIndex, toLane: target, elapsedMs: 0 };
+    // Combat hook (§4.6): a steer toward a rival within the adjacent lane
+    // resolves as a shove exchange instead of an actual lane change — both
+    // fresh presses and buffered continuations land here, so both get the
+    // same check.
+    if (this.shoveInterceptor && this.shoveInterceptor(direction)) {
+      return;
+    }
+    this.tween = { fromLane: this._laneIndex, toLane: target, elapsedMs: 0 };
   }
 
   private updateLaneTween(deltaMs: number): void {
@@ -242,7 +314,7 @@ export class Player implements Collidable {
       return;
     }
 
-    this.laneIndex = this.tween.toLane;
+    this._laneIndex = this.tween.toLane;
     this.tween = null;
 
     if (this.bufferedDirection !== null) {

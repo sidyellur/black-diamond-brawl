@@ -3,9 +3,12 @@ import { COURSE_LENGTH_SEGMENTS, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../c
 import { AIRider } from '../entities/aiRider';
 import { AIRiderRenderer } from '../entities/aiRiderRenderer';
 import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
+import { CombatSystem } from '../entities/combat';
 import { bindPlayerInput } from '../entities/input';
 import { Obstacle } from '../entities/obstacle';
 import { ObstacleRenderer } from '../entities/obstacleRenderer';
+import { collectPickups, Pickup } from '../entities/pickup';
+import { PickupRenderer } from '../entities/pickupRenderer';
 import { Player } from '../entities/player';
 import { PLAYER_FRAMES, PLAYER_TEXTURE_KEY } from '../entities/playerSprite';
 import { RoadRenderer } from '../render/RoadRenderer';
@@ -70,6 +73,13 @@ export class RaceScene extends Phaser.Scene {
   private aiCollisions: CollisionSystem[] = [];
   private aiRiderRenderer!: AIRiderRenderer;
 
+  // Task 8: bump/shove combat between the player and the 4 riders, plus the
+  // ski-pole weapon pickup.
+  private combat!: CombatSystem;
+  private pickups: Pickup[] = [];
+  private pickupRenderer!: PickupRenderer;
+  private weaponText!: Phaser.GameObjects.Text;
+
   private seed = 0;
   private progressBarBg!: Phaser.GameObjects.Graphics;
   private progressBarFill!: Phaser.GameObjects.Graphics;
@@ -90,6 +100,7 @@ export class RaceScene extends Phaser.Scene {
     const generated = generateTrack(this.seed);
     this.track = generated.segments;
     this.obstacles = generated.obstacles;
+    this.pickups = generated.pickups;
     // Precompute world-Z of each jumpable crest apex (centre of the apex
     // segment) for the auto-launch crossing test (§4.3).
     this.crestApexZs = generated.crestApexes.map((i) => i * SEGMENT_LENGTH + SEGMENT_LENGTH / 2);
@@ -111,8 +122,14 @@ export class RaceScene extends Phaser.Scene {
     this.aiRiders = generated.aiRiders.map((params) => new AIRider(params));
     this.aiCollisions = this.aiRiders.map(() => new CollisionSystem());
     this.aiRiderRenderer = new AIRiderRenderer(this);
+    this.pickupRenderer = new PickupRenderer(this);
 
     this.player = new Player();
+    // Task 8: a steer into an adjacent rival resolves a shove instead of a
+    // lane change (§4.6 trigger 1) — wired before any input so the very
+    // first press is covered.
+    this.combat = new CombatSystem(this.player, this.aiRiders, this.obstacles);
+    this.player.shoveInterceptor = (direction) => this.combat.attemptPlayerShove(direction);
     // Jump routes through here so a press on/just before a mogul becomes an
     // extended trick launch (§4.3); otherwise it's a normal jump.
     bindPlayerInput(this, this.player, () => {
@@ -131,6 +148,12 @@ export class RaceScene extends Phaser.Scene {
     });
     this.progressBarBg = this.add.graphics();
     this.progressBarFill = this.add.graphics();
+
+    // Weapon charge count (Task 8 task list; Task 9 owns the full HUD).
+    this.weaponText = this.add.text(PROGRESS_BAR_X, PROGRESS_BAR_Y + PROGRESS_BAR_H + 26, '', {
+      fontSize: '14px',
+      color: '#ffffff'
+    });
   }
 
   update(time: number, delta: number): void {
@@ -161,7 +184,7 @@ export class RaceScene extends Phaser.Scene {
     // collisions are checked, never rider-vs-rider.
     for (let i = 0; i < this.aiRiders.length; i++) {
       const rider = this.aiRiders[i];
-      rider.update(delta, this.obstacles);
+      rider.update(delta, this.obstacles, this.player);
       if (this.finishSegment && rider.worldZ >= this.finishSegment.z) {
         // Same temporary "hold at the line" treatment as the player — real
         // per-rider finish handling is Task 9's job.
@@ -169,6 +192,16 @@ export class RaceScene extends Phaser.Scene {
       }
       this.aiCollisions[i].update(rider, this.obstacles);
     }
+
+    // Task 8: combat resolution runs AFTER every rider has moved and taken
+    // its own obstacle collision this frame, so same-lane checks and
+    // knockout attribution (a rider's wipedOut transition) see final state.
+    this.combat.update(delta, time);
+    this.drainCombatEvents();
+
+    // Ski-pole pickup (§4.6): collected by lane + Z, including while
+    // airborne — unlike obstacles, never gated on `player.airborne`.
+    collectPickups(this.player, this.pickups);
 
     // The course is a fixed, non-looping length (design-spec §4.2) — once
     // the player reaches the finish line their world-Z is held there
@@ -217,10 +250,37 @@ export class RaceScene extends Phaser.Scene {
       y: camY,
       z: camZ
     });
+    // Pickups project with the SAME frame's offset-walk / crest-clip data too.
+    this.pickupRenderer.render(this.pickups, this.track, result.drawnSegments, {
+      x: camX,
+      y: camY,
+      z: camZ
+    });
     this.updatePlayerSprite();
     this.updateProgressBar();
+    this.weaponText.setText(this.player.armed ? `pole: ${this.player.weaponCharges}` : '');
 
     this.prevWorldZ = this.player.worldZ;
+  }
+
+  /**
+   * Drains this frame's combat events to the console — a temporary stand-in
+   * (same convention as the finish/standings logs) until Task 9's scoring
+   * system consumes `CombatSystem.events` for real (250 per hit, +500 more
+   * on a follow-up knockout — §4.7).
+   */
+  private drainCombatEvents(): void {
+    if (this.combat.events.length === 0) {
+      return;
+    }
+    for (const event of this.combat.events) {
+      if (event.type === 'hit') {
+        console.log('[BDB] combat hit landed on a rival');
+      } else {
+        console.log('[BDB] KNOCKOUT: a rival treed after losing a shove — credited to the player');
+      }
+    }
+    this.combat.events.length = 0;
   }
 
   /**
