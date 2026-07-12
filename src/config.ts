@@ -1,0 +1,137 @@
+// Game configuration constants from design spec
+
+// Track geometry
+export const SEGMENT_LENGTH = 200;
+export const COURSE_LENGTH_SEGMENTS = 1500;
+export const MAX_SPEED = 3000;
+export const DRAW_DISTANCE = 100;
+export const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180); // Derived from FOV 100°
+
+// Camera & screen (design-spec §3.2)
+export const SCREEN_W = 960;
+export const SCREEN_H = 540;
+export const ROAD_WIDTH = 2000; // world-space road half-width
+export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surface
+
+// Lanes
+export const LANES = [-0.8, -0.4, 0, 0.4, 0.8];
+
+// Player movement (design-spec §4.1/§4.3)
+export const PLAYER_ACCEL = 1500; // units/sec^2; reaches MAX_SPEED in ~2s from a stop
+export const LANE_TWEEN_MS = 150; // lane-shift tween duration
+export const JUMP_AIRTIME_MS = 600; // constant airtime regardless of speed
+
+// Timing
+export const PAR_TIME = 130;
+
+// Jump mechanics
+export const JUMP_REACH_NORMAL = 9;
+export const JUMP_REACH_EXTENDED = 18;
+// Extended (trick) airtime: launching off a mogul or crest doubles the normal
+// ~600ms airtime to ~1,200ms (design-spec §4.3), covering up to
+// JUMP_REACH_EXTENDED segments at MAX_SPEED.
+export const JUMP_AIRTIME_EXTENDED_MS = 1200;
+
+// Lane changes
+export const LANE_CHANGE_SEGMENTS = 3;
+
+// Obstacle placement / density (design-spec §4.2). Obstacle *rows* per 100
+// segments ramp from START at t=0 to END at t=1 as the difficulty grows.
+export const OBSTACLE_ROWS_PER_100_START = 4;
+export const OBSTACLE_ROWS_PER_100_END = 12;
+// Segments of every lane kept obstacle-free immediately after a crest apex
+// (design-spec §4.2 blind landing zone; 20 ≥ JUMP_REACH_EXTENDED so it also
+// covers the crest jump-reach constraint).
+export const BLIND_LANDING_SEGMENTS = 20;
+
+// Collision (design-spec §4.4). A hit needs the player and obstacle in the same
+// lane with world-Z within ~half a segment.
+export const COLLISION_Z_WINDOW = SEGMENT_LENGTH * 0.5;
+// Lateral tolerance (as a lane-offset fraction) for "same lane" — half the
+// 0.4 lane spacing, so the player must be essentially in the obstacle's lane.
+export const COLLISION_LANE_FRACTION = 0.2;
+
+// Collision outcomes (design-spec §4.4).
+export const ROCK_SPEED_FACTOR = 0.3; // speed drops to ~30% of current
+export const ROCK_TUMBLE_MS = 1000; // ~1s no-steer tumble
+export const ROCK_IMMUNITY_MS = 1000; // ~1s collision immunity after recovery
+export const MOGUL_SPEED_FACTOR = 0.75; // ~25% speed loss on a ridden mogul
+export const MOGUL_STUMBLE_MS = 400; // brief wobble, no control loss
+
+// A mogul launches an extended trick jump when the player presses jump within
+// this forward window of it (design-spec §4.3: "on/just before a mogul").
+export const MOGUL_LAUNCH_WINDOW = SEGMENT_LENGTH * 2;
+
+// AI riders (design-spec §4.5). Per-rider cruise speed/aggression/reaction
+// distance are drawn from the SAME seeded PRNG the geometry/obstacle passes
+// use (see track/aiSpawn.ts), so rivals are deterministic per seed too.
+export const AI_RIDER_COUNT = 4;
+// Cruise speed is 90-105% of MAX_SPEED so the pack roughly keeps pace with
+// the player while still leaving finishing order contestable.
+export const AI_CRUISE_SPEED_MIN_FACTOR = 0.9;
+export const AI_CRUISE_SPEED_MAX_FACTOR = 1.05;
+// Drawn now (part of the spec's per-rider parameter set) but genuinely unused
+// until Task 8's bump/combat behavior reads it.
+export const AI_AGGRESSION_MIN = 0;
+export const AI_AGGRESSION_MAX = 1;
+// How many segments ahead a rider looks for an obstacle in its own lane
+// before dodging — "a handful of segments" (design-spec §4.5 note), well
+// beyond the ~2.25 segments a lane-change tween covers at cruise speed.
+export const AI_REACTION_DISTANCE_MIN_SEGMENTS = 6;
+export const AI_REACTION_DISTANCE_MAX_SEGMENTS = 12;
+// Fixed stagger layout at the start line (lanes skip the player's centre
+// lane; Z offsets put two riders just behind and two just ahead of the
+// player's worldZ=0 start) — not RNG-drawn, since the spec only calls out
+// cruise speed/aggression/reaction distance as needing to be seeded.
+export const AI_START_LANES = [0, 1, 3, 4];
+export const AI_START_Z_OFFSETS_SEGMENTS = [-2, -1, 1, 2];
+
+// Combat (design-spec §4.6). A shove trigger needs the two riders within this
+// many segments of world-Z, whether lateral (steer-in) or same-lane (rear
+// approach / a rival drifting in).
+export const SHOVE_Z_WINDOW = SEGMENT_LENGTH * 1;
+// Per-attacker-pair immunity window after an exchange resolves, so the same
+// pairing can't machine-gun re-trigger (spec §4.6).
+export const SHOVE_IMMUNITY_MS = 500;
+// Tree-clamp lookahead: a knockback destination lane is rejected if a tree
+// sits within this many segments downstream of the loser's world-Z (spec §4.6).
+export const TREE_CLAMP_SEGMENTS = 2;
+// A rival that trees within this many ms of losing a shove to the player
+// counts as the player's knockout (spec §4.6/§4.7).
+export const KNOCKOUT_WINDOW_MS = 2000;
+export const SHOVE_SPEED_LOSS_FACTOR = 0.2; // baseline ~20% loser speed loss
+export const ARMED_SHOVE_SPEED_LOSS_FACTOR = 0.4; // double loss on an armed win
+// How often (ms) each AI rider re-rolls whether to attempt a bump, gated by
+// its own `aggression` (runtime randomness — NOT the seeded PRNG, per §4.5).
+export const AI_BUMP_CHECK_INTERVAL_MS = 500;
+
+// Weapon pickup — ski pole (design-spec §4.6).
+export const WEAPON_CHARGES = 3;
+// Pickups spawn on a random clear lane roughly every 20-30s of travel
+// (~300-450 segments at MAX_SPEED), through the seeded RNG (§4.2).
+export const PICKUP_MIN_GAP_SEGMENTS = 300;
+export const PICKUP_MAX_GAP_SEGMENTS = 450;
+
+// Near-miss (design-spec §4.7): a one-shot check per entity, evaluated when
+// the entity's world-Z crosses the player's. Only counts a genuinely close
+// pass — within this many lanes of the entity, at or above this fraction of
+// MAX_SPEED.
+export const NEAR_MISS_MAX_LANE_DISTANCE = 1;
+export const NEAR_MISS_MIN_SPEED_FACTOR = 0.7;
+
+// Point values (from spec §4.7)
+export const POINTS = {
+  COMBAT_HIT: 250,
+  KNOCKOUT: 500,
+  COMBAT_HIT_TOTAL: 750, // COMBAT_HIT + KNOCKOUT
+  NEAR_MISS: 100,
+  TRICK_JUMP: 150,
+  TRICK_JUMP_EXTRA_PER_QUARTER_SECOND: 50,
+  COMPLETION_BONUS: 2000,
+  TIME_BONUS_PER_SECOND_UNDER_PAR: 50,
+  POSITION_BONUS_FIRST: 1000,
+  POSITION_BONUS_SECOND: 750,
+  POSITION_BONUS_THIRD: 500,
+  POSITION_BONUS_FOURTH: 250,
+  POSITION_BONUS_FIFTH: 0
+};
