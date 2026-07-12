@@ -14,6 +14,11 @@ export interface Segment {
   z: number;
   /** Alternates every few segments to drive alternating snow/rumble shading. */
   colorBand: 0 | 1;
+  /** Marks the single final segment of a generated course (design-spec
+   *  §4.2) — where the finish banner is projected and crossing is detected.
+   *  Absent/false on every other segment (including the hand-built sampler
+   *  track, which has no finish line). */
+  isFinish?: boolean;
 }
 
 /**

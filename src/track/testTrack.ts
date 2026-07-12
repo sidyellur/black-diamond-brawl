@@ -1,4 +1,5 @@
 import { SEGMENT_LENGTH } from '../config';
+import { easeIn, easeInOut, easeOut } from './easing';
 import { Segment } from './segment';
 
 // Number of consecutive segments per alternating color band (snow shading /
@@ -16,15 +17,6 @@ const CURVE_STRONG = 0.8;
 // crest is a taller, sharper peak so it actually clips the road behind it.
 const HILL_HEIGHT = 2200;
 const CREST_HEIGHT = 4200;
-
-// --- Easing helpers (design-spec §3.3/§3.4) -------------------------------
-// Quadratic ease-in for ramping a curve up from 0, quadratic ease-out for
-// ramping it back down, and cosine ease-in-out for smooth hill elevation.
-const easeIn = (a: number, b: number, pct: number): number => a + (b - a) * pct * pct;
-const easeOut = (a: number, b: number, pct: number): number =>
-  a + (b - a) * (1 - (1 - pct) * (1 - pct));
-const easeInOut = (a: number, b: number, pct: number): number =>
-  a + (b - a) * (0.5 - Math.cos(pct * Math.PI) / 2);
 
 /**
  * Hard-coded sampler track that exercises every renderer feature added in
