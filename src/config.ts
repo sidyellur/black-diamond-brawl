@@ -62,6 +62,30 @@ export const MOGUL_STUMBLE_MS = 400; // brief wobble, no control loss
 // this forward window of it (design-spec §4.3: "on/just before a mogul").
 export const MOGUL_LAUNCH_WINDOW = SEGMENT_LENGTH * 2;
 
+// AI riders (design-spec §4.5). Per-rider cruise speed/aggression/reaction
+// distance are drawn from the SAME seeded PRNG the geometry/obstacle passes
+// use (see track/aiSpawn.ts), so rivals are deterministic per seed too.
+export const AI_RIDER_COUNT = 4;
+// Cruise speed is 90-105% of MAX_SPEED so the pack roughly keeps pace with
+// the player while still leaving finishing order contestable.
+export const AI_CRUISE_SPEED_MIN_FACTOR = 0.9;
+export const AI_CRUISE_SPEED_MAX_FACTOR = 1.05;
+// Drawn now (part of the spec's per-rider parameter set) but genuinely unused
+// until Task 8's bump/combat behavior reads it.
+export const AI_AGGRESSION_MIN = 0;
+export const AI_AGGRESSION_MAX = 1;
+// How many segments ahead a rider looks for an obstacle in its own lane
+// before dodging — "a handful of segments" (design-spec §4.5 note), well
+// beyond the ~2.25 segments a lane-change tween covers at cruise speed.
+export const AI_REACTION_DISTANCE_MIN_SEGMENTS = 6;
+export const AI_REACTION_DISTANCE_MAX_SEGMENTS = 12;
+// Fixed stagger layout at the start line (lanes skip the player's centre
+// lane; Z offsets put two riders just behind and two just ahead of the
+// player's worldZ=0 start) — not RNG-drawn, since the spec only calls out
+// cruise speed/aggression/reaction distance as needing to be seeded.
+export const AI_START_LANES = [0, 1, 3, 4];
+export const AI_START_Z_OFFSETS_SEGMENTS = [-2, -1, 1, 2];
+
 // Point values (from spec §4.7)
 export const POINTS = {
   COMBAT_HIT: 250,

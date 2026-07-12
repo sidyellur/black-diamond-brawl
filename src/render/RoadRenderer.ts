@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
+import { DRAW_DISTANCE, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
 import { project } from './project';
 
@@ -102,9 +102,20 @@ export class RoadRenderer {
     let dx = -(baseSegment.curve * baseSegmentFraction);
 
     // Running minimum projected screen-Y for crest clipping (§3.4). Numerically
-    // smaller = higher on screen. Starts at the bottom of the screen so nothing
-    // is clipped until a crest raises the line.
-    let minScreenY = SCREEN_H;
+    // smaller = higher on screen. Starts at +Infinity — i.e. "no baseline
+    // established yet" — rather than SCREEN_H: a segment immediately in front
+    // of the camera can legitimately project with screenY WELL past SCREEN_H
+    // (CAMERA_HEIGHT's steep look-down angle at tiny dz dominates the
+    // projection), which is not a crest at all, just very-near geometry. That
+    // used to make the very first segment(s) processed spuriously self-clip
+    // (harmless for the road trapezoid itself, since it's off-screen either
+    // way, but it also hid any entity — e.g. Task 7's AI riders — sitting in
+    // one of those first few segments via `projectEntity`, even when the
+    // rider was clearly meant to be visible right in front of the camera).
+    // Seeding at Infinity means the first processed segment always establishes
+    // the baseline instead of being compared against a bound it can trivially
+    // exceed; every subsequent real crest comparison is unchanged.
+    let minScreenY = Infinity;
 
     for (let i = 0; i < DRAW_DISTANCE; i++) {
       const drawIndex = baseIndex + i;

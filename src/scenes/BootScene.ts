@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { generateObstacleSpriteSheet } from '../entities/obstacleSprites';
-import { generatePlayerSpriteSheet } from '../entities/playerSprite';
+import { generateAIRiderSpriteSheets, generatePlayerSpriteSheet } from '../entities/playerSprite';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -16,6 +16,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     generatePlayerSpriteSheet(this);
+    generateAIRiderSpriteSheets(this);
     generateObstacleSpriteSheet(this);
 
     // Transition straight into the race scene.

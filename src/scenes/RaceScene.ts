@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { COURSE_LENGTH_SEGMENTS, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
+import { AIRider } from '../entities/aiRider';
+import { AIRiderRenderer } from '../entities/aiRiderRenderer';
 import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
 import { bindPlayerInput } from '../entities/input';
 import { Obstacle } from '../entities/obstacle';
@@ -60,6 +62,14 @@ export class RaceScene extends Phaser.Scene {
   private player!: Player;
   private playerSprite!: Phaser.GameObjects.Sprite;
 
+  // Task 7: 4 AI riders, each with its OWN CollisionSystem instance — the
+  // `hit` set inside CollisionSystem is per-rider, so sharing one across
+  // riders would let one rider's dodge failure silently clear an obstacle
+  // for everyone else.
+  private aiRiders: AIRider[] = [];
+  private aiCollisions: CollisionSystem[] = [];
+  private aiRiderRenderer!: AIRiderRenderer;
+
   private seed = 0;
   private progressBarBg!: Phaser.GameObjects.Graphics;
   private progressBarFill!: Phaser.GameObjects.Graphics;
@@ -94,6 +104,13 @@ export class RaceScene extends Phaser.Scene {
     this.finishBanner.setDepth(BANNER_DEPTH);
     this.obstacleRenderer = new ObstacleRenderer(this);
     this.collisions.reset();
+
+    // Task 7: instantiate the 4 AI riders from the params drawn by the
+    // generator's third pass (same seeded PRNG as geometry/obstacles), plus
+    // a dedicated CollisionSystem and renderer.
+    this.aiRiders = generated.aiRiders.map((params) => new AIRider(params));
+    this.aiCollisions = this.aiRiders.map(() => new CollisionSystem());
+    this.aiRiderRenderer = new AIRiderRenderer(this);
 
     this.player = new Player();
     // Jump routes through here so a press on/just before a mogul becomes an
@@ -136,6 +153,23 @@ export class RaceScene extends Phaser.Scene {
     // Player-vs-obstacle collision (§4.4).
     this.collisions.update(this.player, this.obstacles);
 
+    // Task 7: AI riders. Every rider updates (race + dodge) EVERY frame
+    // regardless of whether it's currently on-screen — off-screen simulation
+    // keeps world-Z/speed/lane honest so a rider re-entering draw distance
+    // appears at the right spot instead of teleporting. No AI-vs-AI collision
+    // (design-spec §4.5 v1 simplification): only each rider's own obstacle
+    // collisions are checked, never rider-vs-rider.
+    for (let i = 0; i < this.aiRiders.length; i++) {
+      const rider = this.aiRiders[i];
+      rider.update(delta, this.obstacles);
+      if (this.finishSegment && rider.worldZ >= this.finishSegment.z) {
+        // Same temporary "hold at the line" treatment as the player — real
+        // per-rider finish handling is Task 9's job.
+        rider.worldZ = this.finishSegment.z;
+      }
+      this.aiCollisions[i].update(rider, this.obstacles);
+    }
+
     // The course is a fixed, non-looping length (design-spec §4.2) — once
     // the player reaches the finish line their world-Z is held there
     // instead of wrapping, so the camera settles near the banner rather
@@ -151,6 +185,7 @@ export class RaceScene extends Phaser.Scene {
         this.finished = true;
         const elapsedSeconds = time / 1000;
         console.log(`FINISHED in ${elapsedSeconds.toFixed(2)}s (seed ${this.seed})`);
+        this.logRaceStandings();
       }
       if (this.finished) {
         this.player.worldZ = Math.max(0, this.finishSegment.z - FINISH_HOLD_BACK);
@@ -174,10 +209,45 @@ export class RaceScene extends Phaser.Scene {
       y: camY,
       z: camZ
     });
+    // AI riders project with the SAME frame's offset-walk / crest-clip data,
+    // so they slide through curves and vanish behind crests exactly like the
+    // road/obstacles do.
+    this.aiRiderRenderer.render(this.aiRiders, this.track, result.drawnSegments, {
+      x: camX,
+      y: camY,
+      z: camZ
+    });
     this.updatePlayerSprite();
     this.updateProgressBar();
 
     this.prevWorldZ = this.player.worldZ;
+  }
+
+  /**
+   * Console-logs race positions (player + 4 rivals) sorted by world-Z at the
+   * moment the player finishes — temporary until Task 9 builds the real
+   * results UI (same pattern as the existing "FINISHED in Xs" log). Wiped-out
+   * riders (tree collision, §4.4) are excluded from the ranking proper and
+   * listed last as DNF, since a rival can also legitimately be ahead/behind
+   * the player at this moment.
+   */
+  private logRaceStandings(): void {
+    const entries = [
+      { label: 'player', worldZ: this.player.worldZ, wipedOut: this.player.wipedOut },
+      ...this.aiRiders.map((rider, i) => ({
+        label: `rival ${i + 1}`,
+        worldZ: rider.worldZ,
+        wipedOut: rider.wipedOut
+      }))
+    ];
+    entries.sort((a, b) => {
+      if (a.wipedOut !== b.wipedOut) {
+        return a.wipedOut ? 1 : -1;
+      }
+      return b.worldZ - a.worldZ;
+    });
+    const summary = entries.map((e, i) => `${i + 1}. ${e.label}${e.wipedOut ? ' (DNF)' : ''}`).join(', ');
+    console.log(`[BDB] race positions: ${summary}`);
   }
 
   private updateProgressBar(): void {

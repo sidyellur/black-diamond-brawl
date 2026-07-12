@@ -3,16 +3,38 @@ import { isJumpable, obstacleLaneFraction, Obstacle } from './obstacle';
 import { Player } from './player';
 
 /**
- * Player-vs-obstacle collision (design-spec §4.4). A hit needs the player and
+ * Minimal shape any rider (player or AI) must expose for obstacle collision
+ * (design-spec §4.4) — extracted so Task 7's AI riders can reuse this system
+ * as-is rather than forking a parallel copy of the tree/rock/mogul outcome
+ * logic (§4.5's explicit instruction: AI riders "suffer normal obstacle
+ * collisions" under "the same rules as the player"). `Player` already
+ * satisfies this shape structurally.
+ */
+export interface Collidable {
+  worldZ: number;
+  readonly laneOffsetFraction: number;
+  readonly airborne: boolean;
+  readonly collisionImmune: boolean;
+  readonly wipedOut: boolean;
+  crashIntoTree(): void;
+  hitRock(): void;
+  hitMogul(): void;
+}
+
+/**
+ * Rider-vs-obstacle collision (design-spec §4.4). A hit needs the rider and
  * obstacle in the same lane (lateral offset within `COLLISION_LANE_FRACTION`)
  * and their world-Z within `COLLISION_Z_WINDOW` (~half a segment), and the
- * player NOT airborne over a jumpable obstacle (rock/mogul pass beneath; a tree
+ * rider NOT airborne over a jumpable obstacle (rock/mogul pass beneath; a tree
  * is too tall and hits even mid-air).
  *
  * Stateful only to fire each obstacle's outcome exactly once — without the
- * `hit` set the player would sit inside the ~0.5-segment window for several
+ * `hit` set the rider would sit inside the ~0.5-segment window for several
  * frames and re-apply the effect (e.g. compounding a rock's speed drop). Call
- * `reset()` when the course is regenerated.
+ * `reset()` when the course is regenerated. Each rider (player + every AI
+ * rider) needs its OWN `CollisionSystem` instance — the `hit` set is
+ * per-rider, not shared, so one rider clearing an obstacle never hides it
+ * from another.
  */
 export class CollisionSystem {
   private readonly hit = new Set<Obstacle>();
@@ -21,12 +43,12 @@ export class CollisionSystem {
     this.hit.clear();
   }
 
-  update(player: Player, obstacles: Obstacle[]): void {
-    if (player.wipedOut) {
+  update(rider: Collidable, obstacles: Obstacle[]): void {
+    if (rider.wipedOut) {
       return;
     }
-    const pz = player.worldZ;
-    const pf = player.laneOffsetFraction;
+    const pz = rider.worldZ;
+    const pf = rider.laneOffsetFraction;
 
     for (const obstacle of obstacles) {
       if (this.hit.has(obstacle)) {
@@ -39,28 +61,28 @@ export class CollisionSystem {
         continue;
       }
       // Same lane + Z window. Airborne clears jumpable obstacles.
-      if (player.airborne && isJumpable(obstacle.kind)) {
+      if (rider.airborne && isJumpable(obstacle.kind)) {
         continue;
       }
       // Temporary post-collision immunity (still passing through, don't consume
-      // the obstacle — the player is far past it before immunity lapses).
-      if (player.collisionImmune) {
+      // the obstacle — the rider is far past it before immunity lapses).
+      if (rider.collisionImmune) {
         continue;
       }
 
       this.hit.add(obstacle);
       switch (obstacle.kind) {
         case 'tree':
-          player.crashIntoTree();
+          rider.crashIntoTree();
           break;
         case 'rock':
-          player.hitRock();
+          rider.hitRock();
           break;
         case 'mogul':
-          player.hitMogul();
+          rider.hitMogul();
           break;
       }
-      if (player.wipedOut) {
+      if (rider.wipedOut) {
         break;
       }
     }

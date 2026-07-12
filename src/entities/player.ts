@@ -13,6 +13,7 @@ import {
   ROCK_SPEED_FACTOR,
   ROCK_TUMBLE_MS
 } from '../config';
+import { Collidable } from './collision';
 import { roadElevationAt, Segment } from '../track/segment';
 
 const CENTER_LANE_INDEX = Math.floor(LANES.length / 2);
@@ -37,8 +38,12 @@ interface LaneTween {
  *
  * Owns its own input-buffering and jump-arc timing so `RaceScene` just calls
  * `update()` plus `requestLaneShift()`/`requestJump()` from input handlers.
+ *
+ * Implements `Collidable` (Task 7's AI riders implement the same interface)
+ * so `CollisionSystem` — and any future rider type — can apply the identical
+ * tree/rock/mogul rules without a parallel copy.
  */
-export class Player {
+export class Player implements Collidable {
   worldZ = 0;
   speed = 0;
 

@@ -1,5 +1,7 @@
 import { COURSE_LENGTH_SEGMENTS } from '../config';
+import { AIRiderParams } from '../entities/aiRider';
 import { Obstacle } from '../entities/obstacle';
+import { spawnAIRiders } from './aiSpawn';
 import { placeObstacles } from './placement';
 import { mulberry32, Prng } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
@@ -269,13 +271,16 @@ export interface GeneratedTrack {
   segments: Segment[];
   obstacles: Obstacle[];
   crestApexes: number[];
+  aiRiders: AIRiderParams[];
 }
 
 /**
- * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: the two
- * strictly-ordered passes over ONE seeded PRNG (§4.2). Seeds a `prng`, runs the
- * geometry pass to completion, then runs the obstacle placement pass drawing
- * from that same `prng` — never a second, separately-seeded generator.
+ * Generates the full ~`COURSE_LENGTH_SEGMENTS`-long course for a seed: three
+ * strictly-ordered passes over ONE seeded PRNG (§4.2/§4.5). Seeds a `prng`,
+ * runs the geometry pass to completion, then the obstacle placement pass,
+ * then draws the AI riders' per-rider parameters — every draw from that same
+ * `prng` instance, never a second, separately-seeded generator, so a seed
+ * fully determines geometry, obstacles, AND rivals together.
  */
 export function generateTrack(seed: number): GeneratedTrack {
   const prng = mulberry32(seed);
@@ -288,5 +293,6 @@ export function generateTrack(seed: number): GeneratedTrack {
     },
     prng
   );
-  return { segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes };
+  const aiRiders = spawnAIRiders(prng);
+  return { segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders };
 }
