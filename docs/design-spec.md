@@ -448,11 +448,23 @@ Result → restart (same seed or new seed) → Race
 - **Pixel art sprites** for the player rider (with lean-left/center/lean-right + jump +
   tumble frames), AI riders (palette-swapped variants of one base sheet is fine), trees,
   rocks, moguls, the ski-pole pickup, and the finish banner. This was an explicit choice —
-  not geometric placeholders, and not deferred. Suggested working format: 32×32 base
-  sprites (48×32 for the banner), nearest-neighbor scaled by the projection (Phaser pixel
-  art mode: `pixelArt: true`, no anti-aliasing). Free/CC0 asset packs or hand-drawn Aseprite
-  sprites are both acceptable; the road itself is flat-shaded Graphics polygons, which
-  reads well next to pixel sprites.
+  not geometric placeholders, and not deferred.
+
+  **Amended in v2 (see `src/render/palette.ts`):** base sprites are **48×48**, not 32×32.
+  At 32px a helmet, a shoulder line and a board edge cannot be told apart once the
+  projection scales the sprite down, and the silhouette — which is most of what survives
+  at distance — stops reading. All art is **generated in code** at boot rather than
+  loaded from asset packs: no free/CC0 snowboarder sprite exists, so the pack route would
+  have shipped a skier as the player character of a snowboarding game. Nearest-neighbour
+  sampling is kept (`pixelArt: true`) but `roundPixels` is **disabled** — it applies to
+  textured objects while Graphics ignore it, so the road and the sprites standing on it
+  would occupy different coordinate spaces and entities would visibly swim against the
+  surface at distance. The road remains flat-shaded Graphics polygons.
+
+  Colour is governed by `src/render/palette.ts` and enforced by `npm run verify:palette`:
+  every gameplay-relevant edge must clear **ΔL\* 12** and every sprite outline **ΔL\* 25**
+  against the snow behind it. This is a gameplay constraint, not an aesthetic one — the
+  mogul previously sat at ΔL\* 2.5, making a 25%-speed-loss hazard effectively invisible.
 - **Audio:** placeholder or none for v1. Full sound design is out of scope.
 
 ## 6. MVP Scope

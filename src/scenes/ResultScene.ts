@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
-import { SCREEN_W } from '../config';
+import { SCREEN_H, SCREEN_W } from '../config';
 import { ScoreBreakdown } from '../entities/scoring';
+import { DEPTH } from '../render/depth';
+import { UI } from '../render/palette';
 import { randomSeed } from '../track/seed';
 
-const BACKGROUND_COLOR = '#1a1a1a';
+const hex = (v: number): string => `#${v.toString(16).padStart(6, '0')}`;
 const ORDINALS: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 5: '5th' };
 
 export interface ResultSceneData {
@@ -13,11 +15,20 @@ export interface ResultSceneData {
   isNewBest: boolean;
 }
 
+interface Row {
+  label: string;
+  value: string;
+  accent?: number;
+}
+
 /**
- * Finish or wipeout summary (design-spec §2/§4.7/§4.8): score breakdown by
- * category, finish time + position (finish mode only awards their bonuses —
- * wipeout mode still shows the frozen position for information, per §4.7),
- * session-best, and the restart prompt (same seed / new seed).
+ * Finish or wipeout summary (design-spec §2/§4.7/§4.8).
+ *
+ * Laid out as a panel with aligned label/value columns rather than a single
+ * centred text blob, so the eye can scan the breakdown. Categories carry the
+ * accent colour that matches what they represent — combat is aggressive, near
+ * misses informational, tricks rewarding — which is what turns a list of
+ * numbers into a readable summary of how the run went.
  */
 export class ResultScene extends Phaser.Scene {
   private resultData!: ResultSceneData;
@@ -28,38 +39,102 @@ export class ResultScene extends Phaser.Scene {
 
   create(data: ResultSceneData): void {
     this.resultData = data;
-    this.cameras.main.setBackgroundColor(BACKGROUND_COLOR);
+    this.cameras.main.setBackgroundColor(UI.panel);
 
     const b = data.breakdown;
-    const lines: string[] = [];
-    lines.push(b.finished ? 'FINISHED!' : 'WIPED OUT');
-    lines.push('');
-    lines.push(`Combat hits:  ${b.combatHitCount}  (+${b.combatHitPoints})`);
-    lines.push(`Knockouts:    ${b.knockoutCount}  (+${b.knockoutPoints})`);
-    lines.push(`Near misses:  ${b.nearMissCount}  (+${b.nearMissPoints})`);
-    lines.push(`Trick jumps:  ${b.trickJumpCount}  (+${b.trickJumpPoints})`);
-    if (b.finished) {
-      lines.push(`Completion bonus: +${b.completionBonus}`);
-      lines.push(`Time bonus (${b.finishTimeSeconds.toFixed(1)}s): +${Math.round(b.timeBonus)}`);
-      lines.push(`Position: ${ORDINALS[b.position] ?? `${b.position}th`}  (+${b.positionBonus})`);
-    } else {
-      lines.push(`Position at wipeout: ${ORDINALS[b.position] ?? `${b.position}th`}  (no bonus)`);
-    }
-    lines.push('');
-    lines.push(`TOTAL: ${Math.round(b.total)}`);
-    lines.push(`Session best: ${Math.round(data.bestScore)}${data.isNewBest ? '  (NEW BEST!)' : ''}`);
-    lines.push('');
-    lines.push('R / Enter: restart (same seed)');
-    lines.push('N: restart (new seed)');
+    const finished = b.finished;
+
+    // Header band — colour-coded so the outcome registers before any reading.
+    const band = this.add.graphics();
+    band.fillStyle(finished ? UI.accentGood : UI.accentBad, 0.16);
+    band.fillRect(0, 0, SCREEN_W, 74);
+    band.fillStyle(finished ? UI.accentGood : UI.accentBad, 1);
+    band.fillRect(0, 72, SCREEN_W, 2);
 
     this.add
-      .text(SCREEN_W / 2, 30, lines.join('\n'), {
-        fontSize: '16px',
-        color: '#ffffff',
-        align: 'center',
-        lineSpacing: 4
+      .text(SCREEN_W / 2, 30, finished ? 'FINISHED' : 'WIPED OUT', {
+        fontSize: '34px',
+        fontStyle: 'bold',
+        color: hex(finished ? UI.accentGood : UI.accentBad)
       })
-      .setOrigin(0.5, 0);
+      .setOrigin(0.5, 0.5);
+
+    const rows: Row[] = [
+      { label: 'Combat hits', value: `${b.combatHitCount}   +${b.combatHitPoints}`, accent: UI.accentBad },
+      { label: 'Knockouts', value: `${b.knockoutCount}   +${b.knockoutPoints}`, accent: UI.accentBad },
+      { label: 'Near misses', value: `${b.nearMissCount}   +${b.nearMissPoints}`, accent: UI.accentInfo },
+      { label: 'Trick jumps', value: `${b.trickJumpCount}   +${b.trickJumpPoints}`, accent: UI.accentWarn }
+    ];
+
+    if (finished) {
+      rows.push({ label: 'Completion', value: `+${b.completionBonus}`, accent: UI.accentGood });
+      rows.push({
+        label: `Time  (${b.finishTimeSeconds.toFixed(1)}s)`,
+        value: `+${Math.round(b.timeBonus)}`,
+        accent: UI.accentGood
+      });
+      rows.push({
+        label: `Position  ${ORDINALS[b.position] ?? `${b.position}th`}`,
+        value: `+${b.positionBonus}`,
+        accent: UI.accentGood
+      });
+    } else {
+      rows.push({
+        label: `Position at wipeout  ${ORDINALS[b.position] ?? `${b.position}th`}`,
+        value: 'no bonus',
+        accent: UI.inkLow
+      });
+    }
+
+    const leftX = SCREEN_W / 2 - 190;
+    const rightX = SCREEN_W / 2 + 190;
+    let y = 108;
+
+    for (const row of rows) {
+      this.add.text(leftX, y, row.label, { fontSize: '15px', color: hex(UI.inkMid) }).setOrigin(0, 0.5);
+      this.add
+        .text(rightX, y, row.value, {
+          fontSize: '15px',
+          fontStyle: 'bold',
+          color: hex(row.accent ?? UI.inkHigh)
+        })
+        .setOrigin(1, 0.5);
+      y += 27;
+    }
+
+    // Total, separated by a rule so it does not read as just another row.
+    y += 8;
+    const rule = this.add.graphics();
+    rule.fillStyle(UI.panelEdge, 1);
+    rule.fillRect(leftX, y - 8, rightX - leftX, 1);
+
+    this.add
+      .text(leftX, y + 14, 'TOTAL', { fontSize: '20px', fontStyle: 'bold', color: hex(UI.inkHigh) })
+      .setOrigin(0, 0.5);
+    this.add
+      .text(rightX, y + 14, `${Math.round(b.total)}`, {
+        fontSize: '26px',
+        fontStyle: 'bold',
+        color: hex(UI.inkHigh)
+      })
+      .setOrigin(1, 0.5);
+
+    const bestLabel = data.isNewBest ? 'NEW SESSION BEST' : 'Session best';
+    this.add
+      .text(SCREEN_W / 2, y + 48, `${bestLabel}   ${Math.round(data.bestScore)}`, {
+        fontSize: '14px',
+        color: hex(data.isNewBest ? UI.accentWarn : UI.inkLow),
+        fontStyle: data.isNewBest ? 'bold' : 'normal'
+      })
+      .setOrigin(0.5, 0.5);
+
+    this.add
+      .text(SCREEN_W / 2, SCREEN_H - 34, 'R / ENTER  restart same seed        N  new seed', {
+        fontSize: '14px',
+        color: hex(UI.inkMid)
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH.HUD);
 
     const keyboard = this.input.keyboard;
     if (keyboard) {

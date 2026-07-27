@@ -1,14 +1,18 @@
 import Phaser from 'phaser';
-import { ROAD_WIDTH } from '../config';
+import { ROAD_WIDTH, SCREEN_W } from '../config';
+import { RUMBLE, shade } from '../render/palette';
 import { project, ProjectedPoint } from '../render/project';
 import { Segment } from './segment';
 
 // World-Y height of the banner arch above the road surface.
 const BANNER_HEIGHT = 1800;
 const CHECKER_COLUMNS = 8;
-const CHECKER_COLOR_A = 0xd94f4f;
-const CHECKER_COLOR_B = 0xffffff;
-const POLE_COLOR = 0x555b66;
+const CHECKER_COLOR_A = RUMBLE.warn;
+const CHECKER_COLOR_B = 0xf4f7fb;
+/** Pole thickness in world units, projected like any other width. */
+const POLE_WORLD_WIDTH = 46;
+const POLE_COLOR = 0x8b93a1;
+const POLE_SHADE = shade(0x8b93a1, 'shadow');
 
 /**
  * Draws the finish banner: a checkered bar spanning the road at the finish
@@ -23,6 +27,11 @@ export class FinishBanner {
 
   constructor(scene: Phaser.Scene) {
     this.graphics = scene.add.graphics();
+  }
+
+  /** See `SkyRenderer.displayObjects`. */
+  get displayObjects(): Phaser.GameObjects.GameObject[] {
+    return [this.graphics];
   }
 
   /** Sets the banner graphics' render depth (design-spec §3.6 render order). */
@@ -54,8 +63,24 @@ export class FinishBanner {
   }
 
   private drawPole(base: ProjectedPoint, top: ProjectedPoint): void {
-    this.graphics.lineStyle(Math.max(1, base.scale * 30), POLE_COLOR, 1);
+    // `scale` is the raw projection factor, not a pixel measurement — turning
+    // it into screen pixels needs the same `SCREEN_W / 2` term `project()`
+    // applies to every other width. Without it the expression only exceeded
+    // 1px for dz < 25 world units, which is inside the near plane and
+    // therefore unreachable, so the poles rendered as hairlines for the
+    // entire race.
+    const widthPx = Math.max(2, base.scale * POLE_WORLD_WIDTH * (SCREEN_W / 2));
+    this.graphics.lineStyle(widthPx, POLE_SHADE, 1);
     this.graphics.lineBetween(base.screenX, base.screenY, top.screenX, top.screenY);
+    // A narrower lit core offset toward the sun gives the pole a round read
+    // instead of a flat bar.
+    this.graphics.lineStyle(Math.max(1, widthPx * 0.42), POLE_COLOR, 1);
+    this.graphics.lineBetween(
+      base.screenX - widthPx * 0.18,
+      base.screenY,
+      top.screenX - widthPx * 0.18,
+      top.screenY
+    );
   }
 
   private drawCheckeredBar(baseLeft: ProjectedPoint, baseRight: ProjectedPoint, topLeft: ProjectedPoint, topRight: ProjectedPoint): void {

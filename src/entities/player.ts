@@ -8,6 +8,7 @@ import {
   MOGUL_SPEED_FACTOR,
   MOGUL_STUMBLE_MS,
   PLAYER_ACCEL,
+  PLAYER_START_Z,
   ROAD_WIDTH,
   ROCK_IMMUNITY_MS,
   ROCK_SPEED_FACTOR,
@@ -45,7 +46,10 @@ interface LaneTween {
  * tree/rock/mogul rules without a parallel copy.
  */
 export class Player implements Collidable {
-  worldZ = 0;
+  /** Starts at `PLAYER_START_Z`, not 0, so the camera (which trails by
+   *  `CAMERA_BACK_Z`) begins at exactly world-Z 0 instead of behind the front
+   *  of the track array. */
+  worldZ = PLAYER_START_Z;
   speed = 0;
 
   private _laneIndex = CENTER_LANE_INDEX;

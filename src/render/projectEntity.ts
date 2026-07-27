@@ -33,13 +33,29 @@ export function projectEntity(
   worldZ: number,
   track: Segment[],
   drawnSegments: Map<number, DrawnSegment>,
-  camera: Camera
+  camera: Camera,
+  /**
+   * Height above the road surface, in world units. Defaults to 0 (planted on
+   * the piste). Non-zero lifts the entity off the surface — needed for
+   * airborne riders and for anything that has to be positioned relative to
+   * the ground rather than on it.
+   */
+  heightOffset = 0,
+  /**
+   * When true, a crest-clipped segment still projects instead of returning
+   * null. An airborne rider cresting a rise is silhouetted against the sky
+   * and should stay visible even though the road *under* it is hidden;
+   * without this it pops out of existence at the top of every jump.
+   */
+  ignoreCrestClip = false
 ): ProjectedPoint | null {
   const segIndex = Math.floor(worldZ / SEGMENT_LENGTH);
   const drawn = drawnSegments.get(segIndex);
-  if (!drawn || drawn.clipped) {
-    // Beyond draw distance / behind camera (absent) or hidden behind a crest.
-    return null;
+  if (!drawn) {
+    return null; // beyond draw distance or behind the camera
+  }
+  if (drawn.clipped && !ignoreCrestClip) {
+    return null; // hidden behind a crest
   }
 
   // Fractional Z within the segment: 0 at its near edge, 1 at its far edge.
@@ -47,7 +63,25 @@ export function projectEntity(
   const curveOffset = drawn.nearOffsetX + (drawn.farOffsetX - drawn.nearOffsetX) * frac;
 
   const worldX = curveOffset + laneFraction * ROAD_WIDTH;
-  const worldY = roadElevationAt(track, worldZ);
+  const worldY = roadElevationAt(track, worldZ) + heightOffset;
 
   return project(worldX, worldY, worldZ, camera.x, camera.y, camera.z);
+}
+
+/**
+ * Compresses a sprite's on-screen scale so nothing can blow up to fill the
+ * frame in the near field.
+ *
+ * Uses a soft knee rather than `Math.min`. A hard clamp produces a visible
+ * derivative discontinuity the instant it engages — the sprite grows normally,
+ * then abruptly freezes — which reads as more broken than the overscale it is
+ * fixing. This eases into the ceiling instead: below roughly half the maximum
+ * it is within a few percent of linear, and it approaches `maxPx`
+ * asymptotically without ever snapping.
+ */
+export function softClampWidth(widthPx: number, maxPx: number): number {
+  if (widthPx <= 0 || maxPx <= 0) {
+    return 0;
+  }
+  return maxPx * (1 - Math.exp(-widthPx / maxPx));
 }
