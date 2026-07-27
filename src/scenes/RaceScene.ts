@@ -23,6 +23,8 @@ import { PLAYER_FRAME_SIZE, PLAYER_FRAMES, PLAYER_TEXTURE_KEY } from '../entitie
 import { computePlayerPosition, ScoreTracker } from '../entities/scoring';
 import { recordScore } from '../entities/session';
 import { DEPTH } from '../render/depth';
+import { Juice } from '../render/Juice';
+import { ShadowRenderer } from '../render/ShadowRenderer';
 import { UI } from '../render/palette';
 import { projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment, RoadRenderer } from '../render/RoadRenderer';
@@ -76,6 +78,15 @@ export class RaceScene extends Phaser.Scene {
   private finishSegment: Segment | undefined;
   private roadRenderer!: RoadRenderer;
   private skyRenderer!: SkyRenderer;
+  private shadows!: ShadowRenderer;
+  private juice!: Juice;
+  /** Previous-frame collision/airborne state, so juice can fire on
+   *  TRANSITIONS without collision or combat logic having to know that
+   *  anything is watching. */
+  private prevWiped = false;
+  private prevTumbling = false;
+  private prevStumbling = false;
+  private prevAirborne = false;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private finishBanner!: FinishBanner;
   private obstacleRenderer!: ObstacleRenderer;
@@ -126,6 +137,10 @@ export class RaceScene extends Phaser.Scene {
     this.prevWorldZ = PLAYER_START_Z;
     this.raceStartMs = this.time.now;
     this.worldObjects = [];
+    this.prevWiped = false;
+    this.prevTumbling = false;
+    this.prevStumbling = false;
+    this.prevAirborne = false;
 
     // Sits behind the generated sky; only ever visible in the bleed margin a
     // camera shake can expose, so it matches the horizon rather than the old
@@ -147,6 +162,7 @@ export class RaceScene extends Phaser.Scene {
     this.roadRenderer.setDepth(DEPTH.ROAD);
     this.finishBanner = new FinishBanner(this);
     this.finishBanner.setDepth(DEPTH.BANNER);
+    this.shadows = new ShadowRenderer(this, this.registerWorld);
     this.obstacleRenderer = new ObstacleRenderer(this, this.registerWorld);
     this.collisions = new CollisionSystem();
 
@@ -190,6 +206,10 @@ export class RaceScene extends Phaser.Scene {
     this.finishBanner.displayObjects.forEach(this.registerWorld);
 
     this.buildHud();
+
+    // Built after the HUD so the UI camera already exists — every juice
+    // object registers as world-space and must be ignored by it.
+    this.juice = new Juice(this, this.cameras.main, this.registerWorld);
   }
 
   /**
@@ -309,6 +329,17 @@ export class RaceScene extends Phaser.Scene {
     // airborne — unlike obstacles, never gated on `player.airborne`.
     collectPickups(this.player, this.pickups);
 
+    // Combat feedback. `ScoreTracker.update()` drains `combat.events`, so
+    // this has to read them first — a landed shove previously changed a HUD
+    // number and produced no visual response whatsoever.
+    if (this.combat.events.length > 0) {
+      this.juice.combatHit(this.playerSprite.x, this.playerSprite.y - this.playerSprite.displayHeight * 0.5);
+    }
+
+    // Collision feedback, fired on state TRANSITIONS so neither the collision
+    // system nor combat needs to know anything is watching.
+    this.emitCollisionFeedback();
+
     // Scoring reads this frame's settled combat/collision/pickup state —
     // must run after all of the above.
     this.scoreTracker.update();
@@ -348,29 +379,51 @@ export class RaceScene extends Phaser.Scene {
     // Sky draws behind the road but needs this frame's curve offset and the
     // road's measured top edge, so it renders after.
     this.skyRenderer.render(result.farCurveOffset, camX, result.topScreenY);
+    this.shadows.begin();
     this.finishBanner.render(this.finishSegment, camX, camY, camZ);
     // Obstacles project with the SAME frame's offset-walk / crest-clip data so
     // they slide through curves and vanish behind crests exactly like the road.
-    this.obstacleRenderer.render(this.obstacles, this.track, result.drawnSegments, {
-      x: camX,
-      y: camY,
-      z: camZ
-    });
+    this.obstacleRenderer.render(
+      this.obstacles,
+      this.track,
+      result.drawnSegments,
+      { x: camX, y: camY, z: camZ },
+      this.shadows
+    );
     // AI riders project with the SAME frame's offset-walk / crest-clip data,
     // so they slide through curves and vanish behind crests exactly like the
     // road/obstacles do.
-    this.aiRiderRenderer.render(this.aiRiders, this.track, result.drawnSegments, {
-      x: camX,
-      y: camY,
-      z: camZ
-    });
+    this.aiRiderRenderer.render(
+      this.aiRiders,
+      this.track,
+      result.drawnSegments,
+      { x: camX, y: camY, z: camZ },
+      this.shadows
+    );
     // Pickups project with the SAME frame's offset-walk / crest-clip data too.
-    this.pickupRenderer.render(this.pickups, this.track, result.drawnSegments, {
-      x: camX,
-      y: camY,
-      z: camZ
-    });
+    this.pickupRenderer.render(
+      this.pickups,
+      this.track,
+      result.drawnSegments,
+      { x: camX, y: camY, z: camZ },
+      this.shadows
+    );
     this.updatePlayerSprite(camX, camY, camZ, result.drawnSegments);
+    this.shadows.end();
+
+    // Carve spray off the board edge, and speed lines whose intensity tracks
+    // actual speed — so the difference between 60% and 100% is something you
+    // feel rather than something you read off the HUD.
+    if (!this.player.wipedOut && !this.player.airborne) {
+      this.juice.emitCarve(
+        this.playerSprite.x,
+        this.playerSprite.y,
+        this.player.speed / MAX_SPEED,
+        this.player.leanDirection !== 0
+      );
+    }
+    this.juice.renderSpeed(this.player.speed, time);
+    this.juice.tick(delta);
     this.updateHud();
 
     this.prevWorldZ = this.player.worldZ;
@@ -466,5 +519,61 @@ export class RaceScene extends Phaser.Scene {
     );
     this.playerSprite.setScale(widthPx / PLAYER_FRAME_SIZE);
     this.playerSprite.setPosition(projected.screenX + stumbleShimmy, projected.screenY);
+
+    // The shadow tracks the ROAD, not the sprite — projected again at zero
+    // height. The growing gap between rider and shadow is what makes a jump
+    // read as height rather than as the sprite drifting up the screen.
+    const ground = projectEntity(
+      this.player.laneOffsetFraction,
+      this.player.worldZ,
+      this.track,
+      drawnSegments,
+      { x: camX, y: camY, z: camZ },
+      0,
+      true
+    );
+    if (ground) {
+      this.shadows.draw(ground.screenX, ground.screenY, widthPx, this.player.jumpArcHeight);
+    }
   }
+
+  /**
+   * Fires impact feedback on state transitions.
+   *
+   * Reading transitions rather than hooking the collision system keeps
+   * `CollisionSystem` and `Player` unaware that anything is observing them —
+   * the v2 work is not allowed to change collision behaviour, only how it is
+   * presented.
+   */
+  private emitCollisionFeedback(): void {
+    const x = this.playerSprite.x;
+    const y = this.playerSprite.y;
+
+    // Tree: run-ending. The heaviest hit in the game, so it gets the most.
+    if (this.player.wipedOut && !this.prevWiped) {
+      this.juice.impact(x, y, 1);
+    } else if (this.player.tumbling && !this.prevTumbling) {
+      // Rock: a hard knockdown, recoverable.
+      this.juice.impact(x, y, 0.62);
+    } else if (this.player.stumbling && !this.prevStumbling) {
+      // Mogul: a bump, not a crash — spray and a nudge, no flash.
+      this.juice.impact(x, y, 0.18);
+    }
+
+    // Landing. An extended (trick) landing is a reward, so it sparkles rather
+    // than shakes.
+    if (!this.player.airborne && this.prevAirborne && !this.player.wipedOut) {
+      if (this.player.extendedJump) {
+        this.juice.trickLanded(x, y);
+      } else {
+        this.juice.emitCarve(x, y, 1, true);
+      }
+    }
+
+    this.prevWiped = this.player.wipedOut;
+    this.prevTumbling = this.player.tumbling;
+    this.prevStumbling = this.player.stumbling;
+    this.prevAirborne = this.player.airborne;
+  }
+
 }

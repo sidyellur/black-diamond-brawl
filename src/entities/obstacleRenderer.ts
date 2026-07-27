@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
 import { entityDepth } from '../render/depth';
+import { ShadowRenderer } from '../render/ShadowRenderer';
 import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
@@ -40,7 +41,8 @@ export class ObstacleRenderer {
     obstacles: Obstacle[],
     track: Segment[],
     drawnSegments: Map<number, DrawnSegment>,
-    camera: Camera
+    camera: Camera,
+    shadows?: ShadowRenderer
   ): void {
     let used = 0;
 
@@ -68,6 +70,11 @@ export class ObstacleRenderer {
       // Nearer (smaller world-Z) → higher depth → drawn on top (far-to-near).
       sprite.setDepth(entityDepth(obstacle.z));
       sprite.setVisible(true);
+      // Moguls are part of the surface, so they cast no separate shadow —
+      // their own shading already carries one.
+      if (shadows && obstacle.kind !== 'mogul') {
+        shadows.draw(projected.screenX, projected.screenY, widthPx * 0.75);
+      }
     }
 
     // Hide any pooled sprites not used this frame.

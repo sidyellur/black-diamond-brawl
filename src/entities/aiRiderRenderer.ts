@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
 import { entityDepth } from '../render/depth';
+import { ShadowRenderer } from '../render/ShadowRenderer';
 import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
@@ -40,7 +41,13 @@ export class AIRiderRenderer {
     this.onCreate = onCreate;
   }
 
-  render(riders: AIRider[], track: Segment[], drawnSegments: Map<number, DrawnSegment>, camera: Camera): void {
+  render(
+    riders: AIRider[],
+    track: Segment[],
+    drawnSegments: Map<number, DrawnSegment>,
+    camera: Camera,
+    shadows?: ShadowRenderer
+  ): void {
     riders.forEach((rider, index) => {
       const sprite = this.acquire(index, rider.params.paletteIndex);
       // Always projected, even for a wiped-out rider: a treed rival stays
@@ -74,6 +81,7 @@ export class AIRiderRenderer {
       // far-to-near convention `ObstacleRenderer` uses.
       sprite.setDepth(entityDepth(rider.worldZ));
       sprite.setVisible(true);
+      shadows?.draw(projected.screenX, projected.screenY, widthPx);
     });
   }
 

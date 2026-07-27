@@ -32,6 +32,12 @@ const RUMBLE_WIDTH_RATIO = 1.1;
  *  behind the canvas along one edge. */
 const SHAKE_BLEED_PX = 48;
 
+/** How many near segments get corduroy grooming lines. Past this the lines are
+ *  sub-pixel and read as shimmer rather than texture — the Nyquist limit, and
+ *  the reason this is capped rather than drawn to the horizon. */
+const CORDUROY_SEGMENTS = 18;
+const CORDUROY_LINES = 9;
+
 /**
  * Per-drawn-segment horizontal offset walk data (design-spec §3.3), recorded so
  * entity projection (§3.5) can interpolate an entity's curve offset between the
@@ -248,11 +254,30 @@ export class RoadRenderer {
         mix(dark ? RUMBLE_DARK : RUMBLE_LIGHT, fogColor, fog)
       );
 
+      const surface = mix(dark ? SNOW_DARK : SNOW_LIGHT, fogColor, fog);
       this.fillTrapezoid(
         near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
         far.screenX - far.screenW, far.screenX + far.screenW, far.screenY,
-        mix(dark ? SNOW_DARK : SNOW_LIGHT, fogColor, fog)
+        surface
       );
+
+      // Groomer corduroy — the parallel ridges a piste basher leaves. Drawn
+      // only for the nearest segments: beyond that the lines fall below a
+      // pixel and turn into shimmer, and drawing them the whole way would add
+      // ~800 fill paths a frame on top of the existing ~300 for no visible
+      // gain. This is a LOD, not a shortcut.
+      if (i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
+        const fade = 1 - i / CORDUROY_SEGMENTS;
+        const groove = mix(surface, SNOW.shadow, 0.16 * fade);
+        for (let g = 1; g < CORDUROY_LINES; g++) {
+          const t = g / CORDUROY_LINES - 0.5;
+          this.fillTrapezoid(
+            near.screenX + t * near.screenW * 2 - 1, near.screenX + t * near.screenW * 2 + 1, near.screenY,
+            far.screenX + t * far.screenW * 2 - 0.5, far.screenX + t * far.screenW * 2 + 0.5, far.screenY,
+            groove
+          );
+        }
+      }
     }
 
     return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
