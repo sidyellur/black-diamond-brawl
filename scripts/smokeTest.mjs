@@ -134,6 +134,44 @@ const probe = await samplePng(midShot);
 const skyVsRoad = deltaL(probe.skyBand, probe.nearRoad);
 check('frame is not blank', skyVsRoad > 1.0, `sky↔road ΔL* ${skyVsRoad.toFixed(1)}`);
 
+// Entity scale sanity. This is the regression test for the projection
+// singularity: rivals used to draw over 1600px wide on a 960px screen, and
+// combat resolved entirely inside that blow-up. Reads real runtime state
+// rather than pixels, via the harness hook in main.ts.
+const scales = await page.evaluate(() => {
+  const g = window.__game;
+  const sc = g && g.scene.getScene('RaceScene');
+  if (!sc || !sc.playerSprite) return null;
+  const riders = (sc.aiRiderRenderer?.pool || []).filter((s) => s.visible).map((s) => s.displayWidth);
+  return { player: sc.playerSprite.displayWidth, riders };
+});
+
+if (scales) {
+  const maxW = Math.max(scales.player, ...(scales.riders.length ? scales.riders : [0]));
+  check('no entity exceeds 42% of screen width', maxW <= 960 * 0.42 + 1, `widest ${maxW.toFixed(0)}px`);
+  check('player is on screen at a sane size', scales.player > 20 && scales.player < 300, `${scales.player.toFixed(0)}px`);
+} else {
+  check('runtime scale probe', false, 'could not read RaceScene state');
+}
+
+// Drive into the result screen so the finish/wipeout path is exercised too —
+// a crash there would otherwise never show up in this gate.
+await page.waitForTimeout(1000);
+const reachedResult = await page.evaluate(async () => {
+  const g = window.__game;
+  const sc = g && g.scene.getScene('RaceScene');
+  if (!sc || !sc.player) return 'no-scene';
+  sc.player.crashIntoTree(); // run-ending wipeout -> ResultScene
+  return 'triggered';
+});
+await page.waitForTimeout(1200);
+await page.screenshot({ path: `${OUT}/04-result.png` });
+const onResult = await page.evaluate(() => {
+  const g = window.__game;
+  return g.scene.isActive('ResultScene');
+});
+check('wipeout reaches the result screen', reachedResult === 'triggered' && onResult, String(onResult));
+
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | ') || 'clean');
 
 await browser.close();

@@ -19,6 +19,25 @@ art sprites for riders, obstacles, and pickups.
 - [Implementation plan](docs/implementation-plan.md)
 - [Task list](docs/tasks.md)
 
+## Development
+
+```bash
+npm install
+npm run dev        # play at http://localhost:5173
+npm run dev        # then open /?spritelab=1 for the sprite contact sheet
+npm run verify     # the gate: build + palette + solvability + headless visual smoke test
+npm run lab        # render the sprite sheet headless and check outline contrast
+```
+
+All art and atmosphere is **generated in code at boot** — there are no image
+files in this repository. Colour is governed by `src/render/palette.ts` and
+enforced by `npm run verify:palette`, which fails the build if any
+gameplay-relevant edge drops below ΔL* 12 or any sprite outline below ΔL* 25
+against the snow behind it.
+
 ## Status
 
-Design/planning complete — implementation not yet started.
+v1 complete (all 9 phases). v2 visual overhaul complete: projection fixes,
+palette system, atmospheric depth, redrawn sprites, contact shadows, impact
+feedback and styled screens. See issue #12 for the plan and what is
+deliberately deferred.

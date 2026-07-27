@@ -1,3 +1,13 @@
+> **SUPERSEDED — kept as the fallback path.** v2 shipped with all art generated
+> in code (see `src/render/palette.ts`, `src/render/pixel.ts`, `src/entities/*Art.ts`)
+> rather than sourced from CC0 packs. The deciding factor was this plan's own
+> accepted gap: no free snowboarder sprite exists, so it would have shipped a
+> **skier** as the player character of a snowboarding game. Generating the art
+> removed that constraint entirely.
+>
+> This document is retained, not deleted: if the procedural riders had failed the
+> silhouette bar in the sprite lab, the pack route was the documented fallback.
+
 # Black Diamond Brawl v2 — Visual Polish Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
