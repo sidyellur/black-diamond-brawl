@@ -277,6 +277,20 @@ export class RaceScene extends Phaser.Scene {
       return; // frozen: ResultScene has already been started this frame
     }
 
+    // Hit-stop: freeze the SIMULATION for a few frames after an impact while
+    // rendering and VFX keep running. Those frozen frames are what give a
+    // collision its sense of mass — without them the rider simply continues
+    // through the hit and it registers as a number changing.
+    //
+    // Only the world stops. The juice timer, particles and camera shake all
+    // keep advancing, so the freeze reads as impact rather than as a stall,
+    // and the HUD stays live on its own camera.
+    if (this.juice.frozen) {
+      this.juice.tick(delta);
+      this.juice.renderSpeed(this.player.speed, time);
+      return;
+    }
+
     // Stamps this frame's clock BEFORE player.update() — a lane-shift press
     // can synchronously resolve a shove via `Player.shoveInterceptor`, which
     // needs a fresh `nowMs` even though `CombatSystem.update()` itself must
@@ -348,7 +362,12 @@ export class RaceScene extends Phaser.Scene {
     // position ONCE and hand off to ResultScene. Checked before the finish
     // check below since a tree collision can never itself put the player
     // past the finish line.
-    if (this.player.wipedOut) {
+    // Gated on the hit-stop still running: a tree wipeout sets `wipedOut` and
+    // triggers the heaviest impact in the game on the SAME frame, so ending
+    // the race here immediately would cut to the result screen before a
+    // single frozen frame — or any of the shake and spray — had been drawn.
+    // Holding the transition until the freeze expires lets the crash land.
+    if (this.player.wipedOut && !this.juice.frozen) {
       this.endRace(false, time);
       return;
     }

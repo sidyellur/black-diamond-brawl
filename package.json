@@ -8,8 +8,10 @@
     "preview": "vite preview",
     "verify": "node scripts/verify.mjs",
     "verify:palette": "tsx scripts/verifyPalette.ts",
+    "verify:combat": "tsx scripts/verifyCombat.ts",
     "verify:solvability": "tsx scripts/verifySolvability.ts",
     "verify:visual": "node scripts/smokeTest.mjs",
+    "measure:rocklock": "tsx scripts/measureRockLock.ts",
     "lab": "node scripts/spriteLab.mjs"
   },
   "dependencies": {

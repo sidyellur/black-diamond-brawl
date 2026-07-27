@@ -242,6 +242,15 @@ All of these are tunables in `config.ts` and expected to change during play-test
   randomness (e.g., AI bump-aggression timing during actual play) is intentionally **not**
   routed through the seeded course-generation PRNG and is not expected to be reproducible —
   the determinism guarantee covers course geometry and placement only.
+
+  **Amendment:** that remains true of normal play, but runtime randomness now goes through
+  `src/entities/runtimeRng.ts` rather than calling `Math.random()` directly. By default
+  `runtimeRandom()` *is* `Math.random()`, so play is unchanged and repeated runs of one
+  course still differ. `setDeterministicRuntime(seed)` swaps in a seeded stream, which is
+  what makes combat testable at all: an exchange is a chain of random rolls, so before
+  this a failing case could not be reproduced, let alone asserted on. Only
+  `scripts/verifyCombat.ts` and future tests call it. Cosmetic randomness (particle
+  jitter) may still use `Math.random()` directly — it cannot change an outcome.
 - The generator emits the whole track up front (1,500 segments is trivially small) by
   stitching **sections** from a pattern library: straight, gentle curve L/R, sharp curve
   L/R, S-curve, hill up, hill down, crest (up-then-down, jumpable). Each section is a run
@@ -270,6 +279,21 @@ All of these are tunables in `config.ts` and expected to change during play-test
   This is the solvability rule's "reachable lane must be clear" logic extended to the jump
   arc's landing zone — a launch can never bait the player into an unavoidable tree. Rocks
   and moguls may still appear in the landing zone: they are recoverable, not run-ending.
+- **Rock no-steer constraint (no locked-in tree kills):** a rock knocks the rider into a
+  ~1 s tumble with **no steering at all** (`ROCK_TUMBLE_MS`, §4.4). The rider who hit it
+  is by definition in that rock's lane and is committed to it for the whole window, which
+  covers ~1,650 world units — about **8.3 segments**, or 2.8 lanes' worth of steering
+  budget. So for every rock, no **tree** may be placed in that rock's lane within
+  `ROCK_LOCK_SEGMENTS` (9) downstream of it.
+
+  This is the same guarantee as the jump-reach constraint above, applied to the other
+  situation where the rider loses lateral control. It was **missing** from the original
+  placement rules, and the omission was live: measured across 200 seeds, **2.30 % of all
+  rocks** had a tree in their own lane inside the tumble window — roughly 1.8 guaranteed,
+  unavoidable run-ending deaths per course, invisible to the player and unattributable.
+  Enforced by placement (an offending tree is demoted to a rock, as with moguls) and
+  re-checked independently by `scripts/verifySolvability.ts`; `npm run measure:rocklock`
+  reproduces the original measurement.
 - **Blind landing zone:** every lane must be obstacle-free for a minimum reaction distance
   after a crest apex (**20 segments**, ≈1.3 s at `MAX_SPEED`), since a crest hides
   upcoming obstacles until the rider is over it. (20 ≥ 18 also satisfies the crest case of
@@ -369,17 +393,36 @@ This is a deliberate v1 simplification (flagged in §7).
   exchanges don't machine-gun. Knockback clamps and scoping:
   - **Road-edge clamp:** a loser already in the edge lane takes the speed loss only — no
     lane change is possible.
-  - **Tree clamp (no forced deaths):** a knockback **loser is never knocked into a lane
-    containing a tree**. If the lane in the knockback direction has a tree within the
-    immediate knockback window (~2 segments downstream of the loser's world-Z — the
-    distance covered during the knockback plus the collision window), clamp to **no lane
-    change, speed loss only**, exactly like the road-edge clamp. For a two-lane (armed)
-    knockback, the loser lands in the **farthest tree-free lane** along the knockback
-    direction (possibly staying put). Rocks and moguls remain valid knockback
+  - **Tree clamp (no forced deaths):** a knockback **loser is never knocked into — or
+    through — a lane containing a tree**. If a lane along the knockback direction has a
+    tree within `TREE_CLAMP_SEGMENTS` downstream of the loser's world-Z, clamp to **no
+    lane change, speed loss only**, exactly like the road-edge clamp. For a two-lane
+    (armed) knockback, the loser lands in the **farthest lane whose whole path is
+    tree-free** (possibly staying put). Rocks and moguls remain valid knockback
     destinations — they are recoverable, not run-ending. **This guarantees a shove loss
     can never be an unavoidable tree kill** (closing the loophole where the only clear
     lane through a tree row is occupied by a rival and losing the exchange would bounce
     the player into the tree).
+
+    Two corrections were made here after the original wording proved unenforceable in
+    practice, both now asserted by `scripts/verifyCombat.ts`:
+
+    1. **The window must cover the real escape distance.** The spec originally specified
+       ~2 segments (400 u) as "the distance covered during the knockback plus the
+       collision window". That is shorter than the loser can possibly escape in: the
+       knockback tween alone is ~360 u at speed, and a buffered escape steer needs
+       ~180 u more to reach lane clearance — ~540 u with perfect play and zero reaction
+       time. Trees between 400 u and ~1000 u were therefore unavoidable kills, which is
+       exactly what this rule exists to prevent. `TREE_CLAMP_SEGMENTS` is now **5**.
+    2. **The path matters, not just the destination.** A two-lane knockback tweens
+       *through* the lane between, and sits inside that lane's collision band long
+       enough to register a hit. Checking only the landing lane let an armed knockback
+       drag the loser straight through a tree it had carefully avoided landing on.
+
+    Both defects only ever struck AI riders while the player was the sole entity able to
+    hold a weapon (an armed player always wins, so the player was never the loser of an
+    armed exchange). They would become forced player deaths the moment rivals can be
+    armed — see the combat-depth epic.
   - **Shove-immunity scope:** immunity applies **per attacker** — an immune loser cannot
     be re-shoved by the **same** rival within the ~0.5 s window, but **can** be targeted
     by a different rival. This prevents double-dipping from one exchange without

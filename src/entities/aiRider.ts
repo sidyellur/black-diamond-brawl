@@ -15,6 +15,7 @@ import {
 import { Collidable } from './collision';
 import { Obstacle } from './obstacle';
 import { Player } from './player';
+import { runtimeRandom } from './runtimeRng';
 
 // Smoothstep eases the lane tween in/out, same curve `Player` uses.
 const smoothstep = (t: number): number => t * t * (3 - 2 * t);
@@ -80,11 +81,12 @@ export class AIRider implements Collidable {
   private stumbleMsRemaining = 0;
 
   // Combat (Task 8, design-spec §4.5 behavior 3 / §4.6). Countdown to the next
-  // bump-attempt roll — deliberately seeded from `Math.random()` (runtime
-  // randomness), never the seeded course-generation PRNG (§4.2). Timestamp of
-  // this rider's most recent shove LOSS to the player, for knockout
-  // attribution's "trees within ~2s of losing a shove" window (§4.6/§4.7).
-  private bumpCooldownMs = Math.random() * AI_BUMP_CHECK_INTERVAL_MS;
+  // bump-attempt roll — RUNTIME randomness, never the seeded
+  // course-generation PRNG (§4.2), so repeated runs of one course still
+  // differ. Routed through `runtimeRandom` rather than `Math.random` directly
+  // so the deterministic switch can cover it for tests; in normal play the
+  // two are identical.
+  private bumpCooldownMs = runtimeRandom() * AI_BUMP_CHECK_INTERVAL_MS;
   private shovedByPlayerAtMs: number | null = null;
 
   constructor(readonly params: AIRiderParams) {
@@ -281,8 +283,8 @@ export class AIRider implements Collidable {
     if (Math.abs(player.worldZ - this.worldZ) > SHOVE_Z_WINDOW) {
       return;
     }
-    if (Math.random() >= this.params.aggression) {
-      return; // aggression-weighted chance; runtime randomness, deliberately unseeded
+    if (runtimeRandom() >= this.params.aggression) {
+      return; // aggression-weighted chance; runtime randomness (see runtimeRng.ts)
     }
     this.tween = { fromLane: this._laneIndex, toLane: this._laneIndex + laneDiff, elapsedMs: 0 };
   }

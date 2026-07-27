@@ -2,6 +2,7 @@ import {
   BLIND_LANDING_SEGMENTS,
   COURSE_LENGTH_SEGMENTS,
   JUMP_REACH_EXTENDED,
+  ROCK_LOCK_SEGMENTS,
   LANE_CHANGE_SEGMENTS,
   LANES,
   OBSTACLE_ROWS_PER_100_END,
@@ -190,14 +191,23 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
 
     for (const lane of blocked) {
       let kind = pickKind(prng);
-      // Enforce the tree jump-reach constraint: a tree may not sit in a lane
-      // still inside a mogul's downstream launch window — demote it to a rock.
+      // Enforce the tree-free constraints: a tree may not sit in a lane still
+      // inside a mogul's downstream launch window, NOR inside a rock's
+      // no-steer tumble window. Both are cases where the rider is committed to
+      // one lane and cannot avoid what is ahead — demote to a rock, which is
+      // recoverable rather than run-ending.
       if (kind === 'tree' && seg <= treeForbiddenUntil[lane]) {
         kind = 'rock';
       }
       obstacles.push({ kind, lane, segIndex: seg, z: segmentCentreZ(seg) });
       if (kind === 'mogul') {
         treeForbiddenUntil[lane] = Math.max(treeForbiddenUntil[lane], seg + JUMP_REACH_EXTENDED);
+      }
+      // A rock locks steering for ~1s; a tree in the same lane inside that
+      // window is an unavoidable kill. Applied AFTER the push so a rock
+      // demoted from a tree above also establishes its own lock window.
+      if (kind === 'rock') {
+        treeForbiddenUntil[lane] = Math.max(treeForbiddenUntil[lane], seg + ROCK_LOCK_SEGMENTS);
       }
     }
 
