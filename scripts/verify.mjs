@@ -55,6 +55,7 @@ function serveDist(root, port) {
 try {
   await step('build (tsc + vite)', () => run('npm', ['run', 'build']));
   await step('palette contrast', () => run('npm', ['run', 'verify:palette']));
+  await step('combat logic', () => run('npm', ['run', 'verify:combat']));
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
 
   const PORT = 4173;

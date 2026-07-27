@@ -25,8 +25,11 @@ art sprites for riders, obstacles, and pickups.
 npm install
 npm run dev        # play at http://localhost:5173
 npm run dev        # then open /?spritelab=1 for the sprite contact sheet
-npm run verify     # the gate: build + palette + solvability + headless visual smoke test
+npm run verify     # the gate: build + palette + combat + solvability + visual smoke test
 npm run lab        # render the sprite sheet headless and check outline contrast
+
+npm run verify:combat      # headless seeded combat sim — no browser needed
+npm run measure:rocklock   # rock-tumble steering lock vs the solvability model
 ```
 
 All art and atmosphere is **generated in code at boot** — there are no image

@@ -12,6 +12,7 @@ import {
 import { AIRider } from './aiRider';
 import { Obstacle } from './obstacle';
 import { Player } from './player';
+import { runtimeRandom } from './runtimeRng';
 
 const LANE_COUNT = LANES.length;
 
@@ -214,7 +215,7 @@ export class CombatSystem {
     // edge-lane loser must be able to end up merely speed-lossed even in the
     // ambiguous case, not bounced to the only lane that happened to be open.
     const laneDiff = loserLane - winnerLane;
-    const direction: -1 | 1 = laneDiff === 0 ? (Math.random() < 0.5 ? 1 : -1) : laneDiff > 0 ? 1 : -1;
+    const direction: -1 | 1 = laneDiff === 0 ? (runtimeRandom() < 0.5 ? 1 : -1) : laneDiff > 0 ? 1 : -1;
 
     const targetLane = this.resolveKnockbackLane(loserLane, direction, maxShift, loserZ);
 
@@ -248,7 +249,21 @@ export class CombatSystem {
       if (target < 0 || target >= LANE_COUNT) {
         continue;
       }
-      if (!this.hasTreeDownstream(target, fromZ)) {
+      // Every lane the knockback CROSSES has to be clear, not just where it
+      // lands. A 2-lane knockback tweens continuously through the lane in
+      // between, and sits inside that lane's collision band (`COLLISION_LANE_
+      // FRACTION`) for roughly 45ms — comfortably longer than the
+      // `COLLISION_Z_WINDOW` needs to register a hit. Checking only the
+      // destination meant an armed knockback could drag the loser straight
+      // through a tree it had carefully avoided landing on.
+      let pathClear = true;
+      for (let step = 1; step <= shift; step++) {
+        if (this.hasTreeDownstream(fromLane + direction * step, fromZ)) {
+          pathClear = false;
+          break;
+        }
+      }
+      if (pathClear) {
         return target;
       }
     }

@@ -97,6 +97,26 @@ export const COLLISION_LANE_FRACTION = 0.2;
 // Collision outcomes (design-spec §4.4).
 export const ROCK_SPEED_FACTOR = 0.3; // speed drops to ~30% of current
 export const ROCK_TUMBLE_MS = 1000; // ~1s no-steer tumble
+
+/**
+ * Segments a rock hit leaves the rider unable to steer, used as a placement
+ * constraint exactly like a mogul's jump reach.
+ *
+ * A rock knocks the rider into a ~1s tumble with NO steering. From full speed
+ * that covers ~1650 world units — about 8.3 segments, or 2.8 lanes' worth of
+ * steering budget. A player who hits a rock is by definition in that rock's
+ * lane and is committed to it for the whole window.
+ *
+ * That made a tree in the same lane inside the window an unavoidable
+ * run-ending death. Measured before the fix (`npm run measure:rocklock`):
+ * **2.30% of all rocks**, roughly 1.8 guaranteed kills per course.
+ *
+ * The placement pass now treats this the same way it already treats a mogul's
+ * landing zone — a tree that would fall inside the window is demoted to a
+ * rock — so the case cannot be generated. 9 segments gives a little headroom
+ * over the measured 8.3.
+ */
+export const ROCK_LOCK_SEGMENTS = 9;
 export const ROCK_IMMUNITY_MS = 1000; // ~1s collision immunity after recovery
 export const MOGUL_SPEED_FACTOR = 0.75; // ~25% speed loss on a ridden mogul
 export const MOGUL_STUMBLE_MS = 400; // brief wobble, no control loss
@@ -136,9 +156,29 @@ export const SHOVE_Z_WINDOW = SEGMENT_LENGTH * 1;
 // Per-attacker-pair immunity window after an exchange resolves, so the same
 // pairing can't machine-gun re-trigger (spec §4.6).
 export const SHOVE_IMMUNITY_MS = 500;
-// Tree-clamp lookahead: a knockback destination lane is rejected if a tree
-// sits within this many segments downstream of the loser's world-Z (spec §4.6).
-export const TREE_CLAMP_SEGMENTS = 2;
+/**
+ * Tree-clamp lookahead: a knockback destination lane is rejected if a tree
+ * sits within this many segments downstream of the loser's world-Z (spec
+ * §4.6).
+ *
+ * Sized from the distance a knocked rider actually needs to get clear, not
+ * picked round. At `MAX_SPEED` after a shove's speed loss (~2400 u/s):
+ *
+ *   knockback tween (`LANE_TWEEN_MS` 150ms)          ~360 u
+ *   buffered escape steer, half a tween to clearance ~180 u
+ *   ------------------------------------------------------
+ *   best case, perfect play, zero reaction time      ~540 u
+ *
+ * At 2 segments the window was 400 u — *shorter than the best possible
+ * escape* — so trees between 400 u and roughly 1000 u in the destination lane
+ * were unavoidable kills, which is precisely what §4.6 promises cannot
+ * happen. 5 segments (1000 u) covers the escape plus realistic reaction time.
+ *
+ * `scripts/verifyCombat.ts` asserts this stays above the computed escape
+ * distance, so shrinking it fails the build rather than silently
+ * reintroducing forced deaths.
+ */
+export const TREE_CLAMP_SEGMENTS = 5;
 // A rival that trees within this many ms of losing a shove to the player
 // counts as the player's knockout (spec §4.6/§4.7).
 export const KNOCKOUT_WINDOW_MS = 2000;

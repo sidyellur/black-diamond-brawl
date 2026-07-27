@@ -22,6 +22,7 @@
 import {
   BLIND_LANDING_SEGMENTS,
   JUMP_REACH_EXTENDED,
+  ROCK_LOCK_SEGMENTS,
   LANE_CHANGE_SEGMENTS,
   LANES
 } from '../src/config';
@@ -165,6 +166,23 @@ function verifySeed(seed: number): SeedResult {
     }
   }
 
+  // Rock no-steer windows: no tree in the same lane within
+  // (rockSeg, rockSeg+ROCK_LOCK_SEGMENTS]. A rock hit locks steering for ~1s,
+  // and the rider is by definition in the rock's own lane — so a tree in that
+  // lane inside the window is an unavoidable run-ending death, with nothing
+  // the player can do from the moment the rock lands. Same shape of guarantee
+  // as the mogul jump-reach check above.
+  for (const rock of track.obstacles) {
+    if (rock.kind !== 'rock') {
+      continue;
+    }
+    for (const tree of trees) {
+      if (tree.lane === rock.lane && tree.segIndex > rock.segIndex && tree.segIndex <= rock.segIndex + ROCK_LOCK_SEGMENTS) {
+        return { ok: false, reason: `tree at seg ${tree.segIndex} lane ${tree.lane} inside rock (seg ${rock.segIndex}) no-steer window`, minReachable, rowCount: rows.length };
+      }
+    }
+  }
+
   return { ok: true, minReachable, rowCount: rows.length };
 }
 
@@ -204,7 +222,7 @@ function main(): void {
     `SOLVABILITY OK: ${SEED_COUNT}/${SEED_COUNT} seeds passed (seeds ${SEED_START}..${lastSeed}).\n` +
       `  total obstacle rows checked: ${totalRows}\n` +
       `  global minimum reachable clear-lane count: ${globalMinReachable} (1 = guarantee is binding, not trivially satisfied)\n` +
-      `  checks per seed: >=1 clear lane/row, reachable clear lane/row (crest-lock aware), crest blind zones clear, mogul jump-reach tree-free, same-seed determinism`
+      `  checks per seed: >=1 clear lane/row, reachable clear lane/row (crest-lock aware), crest blind zones clear, mogul jump-reach tree-free, rock no-steer tree-free, same-seed determinism`
   );
 }
 
