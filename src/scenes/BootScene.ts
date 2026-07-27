@@ -25,6 +25,13 @@ export class BootScene extends Phaser.Scene {
     // here rather than re-filled every frame.
     generateSkyTexture(this);
 
+    // `?spritelab=1` opens the sprite contact sheet instead of the game — the
+    // authoring feedback loop for all generated art (see scripts/spriteLab.mjs).
+    if (new URLSearchParams(window.location.search).has('spritelab')) {
+      this.scene.start('SpriteLabScene');
+      return;
+    }
+
     // Transition to the title screen (design-spec §2/§4.8 scene structure).
     this.scene.start('TitleScene');
   }

@@ -3,6 +3,7 @@ import { SCREEN_H, SCREEN_W } from './config';
 import { BootScene } from './scenes/BootScene';
 import { RaceScene } from './scenes/RaceScene';
 import { ResultScene } from './scenes/ResultScene';
+import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { TitleScene } from './scenes/TitleScene';
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -27,7 +28,7 @@ const config: Phaser.Types.Core.GameConfig = {
   // Disabling it keeps sprites and road in the same coordinate space.
   pixelArt: true,
   roundPixels: false,
-  scene: [BootScene, TitleScene, RaceScene, ResultScene]
+  scene: [BootScene, TitleScene, RaceScene, ResultScene, SpriteLabScene]
 };
 
 const game = new Phaser.Game(config);

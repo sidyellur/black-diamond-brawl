@@ -9,7 +9,8 @@
     "verify": "node scripts/verify.mjs",
     "verify:palette": "tsx scripts/verifyPalette.ts",
     "verify:solvability": "tsx scripts/verifySolvability.ts",
-    "verify:visual": "node scripts/smokeTest.mjs"
+    "verify:visual": "node scripts/smokeTest.mjs",
+    "lab": "node scripts/spriteLab.mjs"
   },
   "dependencies": {
     "phaser": "^3.90.0"
