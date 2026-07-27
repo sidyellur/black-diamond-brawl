@@ -1,18 +1,19 @@
 import Phaser from 'phaser';
-import { Camera, projectEntity } from '../render/projectEntity';
+import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
+import { entityDepth } from '../render/depth';
+import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
 import { AIRider } from './aiRider';
 import { AI_RIDER_TEXTURE_KEYS, PLAYER_FRAME_SIZE, PLAYER_FRAMES } from './playerSprite';
 
 // On-screen width of a rider as a fraction of the projected road half-width
-// at its depth — matches the rough footprint of the player's own board.
-const WIDTH_FRACTION = 0.4;
+// at its depth. Shared verbatim with the player (see RaceScene's
+// PLAYER_WIDTH_FRACTION) — the player and its rivals are the same kind of
+// object, so any divergence here shows up immediately as rivals that dwarf
+// or shrink against the rider you control.
+const WIDTH_FRACTION = 0.13;
 
-// Same depth space `ObstacleRenderer` uses (DEPTH_BASE - worldZ), so riders
-// and obstacles depth-sort together (nearer draws on top) instead of one
-// renderer's sprites always covering the other's regardless of actual depth.
-const DEPTH_BASE = 0;
 
 /**
  * Draws all 4 AI riders each frame (design-spec §3.5/§3.6/§4.5), reusing the
@@ -29,9 +30,14 @@ const DEPTH_BASE = 0;
 export class AIRiderRenderer {
   private readonly pool: Phaser.GameObjects.Sprite[] = [];
   private readonly scene: Phaser.Scene;
+  /** Called for every sprite the pool creates. The pool grows lazily
+   *  mid-race, so a UI camera must be told to ignore each new sprite as it
+   *  appears or it renders twice — once in the world, once over the HUD. */
+  private readonly onCreate?: (obj: Phaser.GameObjects.GameObject) => void;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, onCreate?: (obj: Phaser.GameObjects.GameObject) => void) {
     this.scene = scene;
+    this.onCreate = onCreate;
   }
 
   render(riders: AIRider[], track: Segment[], drawnSegments: Map<number, DrawnSegment>, camera: Camera): void {
@@ -58,12 +64,15 @@ export class AIRiderRenderer {
               : PLAYER_FRAMES.CENTER;
 
       sprite.setFrame(frame);
-      const widthPx = projected.screenW * WIDTH_FRACTION;
+      const widthPx = softClampWidth(
+        projected.screenW * WIDTH_FRACTION,
+        SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
+      );
       sprite.setScale(widthPx / PLAYER_FRAME_SIZE);
       sprite.setPosition(projected.screenX, projected.screenY);
       // Nearer (smaller world-Z) -> higher depth -> drawn on top, same
       // far-to-near convention `ObstacleRenderer` uses.
-      sprite.setDepth(DEPTH_BASE - rider.worldZ);
+      sprite.setDepth(entityDepth(rider.worldZ));
       sprite.setVisible(true);
     });
   }
@@ -74,6 +83,7 @@ export class AIRiderRenderer {
       sprite = this.scene.add.sprite(0, 0, AI_RIDER_TEXTURE_KEYS[paletteIndex], PLAYER_FRAMES.CENTER);
       sprite.setOrigin(0.5, 1);
       this.pool[index] = sprite;
+      this.onCreate?.(sprite);
     }
     return sprite;
   }

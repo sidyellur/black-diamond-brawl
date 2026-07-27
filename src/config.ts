@@ -13,6 +13,49 @@ export const SCREEN_H = 540;
 export const ROAD_WIDTH = 2000; // world-space road half-width
 export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surface
 
+/**
+ * How far BEHIND the player the camera sits, in world units.
+ *
+ * This is load-bearing, not a tuning knob. The camera used to sit exactly on
+ * the player (`camZ = player.worldZ`), which put the player at `dz = 0` — and
+ * `project()` returns null for `dz <= 0`, so the player could not be projected
+ * at all and had to be drawn as a fixed-size screen-space sprite that shared
+ * no scale model with anything else in the world.
+ *
+ * Worse, it made the region right around the player a singularity: a rival at
+ * the player's exact Z vanished, and one world unit ahead projected ~322,000px
+ * wide. Since `SHOVE_Z_WINDOW` is one segment, *every* combat exchange
+ * resolved inside that blow-up, which is why rivals appeared as screen-filling
+ * boxes whenever they got close enough to fight.
+ *
+ * Pulling the camera back means the player projects like every other entity
+ * and the nearest reachable `dz` is bounded, so entity scale is bounded too.
+ * The classic relation is `playerZ = cameraHeight * cameraDepth`, which here
+ * is ~839 — but that places the player exactly at the bottom screen edge,
+ * where the sprite is half cut off. This is pulled back further so the rider
+ * sits fully on screen at y~459 with the slope readable ahead of it.
+ */
+export const CAMERA_BACK_Z = 1200;
+
+/**
+ * World-Z the player starts at. Equal to `CAMERA_BACK_Z` so the camera begins
+ * at exactly 0 rather than behind the start of the track array — a negative
+ * `camZ` would index the segment walk out of bounds. Riders stagger around
+ * this value rather than around 0 (see `spawnAIRiders`), so the start-line
+ * layout is unchanged.
+ */
+export const PLAYER_START_Z = CAMERA_BACK_Z;
+
+/**
+ * Hard ceiling on how wide any single world sprite may draw, as a fraction of
+ * screen width. `CAMERA_BACK_Z` bounds the near-field blow-up on its own; this
+ * is a guard rail for anything that still ends up closer than expected (a
+ * rival mid-shove, an obstacle at the very edge of the near plane).
+ *
+ * Applied as a soft knee rather than a hard `min()` — see `softClampScale`.
+ */
+export const MAX_ENTITY_SCREEN_FRACTION = 0.42;
+
 // Lanes
 export const LANES = [-0.8, -0.4, 0, 0.4, 0.8];
 

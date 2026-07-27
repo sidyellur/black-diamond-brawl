@@ -1,22 +1,36 @@
 import Phaser from 'phaser';
-import { DRAW_DISTANCE, SCREEN_W, SEGMENT_LENGTH } from '../config';
+import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
+import { RUMBLE, SNOW, mix } from './palette';
 import { project } from './project';
 
-// Snow surface shading, alternating by segment.colorBand.
-const SNOW_LIGHT = 0xf5f9ff;
-const SNOW_DARK = 0xe4ecf7;
+// All surface colours now come from the shared palette rather than being
+// declared here, so the road and the sprites standing on it are guaranteed to
+// be shaded by the same system. The piste/off-piste separation is held above
+// MIN_GAMEPLAY_DELTA_L by `verify:palette` — before that gate existed the
+// track edge sat at ΔL* 5, which is why it was so hard to see where the
+// raceable surface ended.
+const SNOW_LIGHT = SNOW.packed;
+const SNOW_DARK = SNOW.packedAlt;
 
-// Off-piste snow, alternating by segment.colorBand.
-const OFF_PISTE_LIGHT = 0xdcecff;
-const OFF_PISTE_DARK = 0xcbe0f7;
+const OFF_PISTE_LIGHT = SNOW.offPiste;
+const OFF_PISTE_DARK = SNOW.offPisteAlt;
 
-// Edge rumble strips, alternating by segment.colorBand.
-const RUMBLE_LIGHT = 0xc0392b;
-const RUMBLE_DARK = 0xffffff;
+// The rumble alternation used to be red against pure white — a 4x asymmetry
+// that read as flickering dashes rather than a strip, because only one half
+// of the pattern carried any weight against the snow behind it. Both halves
+// are now warning-coloured and differ in value instead.
+const RUMBLE_LIGHT = RUMBLE.warn;
+const RUMBLE_DARK = RUMBLE.warnAlt;
 
 // Rumble strip half-width as a multiple of the road's projected half-width.
 const RUMBLE_WIDTH_RATIO = 1.1;
+
+/** How far the off-piste fill overshoots each screen edge. The world is drawn
+ *  in screen space with camera scroll pinned at 0, so a `camera.shake()` on
+ *  impact translates the whole view and would otherwise reveal the black page
+ *  behind the canvas along one edge. */
+const SHAKE_BLEED_PX = 48;
 
 /**
  * Per-drawn-segment horizontal offset walk data (design-spec §3.3), recorded so
@@ -46,6 +60,28 @@ export interface DrawnSegment {
 export interface RenderResult {
   clippedSegments: Set<number>;
   drawnSegments: Map<number, DrawnSegment>;
+  /**
+   * Screen-Y of the highest (numerically smallest) road edge drawn this frame
+   * — i.e. where the snow actually stops.
+   *
+   * The backdrop cannot be anchored to a constant horizon, because there
+   * isn't one: on flat ground the road tops out around y=281, climbing a rise
+   * it can cover the whole screen, and cresting a hill the clip terminates the
+   * draw early and the road can stop as low as y=320+. Anchoring mountains to
+   * a fixed line would leave them floating over a gap of bare sky on every
+   * crest — and crests are a core feature of the generator. The haze band is
+   * drawn from this value instead, so the join is seamless by construction.
+   *
+   * `SCREEN_H` when no road was drawn at all.
+   */
+  topScreenY: number;
+  /**
+   * Accumulated horizontal curve offset at the far end of the drawn road.
+   * Parallax layers shift by a depth-scaled fraction of this so the backdrop
+   * swings with the track through a bend instead of sitting there like
+   * wallpaper.
+   */
+  farCurveOffset: number;
 }
 
 /**
@@ -69,12 +105,17 @@ export class RoadRenderer {
     this.graphics = scene.add.graphics();
   }
 
+  /** See `SkyRenderer.displayObjects`. */
+  get displayObjects(): Phaser.GameObjects.GameObject[] {
+    return [this.graphics];
+  }
+
   /** Sets the road graphics' render depth (design-spec §3.6 render order). */
   setDepth(depth: number): void {
     this.graphics.setDepth(depth);
   }
 
-  render(track: Segment[], camX: number, camY: number, camZ: number): RenderResult {
+  render(track: Segment[], camX: number, camY: number, camZ: number, fogColor: number): RenderResult {
     this.graphics.clear();
 
     const clippedSegments = new Set<number>();
@@ -82,8 +123,11 @@ export class RoadRenderer {
     const drawnSegments = new Map<number, DrawnSegment>();
     this.drawnSegments = drawnSegments;
 
+    let topScreenY = SCREEN_H;
+    let farCurveOffset = 0;
+
     if (track.length === 0) {
-      return { clippedSegments, drawnSegments };
+      return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
     }
 
     const len = track.length;
@@ -166,15 +210,34 @@ export class RoadRenderer {
         continue;
       }
       minScreenY = far.screenY;
+      if (far.screenY < topScreenY) {
+        topScreenY = far.screenY;
+        farCurveOffset = farOffsetX;
+      }
 
       const dark = segment.colorBand === 0;
 
+      // Aerial perspective. Distant snow loses contrast and drifts toward the
+      // colour of the air in front of it — without this the road holds full
+      // saturation right up to the point it stops, which is what made the far
+      // edge read as a hard seam pasted onto the sky rather than as distance.
+      //
+      // The ramp is deliberately non-linear: haze accumulates slowly across
+      // the near half and then quickly, matching how the eye reads depth. The
+      // test is not "can I see haze" but "does a surface at distance still
+      // keep its own local contrast" — hence the 0.82 ceiling, which leaves
+      // far geometry legible instead of dissolving it into flat fog.
+      const distanceT = i / DRAW_DISTANCE;
+      const fog = Math.min(0.82, Math.pow(distanceT, 1.7) * 1.15);
+
       // Off-piste fills the full screen width behind the road (unaffected by
       // the curve offset).
+      // Off-piste bleeds past both screen edges so a camera shake on impact
+      // cannot expose the black page behind the canvas.
       this.fillTrapezoid(
-        0, SCREEN_W, near.screenY,
-        0, SCREEN_W, far.screenY,
-        dark ? OFF_PISTE_DARK : OFF_PISTE_LIGHT
+        -SHAKE_BLEED_PX, SCREEN_W + SHAKE_BLEED_PX, near.screenY,
+        -SHAKE_BLEED_PX, SCREEN_W + SHAKE_BLEED_PX, far.screenY,
+        mix(dark ? OFF_PISTE_DARK : OFF_PISTE_LIGHT, fogColor, fog)
       );
 
       const nearRumbleW = near.screenW * RUMBLE_WIDTH_RATIO;
@@ -182,17 +245,17 @@ export class RoadRenderer {
       this.fillTrapezoid(
         near.screenX - nearRumbleW, near.screenX + nearRumbleW, near.screenY,
         far.screenX - farRumbleW, far.screenX + farRumbleW, far.screenY,
-        dark ? RUMBLE_DARK : RUMBLE_LIGHT
+        mix(dark ? RUMBLE_DARK : RUMBLE_LIGHT, fogColor, fog)
       );
 
       this.fillTrapezoid(
         near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
         far.screenX - far.screenW, far.screenX + far.screenW, far.screenY,
-        dark ? SNOW_DARK : SNOW_LIGHT
+        mix(dark ? SNOW_DARK : SNOW_LIGHT, fogColor, fog)
       );
     }
 
-    return { clippedSegments, drawnSegments };
+    return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
   }
 
   private fillTrapezoid(

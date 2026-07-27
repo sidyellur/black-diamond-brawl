@@ -8,6 +8,7 @@ import {
   AI_RIDER_COUNT,
   AI_START_LANES,
   AI_START_Z_OFFSETS_SEGMENTS,
+  PLAYER_START_Z,
   SEGMENT_LENGTH
 } from '../config';
 import { AIRiderParams } from '../entities/aiRider';
@@ -44,7 +45,12 @@ export function spawnAIRiders(prng: Prng): AIRiderParams[] {
       aggression,
       reactionDistanceSegments,
       startLane: AI_START_LANES[i],
-      startZOffset: AI_START_Z_OFFSETS_SEGMENTS[i] * SEGMENT_LENGTH,
+      // Staggered around the player's start position, not around world-Z 0 —
+      // the player now starts at PLAYER_START_Z so the trailing camera begins
+      // at 0. Adding it here keeps the same relative start-line layout (two
+      // rivals just behind, two just ahead) rather than putting the whole
+      // pack four segments behind the player.
+      startZOffset: PLAYER_START_Z + AI_START_Z_OFFSETS_SEGMENTS[i] * SEGMENT_LENGTH,
       paletteIndex: i
     });
   }

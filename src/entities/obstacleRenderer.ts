@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { Camera, projectEntity } from '../render/projectEntity';
+import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
+import { entityDepth } from '../render/depth';
+import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
 import { obstacleLaneFraction, Obstacle, ObstacleKind } from './obstacle';
@@ -13,10 +15,6 @@ const WIDTH_FRACTION: Record<ObstacleKind, number> = {
   mogul: 0.5
 };
 
-// Depth kept below the player sprite (RaceScene sets the player far above this)
-// and above the road/banner graphics. Nearer obstacles (smaller world-Z) get a
-// larger depth so they draw on top — the far-to-near sort of §3.6 step 3.
-const DEPTH_BASE = 0;
 
 /**
  * Draws all visible obstacles each frame (design-spec §3.5/§3.6). Pools Phaser
@@ -28,9 +26,14 @@ const DEPTH_BASE = 0;
 export class ObstacleRenderer {
   private readonly pool: Phaser.GameObjects.Sprite[] = [];
   private readonly scene: Phaser.Scene;
+  /** Called for every sprite the pool creates. The pool grows lazily
+   *  mid-race, so a UI camera must be told to ignore each new sprite as it
+   *  appears or it renders twice — once in the world, once over the HUD. */
+  private readonly onCreate?: (obj: Phaser.GameObjects.GameObject) => void;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, onCreate?: (obj: Phaser.GameObjects.GameObject) => void) {
     this.scene = scene;
+    this.onCreate = onCreate;
   }
 
   render(
@@ -56,11 +59,14 @@ export class ObstacleRenderer {
       const sprite = this.acquire(used++);
       sprite.setFrame(OBSTACLE_FRAMES[obstacle.kind]);
       // Origin bottom-centre plants the base on the projected road surface.
-      const widthPx = projected.screenW * WIDTH_FRACTION[obstacle.kind];
+      const widthPx = softClampWidth(
+        projected.screenW * WIDTH_FRACTION[obstacle.kind],
+        SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
+      );
       sprite.setScale(widthPx / OBSTACLE_FRAME_SIZE);
       sprite.setPosition(projected.screenX, projected.screenY);
       // Nearer (smaller world-Z) → higher depth → drawn on top (far-to-near).
-      sprite.setDepth(DEPTH_BASE - obstacle.z);
+      sprite.setDepth(entityDepth(obstacle.z));
       sprite.setVisible(true);
     }
 
@@ -76,6 +82,7 @@ export class ObstacleRenderer {
       sprite = this.scene.add.sprite(0, 0, OBSTACLE_TEXTURE_KEY, OBSTACLE_FRAMES.tree);
       sprite.setOrigin(0.5, 1);
       this.pool[index] = sprite;
+      this.onCreate?.(sprite);
     }
     return sprite;
   }

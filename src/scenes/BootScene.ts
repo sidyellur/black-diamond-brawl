@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { generateObstacleSpriteSheet } from '../entities/obstacleSprites';
 import { generatePickupSpriteSheet } from '../entities/pickupSprite';
 import { generateAIRiderSpriteSheets, generatePlayerSpriteSheet } from '../entities/playerSprite';
+import { generateSkyTexture } from '../render/SkyRenderer';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -20,6 +21,9 @@ export class BootScene extends Phaser.Scene {
     generateAIRiderSpriteSheets(this);
     generateObstacleSpriteSheet(this);
     generatePickupSpriteSheet(this);
+    // The sky gradient depends only on screen height, so it is baked once
+    // here rather than re-filled every frame.
+    generateSkyTexture(this);
 
     // Transition to the title screen (design-spec §2/§4.8 scene structure).
     this.scene.start('TitleScene');
