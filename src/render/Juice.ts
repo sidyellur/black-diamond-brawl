@@ -130,10 +130,20 @@ export class Juice {
   }
 
   /** A landed shove. Sparks plus a short, sharp shake — distinct from a
-   *  collision so the two never feel like the same event. */
-  combatHit(x: number, y: number): void {
-    this.sparks.emitParticleAt(x, y, 12);
-    this.burst.emitParticleAt(x, y, 6);
+   *  collision so the two never feel like the same event.
+   *
+   *  `at` is the STRUCK rider's projected position — impact feedback belongs
+   *  on the rider who was hit, not the attacker. Pass `null` when the rider
+   *  can't be projected this frame (behind the camera, beyond draw distance,
+   *  crest-clipped — a knockout event can arrive seconds after the shove,
+   *  with the treed rival long out of view): the screen-space feedback,
+   *  shake and hit-stop, still plays, but no particles are emitted at a
+   *  stale or meaningless position. */
+  combatHit(at: { x: number; y: number } | null): void {
+    if (at) {
+      this.sparks.emitParticleAt(at.x, at.y, 12);
+      this.burst.emitParticleAt(at.x, at.y, 6);
+    }
     this.worldCam.shake(110, 0.008);
     this.hitStopMs = 55;
   }

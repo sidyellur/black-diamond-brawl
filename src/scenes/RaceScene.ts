@@ -343,12 +343,11 @@ export class RaceScene extends Phaser.Scene {
     // airborne — unlike obstacles, never gated on `player.airborne`.
     collectPickups(this.player, this.pickups);
 
-    // Combat feedback. `ScoreTracker.update()` drains `combat.events`, so
-    // this has to read them first — a landed shove previously changed a HUD
-    // number and produced no visual response whatsoever.
-    if (this.combat.events.length > 0) {
-      this.juice.combatHit(this.playerSprite.x, this.playerSprite.y - this.playerSprite.displayHeight * 0.5);
-    }
+    // Combat feedback is emitted AFTER the render pass (`emitCombatFeedback`)
+    // so the struck rival can be projected with THIS frame's offset-walk
+    // data — but the riders must be captured here, because
+    // `ScoreTracker.update()` below drains `combat.events`.
+    const struckRiders = this.combat.events.map((event) => event.rider);
 
     // Collision feedback, fired on state TRANSITIONS so neither the collision
     // system nor combat needs to know anything is watching.
@@ -428,6 +427,7 @@ export class RaceScene extends Phaser.Scene {
       this.shadows
     );
     this.updatePlayerSprite(camX, camY, camZ, result.drawnSegments);
+    this.emitCombatFeedback(struckRiders, camX, camY, camZ, result.drawnSegments);
     this.shadows.end();
 
     // Carve spray off the board edge, and speed lines whose intensity tracks
@@ -553,6 +553,43 @@ export class RaceScene extends Phaser.Scene {
     );
     if (ground) {
       this.shadows.draw(ground.screenX, ground.screenY, widthPx, this.player.jumpArcHeight);
+    }
+  }
+
+  /**
+   * Combat impact feedback, at the STRUCK rider's position.
+   *
+   * This used to fire at the player's sprite — sparks appeared on the
+   * attacker rather than on the rival who was hit, exactly backwards for an
+   * attack (a #13 regression; the #17 prerequisite). Reading the rival's
+   * pooled sprite would still be wrong in two edge cases: sprite positions
+   * are a frame stale, and a rider whose projection was null last frame
+   * (crest-clipped, or a knockout event firing seconds after the shove with
+   * the treed rival far behind the camera) holds a stale-or-garbage position
+   * with `visible = false`. So the rider is re-projected fresh with this
+   * frame's data; if that fails, `Juice.combatHit(null)` plays the shake and
+   * hit-stop without emitting particles somewhere meaningless.
+   */
+  private emitCombatFeedback(
+    struckRiders: AIRider[],
+    camX: number,
+    camY: number,
+    camZ: number,
+    drawnSegments: Map<number, DrawnSegment>
+  ): void {
+    for (const rider of struckRiders) {
+      const projected = projectEntity(rider.laneOffsetFraction, rider.worldZ, this.track, drawnSegments, {
+        x: camX,
+        y: camY,
+        z: camZ
+      });
+      // Mid-body: sprites are square with a bottom-centre origin, so half the
+      // drawn width up from the base. Same width fraction the renderer uses.
+      this.juice.combatHit(
+        projected
+          ? { x: projected.screenX, y: projected.screenY - projected.screenW * PLAYER_WIDTH_FRACTION * 0.5 }
+          : null
+      );
     }
   }
 
