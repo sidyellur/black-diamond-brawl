@@ -1,5 +1,6 @@
 import {
   AI_BUMP_CHECK_INTERVAL_MS,
+  HIT_REACTION_MS,
   LANE_TWEEN_MS,
   LANES,
   MAX_SPEED,
@@ -89,6 +90,17 @@ export class AIRider implements Collidable {
   private bumpCooldownMs = runtimeRandom() * AI_BUMP_CHECK_INTERVAL_MS;
   private shovedByPlayerAtMs: number | null = null;
 
+  /**
+   * Recoil countdown after LOSING an exchange — drives the hit frame and the
+   * impact flash. Set via `notifyHit()`, never inferred from
+   * `applyKnockback`: a knockback alone is not evidence of being struck.
+   *
+   * Before this existed, a rival you shoved rendered with the same lean pose
+   * as one voluntarily changing lanes, so landing a hit and watching someone
+   * dodge looked identical.
+   */
+  hitReactionMsRemaining = 0;
+
   constructor(readonly params: AIRiderParams) {
     this._laneIndex = params.startLane;
     this.worldZ = params.startZOffset;
@@ -127,6 +139,7 @@ export class AIRider implements Collidable {
     this.worldZ += this.speed * deltaSeconds;
 
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - deltaMs);
+    this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - deltaMs);
     this.immunityMsRemaining = Math.max(0, this.immunityMsRemaining - deltaMs);
     this.stumbleMsRemaining = Math.max(0, this.stumbleMsRemaining - deltaMs);
 
@@ -295,6 +308,16 @@ export class AIRider implements Collidable {
    * logic (passing this rider's own current lane means "no lane change,
    * speed loss only"). Overrides any in-progress dodge/bump tween.
    */
+  /** Called by `CombatSystem` on the loser of an exchange. */
+  notifyHit(): void {
+    this.hitReactionMsRemaining = HIT_REACTION_MS;
+  }
+
+  /** True while recoiling from a combat hit. */
+  get hitReacting(): boolean {
+    return this.hitReactionMsRemaining > 0;
+  }
+
   applyKnockback(targetLaneIndex: number, speedLossFactor: number): void {
     if (this.wipedOut) {
       return;

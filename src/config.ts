@@ -184,6 +184,56 @@ export const TREE_CLAMP_SEGMENTS = 5;
 export const KNOCKOUT_WINDOW_MS = 2000;
 export const SHOVE_SPEED_LOSS_FACTOR = 0.2; // baseline ~20% loser speed loss
 export const ARMED_SHOVE_SPEED_LOSS_FACTOR = 0.4; // double loss on an armed win
+
+/**
+ * How long an attack swing locks the attacker's steering AND jump.
+ *
+ * This is the entire cost of attacking, and it is deliberately positional
+ * rather than a speed penalty. Speed losses are noise at this game's scale — a
+ * 45% loss costs ~3 segments of a 1500-segment course, against 250 points for
+ * a landed hit, so any speed-based cost loses to mashing by roughly 25:1. What
+ * is genuinely expensive here is being unable to steer.
+ *
+ * 250ms at MAX_SPEED is 3.75 segments blind, and an escape steer afterwards
+ * needs another ~2.25 to complete — so a swing commits roughly 6 segments of
+ * runway. Late-course obstacle rows can sit 5 segments apart, so dense sections
+ * contain windows where no swing is safe unless your lane is already clear.
+ * That is the intended risk. It is invisible to `verifySolvability` (which
+ * models a player with full steering), so it is a playtest tuning target.
+ */
+export const ATTACK_SWING_MS = 250;
+
+/** Global cooldown between attack presses, regardless of target. Longer than
+ *  `SHOVE_IMMUNITY_MS`, so re-attacking the SAME rival is gated by this rather
+ *  than by pair immunity. */
+export const ATTACK_COOLDOWN_MS = 600;
+
+/** How long a struck rider holds the recoil pose. Long enough to read at
+ *  speed, short enough not to look like a stun. */
+export const HIT_REACTION_MS = 350;
+
+/** How long the white impact flash lasts on a struck rider. */
+export const HIT_FLASH_MS = 80;
+
+/**
+ * Attack reach, as a lane-offset fraction. `LANES` are spaced 0.4 apart, so
+ * 0.48 is 1.2 lanes — enough to hit a neighbour mid-tween without letting the
+ * attack reach two lanes across.
+ */
+export const ATTACK_LANE_REACH = 0.48;
+
+/** Below this the two riders count as sharing a lane, so the knockback has no
+ *  natural direction and falls back to the toward-centre rule. */
+export const SAME_LANE_EPSILON = 0.05;
+
+/** Target switching hysteresis: a challenger must score this much better than
+ *  the current target to steal it, so the marker does not flicker between two
+ *  rivals at similar range. */
+export const TARGET_SWITCH_RATIO = 0.75;
+
+/** Grace period before a target that left range is dropped — stops the marker
+ *  blinking during a pass-by. */
+export const TARGET_GRACE_MS = 100;
 // How often (ms) each AI rider re-rolls whether to attempt a bump, gated by
 // its own `aggression` (runtime randomness — NOT the seeded PRNG, per §4.5).
 export const AI_BUMP_CHECK_INTERVAL_MS = 500;
@@ -204,9 +254,14 @@ export const NEAR_MISS_MIN_SPEED_FACTOR = 0.7;
 
 // Point values (from spec §4.7)
 export const POINTS = {
+  /** A deliberate attack the player pressed for. */
   COMBAT_HIT: 250,
+  /** A passive body check — rear-ending a rival, or one drifting into you.
+   *  Deliberately a fifth of an attack: the point of a dedicated attack key
+   *  is that choosing to fight is the interesting action, and before the
+   *  split the scoreboard could not tell intent from accident. */
+  COMBAT_BRUSH: 50,
   KNOCKOUT: 500,
-  COMBAT_HIT_TOTAL: 750, // COMBAT_HIT + KNOCKOUT
   NEAR_MISS: 100,
   TRICK_JUMP: 150,
   TRICK_JUMP_EXTRA_PER_QUARTER_SECOND: 50,

@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import {
   CAMERA_BACK_Z,
   COURSE_LENGTH_SEGMENTS,
+  HIT_FLASH_MS,
+  HIT_REACTION_MS,
   MAX_ENTITY_SCREEN_FRACTION,
   MAX_SPEED,
   PLAYER_START_Z,
@@ -13,7 +15,7 @@ import { AIRider } from '../entities/aiRider';
 import { AIRiderRenderer } from '../entities/aiRiderRenderer';
 import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
 import { CombatSystem } from '../entities/combat';
-import { bindPlayerInput } from '../entities/input';
+import { bindPlayerInput, PlayerInput } from '../entities/input';
 import { Obstacle } from '../entities/obstacle';
 import { ObstacleRenderer } from '../entities/obstacleRenderer';
 import { collectPickups, Pickup } from '../entities/pickup';
@@ -99,6 +101,8 @@ export class RaceScene extends Phaser.Scene {
   private aiRiderRenderer!: AIRiderRenderer;
 
   private combat!: CombatSystem;
+  private playerInput!: PlayerInput;
+  private targetMarker!: Phaser.GameObjects.Graphics;
   private pickups: Pickup[] = [];
   private pickupRenderer!: PickupRenderer;
   private scoreTracker!: ScoreTracker;
@@ -106,6 +110,7 @@ export class RaceScene extends Phaser.Scene {
   private seed = 0;
   private progressBarBg!: Phaser.GameObjects.Graphics;
   private progressBarFill!: Phaser.GameObjects.Graphics;
+  private attackPip!: Phaser.GameObjects.Graphics;
   private scoreText!: Phaser.GameObjects.Text;
   private speedText!: Phaser.GameObjects.Text;
   private weaponText!: Phaser.GameObjects.Text;
@@ -177,16 +182,16 @@ export class RaceScene extends Phaser.Scene {
     this.pickupRenderer = new PickupRenderer(this, this.registerWorld);
 
     this.player = new Player();
-    // A steer into an adjacent rival resolves a shove instead of a lane
-    // change (§4.6 trigger 1) — wired before any input so the very first
-    // press is covered.
     this.combat = new CombatSystem(this.player, this.aiRiders, this.obstacles);
-    this.player.shoveInterceptor = (direction) => this.combat.attemptPlayerShove(direction);
-    // Jump routes through here so a press on/just before a mogul becomes an
-    // extended trick launch (§4.3); otherwise it's a normal jump.
-    bindPlayerInput(this, this.player, () => {
+    // Steering no longer intercepts into combat — it always steers. Attacking
+    // is its own key, polled in `update`.
+    this.playerInput = bindPlayerInput(this, this.player, () => {
       this.player.jump(isMogulLaunchAvailable(this.player, this.obstacles));
     });
+
+    this.targetMarker = this.add.graphics();
+    this.targetMarker.setDepth(DEPTH.SHADOW + 1);
+    this.registerWorld(this.targetMarker);
 
     this.scoreTracker = new ScoreTracker(this.player, this.aiRiders, this.obstacles, this.collisions, this.combat);
 
@@ -259,8 +264,17 @@ export class RaceScene extends Phaser.Scene {
     this.progressBarBg.fillRect(HUD_X, barY, PROGRESS_BAR_W, PROGRESS_BAR_H);
 
     this.progressBarFill = this.add.graphics();
+    this.attackPip = this.add.graphics();
 
-    hud.push(seedText, this.scoreText, this.speedText, this.weaponText, this.progressBarBg, this.progressBarFill);
+    hud.push(
+      seedText,
+      this.scoreText,
+      this.speedText,
+      this.weaponText,
+      this.progressBarBg,
+      this.progressBarFill,
+      this.attackPip
+    );
 
     // A dedicated UI camera keeps the HUD still while the world camera shakes
     // on impact — and keeps postFX (vignette, bloom) off the text, which
@@ -291,11 +305,14 @@ export class RaceScene extends Phaser.Scene {
       return;
     }
 
-    // Stamps this frame's clock BEFORE player.update() — a lane-shift press
-    // can synchronously resolve a shove via `Player.shoveInterceptor`, which
-    // needs a fresh `nowMs` even though `CombatSystem.update()` itself must
-    // run later, after every rider's collision pass (see its own doc).
-    this.combat.beginFrame(time);
+    // Attack is polled here rather than fired from a key handler: handlers
+    // still run during hit-stop, when this method early-returns above, so a
+    // handler-driven attack would resolve combat inside the freeze on a stale
+    // clock. A press with no eligible target is refused by `attemptAttack`
+    // itself and costs nothing.
+    if (this.playerInput.attackJustPressed()) {
+      this.combat.attemptAttack(time);
+    }
 
     const prevZ = this.prevWorldZ;
     this.player.update(delta);
@@ -427,6 +444,7 @@ export class RaceScene extends Phaser.Scene {
       this.shadows
     );
     this.updatePlayerSprite(camX, camY, camZ, result.drawnSegments);
+    this.renderTargetMarker(camX, camY, camZ, result.drawnSegments);
     this.emitCombatFeedback(struckRiders, camX, camY, camZ, result.drawnSegments);
     this.shadows.end();
 
@@ -484,6 +502,21 @@ export class RaceScene extends Phaser.Scene {
     this.speedText.setText(`speed: ${Math.round((this.player.speed / MAX_SPEED) * 100)}%`);
     this.weaponText.setText(this.player.armed ? `pole: ${this.player.weaponCharges}` : '');
 
+    // Attack readiness. An invisible cooldown is another way to generate
+    // "I pressed attack and nothing happened".
+    const pipY = HUD_Y + HUD_LINE_HEIGHT * 3 + 4;
+    const pipX = HUD_X + 92;
+    this.attackPip.clear();
+    if (this.combat.attackOnCooldown) {
+      this.attackPip.fillStyle(UI.inkLow, 0.5);
+      this.attackPip.fillRect(pipX, pipY, 34, 5);
+      this.attackPip.fillStyle(UI.inkMid, 0.9);
+      this.attackPip.fillRect(pipX, pipY, 34 * (1 - this.combat.attackCooldownFraction), 5);
+    } else {
+      this.attackPip.fillStyle(this.combat.target ? UI.accentWarn : UI.inkLow, this.combat.target ? 1 : 0.45);
+      this.attackPip.fillRect(pipX, pipY, 34, 5);
+    }
+
     const courseLength = COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH;
     const progress = courseLength > 0 ? Phaser.Math.Clamp(this.player.worldZ / courseLength, 0, 1) : 0;
     const barY = HUD_Y + HUD_LINE_HEIGHT * 4;
@@ -499,18 +532,31 @@ export class RaceScene extends Phaser.Scene {
     camZ: number,
     drawnSegments: Map<number, DrawnSegment>
   ): void {
+    // Priority: crash > recoil > mid-attack > airborne > steering. Recoil
+    // outranks the swing so losing an exchange you started still reads as
+    // being hit.
     const lean = this.player.leanDirection;
     const frame =
       this.player.wipedOut || this.player.tumbling
         ? PLAYER_FRAMES.TUMBLE // tree wipeout or rock knockdown
-        : this.player.airborne
-          ? PLAYER_FRAMES.JUMP
-          : lean < 0
-            ? PLAYER_FRAMES.LEAN_LEFT
-            : lean > 0
-              ? PLAYER_FRAMES.LEAN_RIGHT
-              : PLAYER_FRAMES.CENTER;
+        : this.player.hitReacting
+          ? PLAYER_FRAMES.HIT
+          : this.player.swinging
+            ? PLAYER_FRAMES.SWING
+            : this.player.airborne
+              ? PLAYER_FRAMES.JUMP
+              : lean < 0
+                ? PLAYER_FRAMES.LEAN_LEFT
+                : lean > 0
+                  ? PLAYER_FRAMES.LEAN_RIGHT
+                  : PLAYER_FRAMES.CENTER;
     this.playerSprite.setFrame(frame);
+
+    if (this.player.hitReactionMsRemaining > HIT_REACTION_MS - HIT_FLASH_MS) {
+      this.playerSprite.setTintFill(0xffffff);
+    } else {
+      this.playerSprite.clearTint();
+    }
 
     // Projected exactly like every other entity, with the jump arc fed in as a
     // real world-space height rather than a screen-space bob — so the player
@@ -554,6 +600,56 @@ export class RaceScene extends Phaser.Scene {
     if (ground) {
       this.shadows.draw(ground.screenX, ground.screenY, widthPx, this.player.jumpArcHeight);
     }
+  }
+
+  /**
+   * Draws a chevron under the rival an attack would strike.
+   *
+   * This is what replaces directional attack input. Auto-targeting on its own
+   * would leave the player unable to predict who a press hits — but showing
+   * the choice *before* the press answers the same question without needing
+   * extra keys, which would collide with the steering bindings anyway.
+   *
+   * The target comes from `CombatSystem.target`, which is the exact rival
+   * `attemptAttack` will resolve against, and is null whenever any guard
+   * would refuse — cooldown, pair immunity, a rival mid-rock-tumble. So the
+   * marker can never promise a hit that then silently fails.
+   */
+  private renderTargetMarker(
+    camX: number,
+    camY: number,
+    camZ: number,
+    drawnSegments: Map<number, DrawnSegment>
+  ): void {
+    this.targetMarker.clear();
+    const target = this.combat.target;
+    if (!target) {
+      return;
+    }
+    const projected = projectEntity(target.laneOffsetFraction, target.worldZ, this.track, drawnSegments, {
+      x: camX,
+      y: camY,
+      z: camZ
+    });
+    if (!projected) {
+      return;
+    }
+
+    const w = Math.max(10, softClampWidth(projected.screenW * PLAYER_WIDTH_FRACTION, SCREEN_W * 0.2));
+    const x = projected.screenX;
+    const y = projected.screenY + 3;
+    // A chevron rather than a ring: it points at the rider, survives being
+    // small, and cannot be mistaken for a contact shadow.
+    this.targetMarker.fillStyle(UI.accentWarn, 0.92);
+    this.targetMarker.beginPath();
+    this.targetMarker.moveTo(x, y + w * 0.30);
+    this.targetMarker.lineTo(x - w * 0.34, y);
+    this.targetMarker.lineTo(x - w * 0.17, y);
+    this.targetMarker.lineTo(x, y + w * 0.15);
+    this.targetMarker.lineTo(x + w * 0.17, y);
+    this.targetMarker.lineTo(x + w * 0.34, y);
+    this.targetMarker.closePath();
+    this.targetMarker.fillPath();
   }
 
   /**

@@ -6,6 +6,8 @@ import {
   LANES,
   MAX_SPEED,
   MOGUL_SPEED_FACTOR,
+  ATTACK_SWING_MS,
+  HIT_REACTION_MS,
   MOGUL_STUMBLE_MS,
   PLAYER_ACCEL,
   PLAYER_START_Z,
@@ -57,13 +59,22 @@ export class Player implements Collidable {
   private bufferedDirection: -1 | 1 | null = null;
 
   /**
-   * Combat hook (Task 8, design-spec §4.6): when set, every attempted lane
-   * shift — fresh input or a buffered continuation, both funnel through
-   * `startLaneTween` — is offered to this callback first. Returning `true`
-   * means it resolved as a shove exchange instead; the lane shift is
-   * dropped. `RaceScene` wires this to `CombatSystem.attemptPlayerShove`.
+   * Attack swing countdown. While this runs the player cannot steer or jump —
+   * the entire cost of attacking (see `ATTACK_SWING_MS`). Set by
+   * `CombatSystem` when a swing starts, never by input directly.
    */
-  shoveInterceptor: ((direction: -1 | 1) => boolean) | null = null;
+  swingMsRemaining = 0;
+
+  /**
+   * Recoil countdown after LOSING a combat exchange. Drives the hit frame and
+   * the impact flash.
+   *
+   * Set through `notifyHit()` rather than inferred from `applyKnockback`,
+   * because a knockback is not by itself evidence of being struck — the
+   * combat harness uses `applyKnockback` to walk a player across lanes during
+   * setup, and any future forced lane change would look identical.
+   */
+  hitReactionMsRemaining = 0;
 
   airborne = false;
   private jumpElapsedMs = 0;
@@ -102,6 +113,15 @@ export class Player implements Collidable {
     this.worldZ += this.speed * deltaSeconds;
 
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - deltaMs);
+    this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - deltaMs);
+    const wasSwinging = this.swingMsRemaining > 0;
+    this.swingMsRemaining = Math.max(0, this.swingMsRemaining - deltaMs);
+    // A steer pressed during the lock fires the instant it lifts.
+    if (wasSwinging && this.swingMsRemaining === 0 && this.bufferedDirection !== null && !this.tween) {
+      const direction = this.bufferedDirection;
+      this.bufferedDirection = null;
+      this.startLaneTween(direction);
+    }
     this.immunityMsRemaining = Math.max(0, this.immunityMsRemaining - deltaMs);
     this.stumbleMsRemaining = Math.max(0, this.stumbleMsRemaining - deltaMs);
 
@@ -116,6 +136,13 @@ export class Player implements Collidable {
     }
     if (this.airborne) {
       return; // committed jump: steering is locked mid-air, input is dropped
+    }
+    if (this.swingMsRemaining > 0) {
+      // Mid-swing: steering is locked, but the press is BUFFERED rather than
+      // eaten, so committing to an attack never silently swallows input the
+      // way the old steer-shove interceptor did.
+      this.bufferedDirection = direction;
+      return;
     }
     if (this.tween) {
       // One-deep buffer: a rapid second tap overwrites any previously
@@ -143,10 +170,38 @@ export class Player implements Collidable {
     if (this.airborne || this.wipedOut) {
       return;
     }
+    if (this.swingMsRemaining > 0) {
+      // Jump is locked during a swing too. Without this, F-then-Space escapes
+      // the positional commitment through the air (airborne clears rocks and
+      // moguls outright), and "attacking commits you" would mean "attacking
+      // commits you unless you press the other button".
+      return;
+    }
     this.airborne = true;
     this.jumpElapsedMs = 0;
     this.extendedJump = extended;
     this.jumpAirtimeMs = extended ? JUMP_AIRTIME_EXTENDED_MS : JUMP_AIRTIME_MS;
+  }
+
+  /** Starts an attack swing: steering and jump are locked for its duration. */
+  startSwing(): void {
+    this.swingMsRemaining = ATTACK_SWING_MS;
+  }
+
+  /** True while mid-attack — drives the swing pose. */
+  get swinging(): boolean {
+    return this.swingMsRemaining > 0;
+  }
+
+  /** Called by `CombatSystem` on the LOSER of an exchange. Distinct from
+   *  `applyKnockback`, which is also used to move riders for other reasons. */
+  notifyHit(): void {
+    this.hitReactionMsRemaining = HIT_REACTION_MS;
+  }
+
+  /** True while recoiling from a combat hit — drives the hit pose and flash. */
+  get hitReacting(): boolean {
+    return this.hitReactionMsRemaining > 0;
   }
 
   /** True while the player can't be collided with (§4.4): mid-tumble from a
@@ -296,13 +351,6 @@ export class Player implements Collidable {
     const target = clamp(this._laneIndex + direction, 0, LANES.length - 1);
     if (target === this._laneIndex) {
       return; // already at the road edge; nothing to do
-    }
-    // Combat hook (§4.6): a steer toward a rival within the adjacent lane
-    // resolves as a shove exchange instead of an actual lane change — both
-    // fresh presses and buffered continuations land here, so both get the
-    // same check.
-    if (this.shoveInterceptor && this.shoveInterceptor(direction)) {
-      return;
     }
     this.tween = { fromLane: this._laneIndex, toLane: target, elapsedMs: 0 };
   }

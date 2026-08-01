@@ -28,7 +28,9 @@ export class SpriteLabScene extends Phaser.Scene {
 
     const entries: Array<{ name: string; cv: PixelCanvas }> = [];
 
-    const poses: RiderPose[] = ['lean-left', 'center', 'lean-right', 'jump', 'tumble'];
+    // Must list every pose in the sheet — this is what puts each new frame
+    // through the silhouette and outline-contrast gates.
+    const poses: RiderPose[] = ['lean-left', 'center', 'lean-right', 'jump', 'tumble', 'hit', 'swing'];
     for (const pose of poses) {
       entries.push({ name: `player/${pose}`, cv: drawRider(pose, PLAYER_RIDER_PALETTE) });
     }

@@ -19,6 +19,8 @@ export interface ScoreBreakdown {
   combatHitPoints: number;
   knockoutCount: number;
   knockoutPoints: number;
+  brushCount: number;
+  brushPoints: number;
   nearMissCount: number;
   nearMissPoints: number;
   trickJumpCount: number;
@@ -61,6 +63,7 @@ const POSITION_BONUS_BY_PLACE: Record<number, number> = {
 export class ScoreTracker {
   private combatHitCount = 0;
   private knockoutCount = 0;
+  private brushCount = 0;
   private nearMissCount = 0;
   private trickJumpCount = 0;
   private trickJumpPoints = 0;
@@ -106,14 +109,23 @@ export class ScoreTracker {
     }
   }
 
-  /** Combat hit = 250, knockout = 500 ON TOP of the hit that caused it (a
-   *  knockout totals 750 — §4.7) — both land as separate events from
-   *  `CombatSystem`, so no special-casing is needed here beyond summing them. */
+  /**
+   * Deliberate attack = 250, passive body check = 50, knockout = 500 ON TOP
+   * of whichever caused it (§4.7). All three arrive as separate events from
+   * `CombatSystem`, so summing them is all that is needed.
+   *
+   * Note the explicit `brush` branch. This used to be `if (hit) … else
+   * { knockout }`, so adding a third event type without restructuring would
+   * have silently scored every body check as a 500-point knockout.
+   */
   private drainCombatEvents(): void {
     for (const event of this.combat.events) {
       if (event.type === 'hit') {
         this.combatHitCount++;
         this.eventPoints += POINTS.COMBAT_HIT;
+      } else if (event.type === 'brush') {
+        this.brushCount++;
+        this.eventPoints += POINTS.COMBAT_BRUSH;
       } else {
         this.knockoutCount++;
         this.eventPoints += POINTS.KNOCKOUT;
@@ -223,6 +235,8 @@ export class ScoreTracker {
       combatHitPoints: this.combatHitCount * POINTS.COMBAT_HIT,
       knockoutCount: this.knockoutCount,
       knockoutPoints: this.knockoutCount * POINTS.KNOCKOUT,
+      brushCount: this.brushCount,
+      brushPoints: this.brushCount * POINTS.COMBAT_BRUSH,
       nearMissCount: this.nearMissCount,
       nearMissPoints: this.nearMissCount * POINTS.NEAR_MISS,
       trickJumpCount: this.trickJumpCount,

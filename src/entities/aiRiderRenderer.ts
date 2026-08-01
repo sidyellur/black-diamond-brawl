@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
+import { HIT_FLASH_MS, HIT_REACTION_MS, MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
 import { entityDepth } from '../render/depth';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
@@ -60,17 +60,33 @@ export class AIRiderRenderer {
         return;
       }
 
+      // Frame priority: a crash outranks a recoil, which outranks steering.
+      // The recoil tier is what makes a landed hit legible at all — without
+      // it a struck rival showed the same lean pose as one voluntarily
+      // changing lanes, so hitting someone and watching them dodge looked
+      // identical.
       const lean = rider.leanDirection;
       const frame =
         rider.wipedOut || rider.tumbling
           ? PLAYER_FRAMES.TUMBLE
-          : lean < 0
-            ? PLAYER_FRAMES.LEAN_LEFT
-            : lean > 0
-              ? PLAYER_FRAMES.LEAN_RIGHT
-              : PLAYER_FRAMES.CENTER;
+          : rider.hitReacting
+            ? PLAYER_FRAMES.HIT
+            : lean < 0
+              ? PLAYER_FRAMES.LEAN_LEFT
+              : lean > 0
+                ? PLAYER_FRAMES.LEAN_RIGHT
+                : PLAYER_FRAMES.CENTER;
 
       sprite.setFrame(frame);
+
+      // A brief white-out on the frames right after impact. Safe to tint:
+      // rival palettes are baked into separate textures, so nothing else
+      // relies on the sprite's tint.
+      if (rider.hitReactionMsRemaining > HIT_REACTION_MS - HIT_FLASH_MS) {
+        sprite.setTintFill(0xffffff);
+      } else {
+        sprite.clearTint();
+      }
       const widthPx = softClampWidth(
         projected.screenW * WIDTH_FRACTION,
         SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
