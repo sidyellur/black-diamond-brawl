@@ -309,6 +309,24 @@ All of these are tunables in `config.ts` and expected to change during play-test
   −0.8, −0.4, 0, +0.4, +0.8 of road half-width). Left/Right (arrow keys and A/D) shift the
   player one lane per press; the visible position tweens between lane offsets over
   ~150 ms. Inputs during a tween are buffered (one deep) so double-taps feel responsive.
+- **Attack:** `F` or `K`. The deliberate combat action, and the only one — steering never
+  resolves as combat (see §4.6). Strikes whichever rival the **target marker** is showing:
+  a chevron drawn under the rival an attack would hit, visible exactly when a press would
+  land and hidden whenever any rule would refuse it (out of reach, on cooldown, inside a
+  pair's shove immunity, either side mid-tumble). A press with no marker is refused
+  outright — no swing, no cooldown, no cost.
+
+  A landed press starts a **swing** (`ATTACK_SWING_MS`, 250 ms) during which **steering
+  and jump are both locked**. That commitment is the entire cost of attacking. Speed
+  penalties are noise at this game's scale — a 45% loss costs ~3 segments of a
+  1500-segment course against 250 points for a hit — so any speed-based cost loses to
+  mashing by roughly 25:1. Being unable to steer for ~3.75 segments, with ~2.25 more
+  needed to complete an escape tween, is a real price on a slope with obstacles.
+  A steer pressed during the lock is **buffered**, not discarded.
+
+  Jump is locked alongside steering deliberately: without it, attack-then-jump escapes the
+  commitment through the air, since an airborne rider clears rocks and moguls outright.
+  `ATTACK_COOLDOWN_MS` (600 ms) gates the next press regardless of target.
 - **Jump:** Space or Up. Fixed-impulse vertical arc (simple gravity) with a **constant
   ~600 ms airtime** — airtime is a property of the fixed impulse and gravity, independent
   of speed; it is the **horizontal distance** covered during the arc that scales with
@@ -360,7 +378,8 @@ are deterministic per seed too. Behavior is a simple priority list evaluated per
    to an adjacent clear lane. AI riders that fail to dodge hit obstacles under the same
    rules as the player (a tree takes a rival out of the race entirely).
 3. **Bump:** when within ~2 segments of the player's Z and an adjacent lane, occasionally
-   (aggression-weighted timer) drift into the player's lane to attempt a shove. A bump
+   (aggression-weighted timer) drift into the player's lane, which resolves as a **body
+   check** rather than an attack (§4.6 — rivals have no attack action). A bump
    attempt against an **airborne** player whiffs — no effect on either rider (§4.3, §4.6).
 
 AI riders start staggered around the player at the start line. They do not use weapons in
@@ -374,7 +393,32 @@ This is a deliberate v1 simplification (flagged in §7).
 
 ### 4.6 Combat
 
-- **Bump-to-shove is the baseline — no attack button.** A knockback exchange triggers in
+- **Attack is a dedicated action; contact is a body check.** *(Amended — this rule
+  originally read "Bump-to-shove is the baseline — no attack button", with combat
+  triggered by steering into a rival. That made intent to move and intent to fight the
+  same keypress, and made declining a fight inexpressible: `shoveInterceptor`'s single
+  boolean had to mean both "combat happened" and "swallow the lane change", so the only
+  way into a rival's lane without fighting was to fight first and move inside the
+  immunity window.)*
+
+  Steering now always steers. Two things resolve an exchange:
+
+  1. **A deliberate attack** (§4.3) — the player pressed the attack key at a marked
+     target. Pays `POINTS.COMBAT_HIT` (250), applies the ski pole if armed, and commits
+     the attacker to a swing.
+  2. **A body check** — passive contact nobody asked for: rear-ending a rival, or one
+     drifting into the player's lane. Same physics, `POINTS.COMBAT_BRUSH` (50), and
+     **never armed** — the pole is a weapon you swing, so a brush neither auto-wins nor
+     spends a charge. (Before the split an armed player who was merely bumped into burned
+     a charge for it.)
+
+  Body checks fire on the **entering edge of contact only**, not continuously while
+  co-located. Firing them every frame would starve the deliberate attack outright: each
+  one sets pair immunity, and since that window (500 ms) is shorter than the attack
+  cooldown (600 ms), the passive path would always re-trigger first and a same-lane rival
+  could never be attacked on purpose.
+
+  A knockback exchange also triggers in
   either of two ways, and **both resolve identically**:
   1. **Lateral shove:** the player is laterally adjacent to a rival (neighboring lane),
      within ~1 segment in Z, and **steers toward the rival's lane** — the exchange
@@ -403,6 +447,14 @@ This is a deliberate v1 simplification (flagged in §7).
     can never be an unavoidable tree kill** (closing the loophole where the only clear
     lane through a tree row is occupied by a rival and losing the exchange would bounce
     the player into the tree).
+
+    **Knockback direction** is deterministic. A lateral exchange knocks the loser away
+    from the winner; a same-lane one has no natural side, and that is the *common* case
+    for a deliberate attack — you press having settled in the rival's lane, at which point
+    both riders report an identical lane offset. It resolves **toward road centre**, which
+    is also the kinder option for the loser since the edge lanes are where the road-edge
+    clamp turns a knockback into a no-op. This was previously a coin flip, which would
+    have made the attack button's most common outcome random.
 
     Two corrections were made here after the original wording proved unenforceable in
     practice, both now asserted by `scripts/verifyCombat.ts`:
@@ -451,7 +503,8 @@ Score is a running total of event points, plus completion bonuses at the finish 
 
 | Event | Points |
 | --- | --- |
-| Combat hit landed on a rival | 250 |
+| Deliberate attack landed on a rival | 250 |
+| Body check (passive contact) won | 50 |
 | Knockout (rival removed from the race by your shove) | 500, **in addition to** the 250 combat hit — a knockout totals **750** |
 | Near-miss (pass within one lane of an obstacle, or graze past a rival without contact, at ≥70% max speed) | 100 |
 | Trick jump (airtime launched off a mogul or crest) | 150 (+50 per extra 0.25 s of airtime) |

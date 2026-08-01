@@ -22,7 +22,7 @@ import { PixelCanvas, applyRim } from '../render/pixel';
 
 export const RIDER_FRAME_SIZE = 48;
 
-export type RiderPose = 'lean-left' | 'center' | 'lean-right' | 'jump' | 'tumble';
+export type RiderPose = 'lean-left' | 'center' | 'lean-right' | 'jump' | 'tumble' | 'hit' | 'swing';
 
 export interface RiderPalette {
   suit: number;
@@ -46,6 +46,10 @@ export function drawRider(pose: RiderPose, palette: RiderPalette): PixelCanvas {
   const cv = new PixelCanvas(RIDER_FRAME_SIZE, RIDER_FRAME_SIZE);
   if (pose === 'tumble') {
     drawTumble(cv, palette);
+  } else if (pose === 'hit') {
+    drawHit(cv, palette);
+  } else if (pose === 'swing') {
+    drawSwing(cv, palette);
   } else {
     const lean = pose === 'lean-left' ? -1 : pose === 'lean-right' ? 1 : 0;
     drawUpright(cv, palette, lean, pose === 'jump');
@@ -209,6 +213,95 @@ function drawHead(cv: PixelCanvas, cx: number, y: number): void {
 
   // A sliver of face below the goggles.
   cv.rect(cx - 3, y + 4, 6, 2, RIDER.skin);
+}
+
+/**
+ * Recoil: struck, but still on the board.
+ *
+ * This has to be readable in a quarter-second, against snow, at ~40px, and —
+ * hardest — it must not be confusable with `tumble` (which is a crash) or with
+ * a lean (which is a voluntary turn). Before this frame existed, a rival you
+ * shoved rendered with the *same* lean pose as one calmly changing lanes, so
+ * landing a hit and watching someone dodge looked identical.
+ *
+ * Three things separate it. The torso jackknifes away from the impact rather
+ * than angling into a carve. The head snaps back past the shoulders, which no
+ * other pose does. And both arms fly up and outward — the opposite of the
+ * controlled balance spread — which is what makes the silhouette read as
+ * "lost control" instead of "turning".
+ */
+function drawHit(cv: PixelCanvas, pal: RiderPalette): void {
+  const cx = 24;
+  const baseY = 42;
+
+  // Board skids out from under the rider, still flat but shoved sideways.
+  drawBoard(cv, cx + 4, baseY, 1, pal);
+
+  // Torso thrown back over the tail of the board.
+  const hipY = baseY - 8;
+  const shoulderY = hipY - 10;
+  const tilt = -7;
+
+  drawLegs(cv, cx + 3, hipY, baseY, 2, false);
+
+  const lit = shade(pal.suit, 'lit');
+  const dark = shade(pal.suit, 'shadow');
+  const h = hipY - shoulderY;
+  for (let i = 0; i < h; i++) {
+    const t = i / Math.max(1, h - 1);
+    const halfW = Math.round(6 - t * 1.5);
+    // Each row shifts further back up the body — a jackknife, not a lean.
+    const x = cx + tilt + Math.round(t * 5);
+    cv.rect(x - halfW, shoulderY + i, halfW * 2, 1, pal.suit);
+    cv.rect(x - halfW, shoulderY + i, 2, 1, lit);
+    cv.rect(x + halfW - 2, shoulderY + i, 2, 1, dark);
+  }
+
+  // Arms flung up and out, both sides — reads as flailing, never as balance.
+  cv.line(cx + tilt - 4, shoulderY + 2, cx + tilt - 13, shoulderY - 6, pal.suit, 2);
+  cv.line(cx + tilt + 4, shoulderY + 2, cx + tilt + 12, shoulderY - 7, dark, 2);
+  cv.rect(cx + tilt - 15, shoulderY - 8, 3, 3, RIDER.glove);
+  cv.rect(cx + tilt + 11, shoulderY - 9, 3, 3, RIDER.glove);
+
+  // Head snapped back past the shoulder line.
+  drawHead(cv, cx + tilt - 4, shoulderY - 2);
+
+  // Spray kicked up by the board losing its edge.
+  cv.ellipse(cx + 10, baseY + 1, 9, 2, mix(SNOW.packed, SNOW.shadow, 0.3), 190);
+}
+
+/**
+ * Mid-swing: the attack pose.
+ *
+ * Shown on the attacker for the duration of the swing lock, so committing to
+ * an attack is visible on your own rider rather than being an invisible state
+ * you infer from a cooldown. The lead arm drives across the body — a long
+ * horizontal line no other pose has, which is what makes it readable at speed.
+ */
+function drawSwing(cv: PixelCanvas, pal: RiderPalette): void {
+  const cx = 24;
+  const baseY = 42;
+
+  drawBoard(cv, cx, baseY, 0, pal);
+
+  const hipY = baseY - 9;
+  const shoulderY = hipY - 11;
+
+  drawLegs(cv, cx, hipY, baseY, 0, false);
+  // Shoulders rotate into the swing.
+  drawTorso(cv, cx + 2, shoulderY, hipY, pal);
+
+  const dark = shade(pal.suit, 'shadow');
+
+  // Trailing arm tucked in for the counter-rotation.
+  cv.line(cx - 2, shoulderY + 3, cx - 8, shoulderY + 7, dark, 2);
+  cv.rect(cx - 10, shoulderY + 6, 3, 3, RIDER.glove);
+
+  // Lead arm extended hard across — the read.
+  cv.line(cx + 4, shoulderY + 2, cx + 16, shoulderY + 1, pal.suit, 3);
+  cv.rect(cx + 15, shoulderY - 1, 4, 4, RIDER.glove);
+
+  drawHead(cv, cx + 3, shoulderY - 3);
 }
 
 /** A crumpled heap, mid-wipeout. Reads as "person, not upright" in

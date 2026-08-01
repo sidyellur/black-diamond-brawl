@@ -62,6 +62,7 @@ export class ResultScene extends Phaser.Scene {
     const rows: Row[] = [
       { label: 'Combat hits', value: `${b.combatHitCount}   +${b.combatHitPoints}`, accent: UI.accentBad },
       { label: 'Knockouts', value: `${b.knockoutCount}   +${b.knockoutPoints}`, accent: UI.accentBad },
+      { label: 'Body checks', value: `${b.brushCount}   +${b.brushPoints}`, accent: UI.inkMid },
       { label: 'Near misses', value: `${b.nearMissCount}   +${b.nearMissPoints}`, accent: UI.accentInfo },
       { label: 'Trick jumps', value: `${b.trickJumpCount}   +${b.trickJumpPoints}`, accent: UI.accentWarn }
     ];

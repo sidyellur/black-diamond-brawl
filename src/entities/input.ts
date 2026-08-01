@@ -23,10 +23,22 @@ import { Player } from './player';
  * browser does not also act on it (arrows scroll, space scrolls), and leave
  * `emitOnRepeat` false so a held key fires exactly once.
  */
-export function bindPlayerInput(scene: Phaser.Scene, player: Player, onJump?: () => void): void {
+export interface PlayerInput {
+  /** True on the frame the attack key went down. Attack is POLLED rather than
+   *  bound to a `keydown` handler: handlers still fire during hit-stop, when
+   *  the scene's `update()` early-returns, so a handler-driven attack would
+   *  resolve combat inside the freeze against a stale clock. */
+  attackJustPressed(): boolean;
+}
+
+export function bindPlayerInput(
+  scene: Phaser.Scene,
+  player: Player,
+  onJump?: () => void
+): PlayerInput {
   const keyboard = scene.input.keyboard;
   if (!keyboard) {
-    return;
+    return { attackJustPressed: () => false };
   }
 
   const KEYS = Phaser.Input.Keyboard.KeyCodes;
@@ -35,6 +47,13 @@ export function bindPlayerInput(scene: Phaser.Scene, player: Player, onJump?: ()
   [KEYS.LEFT, KEYS.A, KEYS.RIGHT, KEYS.D, KEYS.SPACE, KEYS.UP].forEach((code) =>
     keyboard.addKey(code, true, false)
   );
+
+  // Attack. `F` suits arrow-key players (left hand free), `K` suits WASD
+  // players (right hand free). SHIFT was considered and rejected: five
+  // presses in a row pops the Windows Sticky Keys dialog, which no amount of
+  // `preventDefault` can suppress, and a cooldown-limited attack key is
+  // exactly a five-presses-in-a-row key.
+  const attackKeys = [KEYS.F, KEYS.K].map((code) => keyboard.addKey(code, true, false));
 
   keyboard.on('keydown-LEFT', () => player.requestLaneShift(-1));
   keyboard.on('keydown-A', () => player.requestLaneShift(-1));
@@ -46,4 +65,9 @@ export function bindPlayerInput(scene: Phaser.Scene, player: Player, onJump?: ()
   const jump = onJump ?? (() => player.requestJump());
   keyboard.on('keydown-SPACE', jump);
   keyboard.on('keydown-UP', jump);
+
+  return {
+    attackJustPressed: () =>
+      attackKeys.some((key) => Phaser.Input.Keyboard.JustDown(key))
+  };
 }

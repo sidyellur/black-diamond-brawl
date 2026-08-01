@@ -19,6 +19,18 @@ art sprites for riders, obstacles, and pickups.
 - [Implementation plan](docs/implementation-plan.md)
 - [Task list](docs/tasks.md)
 
+## Controls
+
+| Key | Action |
+| --- | --- |
+| `←` / `A`, `→` / `D` | Shift one lane |
+| `Space` / `↑` | Jump |
+| `F` / `K` | Attack the marked rival |
+
+An amber chevron marks the rival an attack would hit; it is visible exactly when a press
+would land. Attacking locks steering and jump for 250 ms — that commitment is the cost.
+Riding into someone still body-checks them, for a fifth of the points.
+
 ## Development
 
 ```bash

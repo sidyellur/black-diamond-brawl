@@ -26,10 +26,14 @@ export const PLAYER_FRAMES = {
   CENTER: 'center',
   LEAN_RIGHT: 'lean-right',
   JUMP: 'jump',
-  TUMBLE: 'tumble'
+  TUMBLE: 'tumble',
+  /** Struck in combat — a recoil, not a crash. */
+  HIT: 'hit',
+  /** Mid-attack, shown for the duration of the swing lock. */
+  SWING: 'swing'
 } as const;
 
-const FRAME_ORDER: RiderPose[] = ['lean-left', 'center', 'lean-right', 'jump', 'tumble'];
+const FRAME_ORDER: RiderPose[] = ['lean-left', 'center', 'lean-right', 'jump', 'tumble', 'hit', 'swing'];
 
 /** Builds the player's sheet. Called once from BootScene; no-ops if present. */
 export function generatePlayerSpriteSheet(scene: Phaser.Scene): void {
