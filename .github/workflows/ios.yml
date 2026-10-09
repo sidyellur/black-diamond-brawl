@@ -65,6 +65,7 @@ jobs:
             .verify/ios/*.txt
             .verify/ios/*.json
             .verify/ios/*.png
+            .verify/ios/attachments/
             .verify/ios/*.xcresult
             .verify/ios/*.zip
           include-hidden-files: true

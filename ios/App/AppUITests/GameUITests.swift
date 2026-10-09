@@ -15,7 +15,7 @@ final class GameUITests: XCTestCase {
 
     override func tearDownWithError() throws {
         if app != nil {
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(data: try screenshotPNG(), uniformTypeIdentifier: "public.png")
             screenshot.name = name
             screenshot.lifetime = .keepAlways
             add(screenshot)
@@ -30,7 +30,8 @@ final class GameUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(status.waitForExistence(timeout: 60), "Native test status never appeared; app/WKWebView did not boot")
         return try waitFor("bundled title scene", timeout: 60) { state in
-            self.scenes(state).contains("TitleScene") && state["loading"] as? Bool == false
+            self.scenes(state).contains("TitleScene") && state["loading"] as? Bool == false &&
+            state["titleFadeComplete"] as? Bool == true && self.number(state, "titleSeed") == 202
         }
     }
 
@@ -76,6 +77,7 @@ final class GameUITests: XCTestCase {
     private func assertClean(_ state: [String: Any], file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(state["protocol"] as? String, "capacitor:", file: file, line: line)
         XCTAssertEqual(state["offlineHTTPBlocked"] as? Bool, true, file: file, line: line)
+        XCTAssertEqual(state["probeInstalled"] as? Bool, true, file: file, line: line)
         XCTAssertEqual(state["externalResources"] as? [String], [], file: file, line: line)
         XCTAssertEqual(state["errors"] as? [String], [], file: file, line: line)
         XCTAssertNil(state["evaluationError"], file: file, line: line)
@@ -98,15 +100,37 @@ final class GameUITests: XCTestCase {
         XCTAssertEqual(number(canvas, "width") / number(canvas, "height"), 960.0 / 540.0, accuracy: 0.02)
     }
 
+    /// Application-scoped screenshots can be cropped in the wrong coordinate
+    /// space after a landscape transition. Capture the actual screen, then let
+    /// UIKit apply its imageOrientation before pixel sampling/portable export.
+    private func screenImage() -> UIImage {
+        let source = XCUIScreen.main.screenshot().image
+        print("SCREENSHOT size=\(source.size) scale=\(source.scale) orientation=\(source.imageOrientation.rawValue)")
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = source.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: source.size, format: format).image { _ in
+            source.draw(in: CGRect(origin: .zero, size: source.size))
+        }
+    }
+
+    private func screenshotPNG() throws -> Data {
+        try XCTUnwrap(screenImage().pngData())
+    }
+
     private func assertRenderedCanvas(_ state: [String: Any]) throws {
         let canvas = try XCTUnwrap(state["canvas"] as? [String: Any])
-        let cgImage = try XCTUnwrap(app.screenshot().image.cgImage)
+        let cgImage = try XCTUnwrap(screenImage().cgImage)
         let width = cgImage.width, height = cgImage.height
+        XCTAssertGreaterThan(width, height, "Screenshot must show the full landscape display")
+        XCTAssertEqual(Double(width) / Double(height),
+                       number(state, "nativeWidth") / number(state, "nativeHeight"), accuracy: 0.02,
+                       "Screenshot and actual native viewport must use the same orientation")
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         try pixels.withUnsafeMutableBytes { buffer in
             let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: width, height: height,
                 bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
             context.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
         }
         let sx = Double(width) / number(state, "nativeWidth")
@@ -115,10 +139,10 @@ final class GameUITests: XCTestCase {
         var lightest = 0, darkest = 255
         // Pixel evidence from the actual displayed WKWebView canvas, not the
         // JS scene flag alone. A solid/blank frame must fail this assertion.
-        for gy in 1..<15 {
-            for gx in 1..<25 {
-                let x = min(width - 1, max(0, Int((number(canvas, "x") + number(canvas, "width") * Double(gx) / 25) * sx)))
-                let y = min(height - 1, max(0, Int((number(canvas, "y") + number(canvas, "height") * Double(gy) / 15) * sy)))
+        for gy in 1..<31 {
+            for gx in 1..<55 {
+                let x = min(width - 1, max(0, Int((number(canvas, "x") + number(canvas, "width") * Double(gx) / 55) * sx)))
+                let y = min(height - 1, max(0, Int((number(canvas, "y") + number(canvas, "height") * Double(gy) / 31) * sy)))
                 let offset = (y * width + x) * 4
                 let r = Int(pixels[offset]), g = Int(pixels[offset + 1]), b = Int(pixels[offset + 2])
                 colors.insert((r / 16) * 256 + (g / 16) * 16 + b / 16)
@@ -150,7 +174,7 @@ final class GameUITests: XCTestCase {
             }
             try assertSafeArea(state)
             assertClean(state)
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(data: try screenshotPNG(), uniformTypeIdentifier: "public.png")
             screenshot.name = orientation == .landscapeRight ? "landscape-right" : "landscape-left"
             screenshot.lifetime = .keepAlways
             add(screenshot)

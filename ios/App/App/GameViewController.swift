@@ -20,19 +20,25 @@ final class GameViewController: CAPBridgeViewController {
         ProcessInfo.processInfo.arguments.contains("--uitesting")
     }
 
-    override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
-        let configuration = super.webViewConfiguration(for: instanceConfiguration)
-        if isSimulatorTest {
-            if let rules = simulatorTestRules { configuration.userContentController.add(rules) }
-            configuration.userContentController.addUserScript(WKUserScript(source: """
-                // Fixed course is a test fixture; gameplay and input are unmodified.
-                history.replaceState(null, '', '?seed=202');
-                window.__nativeTestErrors = [];
-                window.addEventListener('error', e => window.__nativeTestErrors.push(String(e.message)));
-                window.addEventListener('unhandledrejection', e => window.__nativeTestErrors.push(String(e.reason)));
-                """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    private var testRulesInstalled = false
+
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        guard isSimulatorTest, let content = webView?.configuration.userContentController else { return }
+        // Capacitor replaces webViewConfiguration.userContentController during
+        // prepareWebView. Install on the FINAL controller, after bridge setup
+        // but before viewDidLoad starts the first navigation.
+        if let rules = simulatorTestRules {
+            content.add(rules)
+            testRulesInstalled = true
         }
-        return configuration
+        content.addUserScript(WKUserScript(source: """
+            window.__nativeTestErrors = [];
+            window.addEventListener('error', e => window.__nativeTestErrors.push(String(e.message)));
+            window.addEventListener('unhandledrejection', e => window.__nativeTestErrors.push(String(e.reason)));
+            // Fixed course fixture; gameplay/input and its save path are unmodified.
+            history.replaceState(null, '', '?seed=202');
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -74,7 +80,7 @@ final class GameViewController: CAPBridgeViewController {
             if let error = error { state["evaluationError"] = error.localizedDescription }
             self.testSample += 1
             state["sample"] = self.testSample
-            state["offlineHTTPBlocked"] = self.simulatorTestRules != nil
+            state["offlineHTTPBlocked"] = self.testRulesInstalled
             state["nativeActive"] = self.view.window?.windowScene?.activationState == .foregroundActive
             state["nativeWidth"] = self.view.bounds.width
             state["nativeHeight"] = self.view.bounds.height
@@ -86,6 +92,13 @@ final class GameViewController: CAPBridgeViewController {
             if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
                let json = String(data: data, encoding: .utf8) {
                 self.testStatus?.accessibilityValue = json
+                if ProcessInfo.processInfo.arguments.contains("--uitest-prewarm"),
+                   let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                    // Readiness evidence for the CI preflight only. Normal Debug
+                    // and XCTest launches never write this file; Release omits it.
+                    let file = cache.appendingPathComponent("bdb-uitest-prewarm-\(ProcessInfo.processInfo.processIdentifier).json")
+                    try? data.write(to: file, options: .atomic)
+                }
             }
         }
     }
@@ -106,6 +119,8 @@ final class GameViewController: CAPBridgeViewController {
             href: location.href, protocol: location.protocol,
             scenes: game?.scene.getScenes(true).map(s => s.scene.key) || [],
             titleSeed: title?.seed ?? null,
+            titleFadeComplete: !!title && !title.cameras?.main?.fadeEffect?.isRunning,
+            probeInstalled: Array.isArray(window.__nativeTestErrors),
             texts: game?.scene.getScenes(true).flatMap(s => texts(s.children.list)) || [],
             canvas: box(canvas), app: box(document.getElementById('app')),
             loading: !!document.getElementById('loading'),

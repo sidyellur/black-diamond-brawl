@@ -45,6 +45,7 @@ try {
   check('WebKit boots the bundled game with no external asset requests', requests.every(url => new URL(url).origin === new URL(base).origin));
   await insets(47, 47, 21);
   check('notch and home-indicator insets bound the whole game canvas', true);
+  await page.waitForFunction(() => !window.__game.scene.getScene('TitleScene').cameras.main.fadeEffect.isRunning);
   await page.screenshot({ path: '.verify/ios-webkit-title.png' });
   await context.setOffline(true);
   await tap(178, 351);
