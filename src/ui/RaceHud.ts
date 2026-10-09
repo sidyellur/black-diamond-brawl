@@ -41,6 +41,9 @@ export class RaceHud {
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
+  private readonly raceControls: Phaser.GameObjects.GameObject[] = [];
+  private readonly releaseTouchControls: Array<() => void> = [];
+  private readonly cancelButtons: Array<() => void> = [];
 
   constructor(private readonly scene: Phaser.Scene, seed: number, actions: {
     pause: () => void;
@@ -81,10 +84,19 @@ export class RaceHud {
       const held = (x: number, label: string, action: InputAction) => {
         const g = scene.add.rectangle(x, SCREEN_H - 43, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
         const t = this.text(x, SCREEN_H - 43, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
-        const press = (p: Phaser.Input.Pointer) => { actions.control(action, true, `touch:${p.id}`); g.setFillStyle(UI.panelEdge, 0.95); };
-        const release = (p: Phaser.Input.Pointer) => { actions.control(action, false, `touch:${p.id}`); g.setFillStyle(UI.panel, 0.8); };
+        const pointers = new Set<number>();
+        const press = (p: Phaser.Input.Pointer) => { pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); g.setFillStyle(UI.panelEdge, 0.95); };
+        const release = (p: Phaser.Input.Pointer) => {
+          pointers.delete(p.id); actions.control(action, false, `touch:${p.id}`);
+          if (pointers.size === 0) g.setFillStyle(UI.panel, 0.8);
+        };
+        this.releaseTouchControls.push(() => {
+          for (const id of pointers) actions.control(action, false, `touch:${id}`);
+          pointers.clear(); g.setFillStyle(UI.panel, 0.8);
+        });
         g.on('pointerdown', press).on('pointerup', release).on('pointerout', release);
         this.objects.push(g, t);
+        this.raceControls.push(g);
       };
       held(58, '‹', 'left'); held(142, '›', 'right'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'attack');
       this.speed.setPosition(30, SCREEN_H - 104);
@@ -95,7 +107,11 @@ export class RaceHud {
     }
 
     this.pauseOverlay = scene.add.container(0, 0).setDepth(11000).setVisible(false);
-    const shade = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, SCREEN_W, SCREEN_H, UI.panel, 0.78).setInteractive();
+    // Keep the shade visual-only. Phaser sorts overlapping input targets by
+    // the previous camera renderList, so an overlay shown and clicked before
+    // its first render must not let an unrendered shade steal a button press.
+    // Ordinary race controls are explicitly disabled while this is visible.
+    const shade = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, SCREEN_W, SCREEN_H, UI.panel, 0.78);
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
@@ -129,11 +145,13 @@ export class RaceHud {
     if (this.touch) b.setInteractive(new Phaser.Geom.Rectangle(-10, -18, width + 20, height + 36), Phaser.Geom.Rectangle.Contains);
     this.bindButton(b, action);
     this.objects.push(b);
+    this.raceControls.push(b);
     return t;
   }
 
   private bindButton(button: Phaser.GameObjects.Rectangle, action: () => void): void {
     let pressedPointer: number | null = null;
+    this.cancelButtons.push(() => { pressedPointer = null; button.setFillStyle(UI.panelEdge); });
     button.on('pointerover', () => button.setFillStyle(0x38536a));
     button.on('pointerout', (pointer: Phaser.Input.Pointer) => {
       if (pressedPointer === pointer.id) pressedPointer = null;
@@ -159,7 +177,16 @@ export class RaceHud {
     this.message.setAlpha(Math.min(1, this.messageMs / 350));
   }
 
-  setPaused(paused: boolean): void { this.pauseOverlay.setVisible(paused); }
+  setPaused(paused: boolean): void {
+    // Hidden/disabled objects cannot receive the release that follows a
+    // keyboard interruption. Forget owned presses before changing visibility.
+    this.cancelButtons.forEach(cancel => cancel());
+    this.pauseOverlay.setVisible(paused);
+    if (paused) this.releaseTouchControls.forEach(release => release());
+    for (const control of this.raceControls) {
+      if (control.input) control.input.enabled = !paused;
+    }
+  }
   setCountdown(label: string): void { this.countdown.setText(label); }
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 

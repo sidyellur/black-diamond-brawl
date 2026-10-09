@@ -95,6 +95,20 @@ try {
     executablePath: process.env.CHROMIUM_PATH || undefined,
     args: ['--use-gl=angle', '--use-angle=swiftshader']
   });
+  // Keep visual review independent of later lifecycle regressions. These are
+  // ordinary live frames; the full touch interaction assertions still follow.
+  phase = 'initial mobile visual evidence';
+  page = await newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  await page.goto(`${BASE_URL}/?seed=202&touch=1`, { waitUntil: 'networkidle' });
+  await scene('TitleScene');
+  await page.screenshot({ path: `${OUT}/07-mobile-title.png` });
+  await clickGame(178, 351, true);
+  await ready();
+  await page.screenshot({ path: `${OUT}/08-mobile-race.png` });
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.screenshot({ path: `${OUT}/11-mobile-landscape.png` });
+  await page.context().close();
+
   page = await newPage();
   phase = 'title and countdown';
   await page.goto(`${BASE_URL}/?seed=101`, { waitUntil: 'networkidle' });
@@ -178,6 +192,31 @@ try {
   });
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
 
+  phase = 'immediate pause-menu hit testing';
+  const immediateResume = await page.evaluate(() => {
+    const game = window.__game;
+    const sc = game.scene.getScene('RaceScene');
+    const beforeFrame = game.loop.frame;
+    // Model the legitimate render-list cache from the frame before the
+    // overlay appeared, even if an earlier test had recently shown it.
+    const overlayObjects = new Set([sc.hud.pauseOverlay, ...sc.hud.pauseOverlay.list]);
+    for (const camera of sc.cameras.cameras) {
+      const priorFrameObjects = camera.renderList.filter((object) => !overlayObjects.has(object));
+      camera.renderList.splice(0, camera.renderList.length, ...priorFrameObjects);
+    }
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP', key: 'p', keyCode: 80, which: 80, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyP', key: 'p', keyCode: 80, which: 80, bubbles: true }));
+    const afterPause = sc.paused;
+    const canvas = game.canvas;
+    const bounds = canvas.getBoundingClientRect();
+    const mouse = { clientX: bounds.x + bounds.width * 480 / 960, clientY: bounds.y + bounds.height * 267 / 540, button: 0, bubbles: true };
+    canvas.dispatchEvent(new MouseEvent('mousedown', { ...mouse, buttons: 1 }));
+    canvas.dispatchEvent(new MouseEvent('mouseup', { ...mouse, buttons: 0 }));
+    return { beforeFrame, afterFrame: game.loop.frame, afterPause, afterResume: sc.paused };
+  });
+  writeFileSync(`${OUT}/immediate-resume.json`, JSON.stringify(immediateResume, null, 2));
+  check('a newly opened pause menu can resume before its next rendered frame', immediateResume.afterPause && !immediateResume.afterResume && immediateResume.beforeFrame === immediateResume.afterFrame);
+
   phase = 'pause and focus interruption';
   await page.keyboard.press('KeyP');
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
@@ -202,6 +241,37 @@ try {
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   check('returning focus leaves the race paused', (await state()).paused);
+  await page.evaluate(() => {
+    const game = window.__game;
+    const sc = game.scene.getScene('RaceScene');
+    const trace = window.__qaResumeTrace = [];
+    const snapshot = (event, pointer, target) => {
+      if (trace.length > 80) return;
+      trace.push({
+        event, time: performance.now(), frame: game.loop.frame, paused: sc.paused,
+        gameHasFocus: game.hasFocus, documentFocused: document.hasFocus(),
+        inputEnabled: sc.input.enabled, managerEnabled: sc.input.manager.enabled,
+        pointer: pointer ? { id: pointer.id, x: pointer.x, y: pointer.y, down: pointer.isDown, eventType: pointer.event?.type, camera: pointer.camera?.name } : null,
+        target: target ? { type: target.type, x: target.x, y: target.y, visible: target.visible, cameraFilter: target.cameraFilter } : null,
+        inputTemp: Array.isArray(sc.input._temp) ? sc.input._temp.map((object) => ({ type: object.type, x: object.x, y: object.y })) : null,
+        cameras: sc.cameras.cameras.map((camera) => ({ name: camera.name, id: camera.id, x: camera.x, y: camera.y, scrollX: camera.scrollX, scrollY: camera.scrollY, visible: camera.visible,
+          overlayRenderIndex: camera.renderList.indexOf(sc.hud.pauseOverlay),
+          targetRenderIndex: target ? camera.renderList.indexOf(target) : null
+        }))
+      });
+    };
+    snapshot('before-click');
+    for (const child of sc.hud.pauseOverlay.list.filter((object) => object.input)) {
+      for (const event of ['pointerover', 'pointerdown', 'pointerup', 'pointerout']) {
+        child.on(event, (pointer) => snapshot(event, pointer, child));
+      }
+    }
+    for (const name of ['mousemove', 'mousedown', 'mouseup', 'blur', 'focus']) {
+      const listener = () => snapshot(`window:${name}`, sc.input.activePointer);
+      window.addEventListener(name, listener, true);
+      sc.events.once('shutdown', () => window.removeEventListener(name, listener, true));
+    }
+  });
   await clickGame(480, 267);
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
 
@@ -323,6 +393,30 @@ try {
   const settledCancel = await state();
   await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, settledCancel.elapsed);
   check('touchcancel releases held steering after the current motion settles', (await state()).lane, settledCancel.lane);
+
+  phase = 'held touch across pause';
+  const beforeHeldTouch = await state();
+  const heldDirection = beforeHeldTouch.lane < 3 ? 1 : -1;
+  const heldPoint = await gamePoint(heldDirection === 1 ? 142 : 58, 497);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...heldPoint, id: 1 }] });
+  await page.waitForFunction((lane) => window.__game.scene.getScene('RaceScene').player.laneIndex !== lane, beforeHeldTouch.lane);
+  // Keep the actual touch physically held while opening pause by keyboard;
+  // release reaches the browser only after ordinary HUD hit targets disable.
+  await page.keyboard.press('KeyP');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await clickGame(480, 267, true);
+  await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
+  const touchResume = await state();
+  await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, touchResume.elapsed);
+  const touchSettled = await state();
+  await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, touchSettled.elapsed);
+  check('a touch released while paused cannot stay held after resume', (await state()).lane, touchSettled.lane);
+  const freshPoint = await gamePoint(touchSettled.lane < 4 ? 142 : 58, 497);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...freshPoint, id: 1 }] });
+  await page.waitForFunction((lane) => window.__game.scene.getScene('RaceScene').player.laneIndex !== lane, touchSettled.lane);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check('the same touch pointer can steer afresh after pause and release', (await state()).lane !== touchSettled.lane);
   await touchSession.detach();
   await clickGame(902, 77, true);
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
@@ -354,6 +448,9 @@ try {
     const game = window.__game;
     const sc = game.scene.getScene('RaceScene');
     return {
+      rendererType: game.renderer.type,
+      actualFps: game.loop.actualFps,
+      rawDelta: game.loop.rawDelta,
       cameras: sc.cameras.cameras.length,
       textures: Object.keys(game.textures.list).length,
       displayObjects: sc.children.length,
@@ -389,6 +486,10 @@ try {
   if (page && !page.isClosed()) await page.screenshot({ path: `${OUT}/acceptance-failure.png` }).catch(() => {});
 } finally {
   clearTimeout(deadline);
+  if (page && !page.isClosed()) {
+    const trace = await page.evaluate(() => window.__qaResumeTrace ?? null).catch(() => null);
+    if (trace) writeFileSync(`${OUT}/resume-pointer-trace.json`, JSON.stringify(trace, null, 2));
+  }
   writeFileSync(`${OUT}/acceptance-report.txt`, [...notes, ...(failure ? [failure] : []), ...errors.map((error) => `BROWSER ERROR ${error}`)].join('\n') + '\n');
   await browser?.close();
 }
