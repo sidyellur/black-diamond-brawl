@@ -8,7 +8,7 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 
 - Feature PR: [#20](https://github.com/sidyellur/black-diamond-brawl/pull/20).
 - Latest publication/merge status and artifact links: [release issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21). This is updated after merge and main verification, rather than predicting a future merge inside a pre-merge commit.
-- Latest published source before this follow-on: `2d5797c2edd582a59549c6cd6035fba3f550bdd5`. Build/model/WebGL smoke gates pass; complete browser acceptance remains pending the rotation fix below. The linked release issue records the final exact verified head.
+- Latest published gameplay source: `4992c13d18ec6eaf29d67a01dd0debc1d52f1552`. Build/model/WebGL smoke, desktop flows, repeated phone rotation and quick-tap checks pass; remaining multitouch/Canvas acceptance is pending the test-clock correction below. The linked release issue records the final exact verified head.
 - Hosting: no public site, Pages configuration, deployment workflow or existing homepage was found. No new hosting, account, billing or security settings were introduced.
 
 ## What changed
@@ -151,3 +151,10 @@ The entries below preserve the actual progression, including failed runs and the
 - Recorded DOM and Phaser diagnostics prove the mount was already correct at 844×390 while the canvas retained the old 390×219.375 fit. Phaser 3.90's orientation handler fits using cached parent bounds, then updates that cache too late; its next dirty check sees no change and never refits.
 - Added a game-owned resize observer and viewport listeners that sample current parent bounds before calling the public scale refresh. Duplicate events and zero-size mounts do no work; game destruction removes all listeners/observation. No per-frame resize or new dependencies were added.
 - New ordered-fit, repeated-rotation, same-size stability, idempotency and cleanup regressions **pass** locally, as do the production build and whitespace checks. Browser acceptance now also verifies portrait→landscape→portrait→landscape with separate diagnostics. Actual rotation, quick-tap and later touch/Canvas checks remain pending the replacement CI run; no assertions were relaxed.
+
+### 2026-10-09 09:28 UTC / 02:28 PDT — rotation and quick-tap fixes verified
+
+- [Run 37910633076](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37910633076) at `4992c13`: build/model/asset gates, all 13 WebGL smoke checks, all desktop lifecycle checks, repeated portrait→landscape→portrait→landscape, canceled menu touches, viewport scroll protection, and real touch steering/jump **passed**.
+- The quick-touch trace confirms the formerly lost tap was consumed 180.3 ms after touchstart, beyond the old 160 ms window. The viewport now fits at 693.33×390 in an 844×390 landscape viewport. Independent actual landscape review **passes**; desktop/title/race/crest/pause/results/finish/mobile visual acceptance is complete.
+- The run then **failed** a drag-release test using 500 ms + 400 ms wall-clock sleeps. Recorded events prove the left control released correctly, made exactly one legitimate lane tween from 3 to 2, and stayed there. The first sample preceded that tween's completion on the slow software renderer; this was a test-clock mismatch, not stuck input.
+- Changed that check to simulation-time settling and stability windows, plus an explicit one-lane movement assertion. Product code is unchanged for this correction. Remaining multitouch, held-touch pause/reuse, Canvas and ten-retry resource checks must still pass before merge.

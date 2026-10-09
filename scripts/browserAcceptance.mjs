@@ -412,10 +412,11 @@ try {
     const input = sc.playerInput;
     const trace = window.__qaTouchTrace = [];
     const record = (event, details = {}) => {
-      if (trace.length >= 180) return;
+      if (trace.length >= 600) return;
       trace.push({ event, at: performance.now(), frame: sc.game.loop.frame,
         rawDelta: sc.game.loop.rawDelta, paused: sc.paused, countdown: sc.countdownMs,
-        lane: sc.player.laneIndex, airborne: sc.player.airborne, ...details });
+        elapsed: sc.elapsedRaceMs, lane: sc.player.laneIndex, lean: sc.player.leanDirection,
+        airborne: sc.player.airborne, ...details });
     };
     const setAction = input.setAction;
     input.setAction = (...args) => { record('setAction', { args }); return setAction(...args); };
@@ -434,6 +435,7 @@ try {
   check('real touch taps steer and jump', (await state()).airborne);
   await page.screenshot({ path: `${OUT}/08-mobile-race.png` });
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').player.airborne);
+  const beforeDrag = await state();
   const left = await gamePoint(58, 497);
   const outside = await gamePoint(480, 260);
   await page.mouse.move(left.x, left.y);
@@ -441,10 +443,19 @@ try {
   await page.waitForTimeout(50);
   await page.mouse.move(outside.x, outside.y);
   await page.mouse.up();
-  await page.waitForTimeout(500);
-  const afterDrag = (await state()).lane;
-  await page.waitForTimeout(400);
-  check('dragging out of a control cannot leave steering held', (await state()).lane, afterDrag);
+  // A release cancels the hold, not the single lane tween already requested.
+  // Observe completion in simulation time, which advances slower than wall
+  // time on software WebGL, then watch beyond both repeat and buffer windows.
+  await page.waitForFunction((lane) => {
+    const player = window.__game.scene.getScene('RaceScene').player;
+    return player.laneIndex === lane - 1 && player.leanDirection === 0;
+  }, beforeDrag.lane);
+  const afterDrag = await state();
+  await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, afterDrag.elapsed);
+  check('dragging out completes only one steer and cannot leave steering held', await page.evaluate((lane) => {
+    const player = window.__game.scene.getScene('RaceScene').player;
+    return player.laneIndex === lane - 1 && player.leanDirection === 0;
+  }, beforeDrag.lane));
 
   const beforeMultiTouch = await state();
   const jump = await gamePoint(812, 497);
