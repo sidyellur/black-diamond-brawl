@@ -64,6 +64,7 @@ try {
   await step('rival pack pacing', () => run('npm', ['run', 'verify:pacing']));
   await step('scoring and flow', () => run('npm', ['run', 'verify:scoring']));
   await step('responsive controls', () => run('npm', ['run', 'verify:controls']));
+  await step('touchcancel browser compatibility', () => run('node', ['--import', 'tsx', 'scripts/verifyTouchCancel.ts']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
 

@@ -3,8 +3,25 @@ import { RoadRenderer } from '../src/render/RoadRenderer';
 import { SkyRenderer } from '../src/render/SkyRenderer';
 import { Juice } from '../src/render/Juice';
 import { FinishBanner } from '../src/track/finishBanner';
+import { project } from '../src/render/project';
+import { softClampWidth } from '../src/render/projectEntity';
 import { projectEntity } from '../src/render/projectEntity';
-import { SEGMENT_LENGTH } from '../src/config';
+import { SEGMENT_LENGTH, CAMERA_BACK_Z, CAMERA_HEIGHT, LANES, ROAD_WIDTH, SCREEN_W, MAX_ENTITY_SCREEN_FRACTION, RIDER_WIDTH_FRACTION, RIDER_JUMP_HEIGHT_WORLD } from '../src/config';
+
+
+// Same-depth outer rivals used to lie wholly outside the centered view. Keep
+// the local pack readable without shrinking the player or flattening jumps.
+for (const lane of LANES) {
+  const p = project(lane * ROAD_WIDTH, 0, CAMERA_BACK_Z, 0, CAMERA_HEIGHT, 0)!;
+  const width = softClampWidth(p.screenW * RIDER_WIDTH_FRACTION, SCREEN_W * MAX_ENTITY_SCREEN_FRACTION);
+  assert.ok(p.screenX - width / 2 > 0 && p.screenX + width / 2 < SCREEN_W, 'all five centered-pack frames fit');
+  assert.ok(width >= 94 && width <= 104, 'readable, coherent rider scale');
+  assert.ok(p.screenY >= 455 && p.screenY <= 465, 'stable hero foot position');
+}
+const grounded = project(0, 0, CAMERA_BACK_Z, 0, CAMERA_HEIGHT, 0)!;
+const jumping = project(0, RIDER_JUMP_HEIGHT_WORLD, CAMERA_BACK_Z, 0, CAMERA_HEIGHT, 0)!;
+assert.ok(grounded.screenY - jumping.screenY >= 95 && grounded.screenY - jumping.screenY <= 100);
+console.log('PASS local pack framing: five same-depth riders visible, stable hero size/feet and jump height');
 
 let calls = 0;
 let fillAlpha = 1;

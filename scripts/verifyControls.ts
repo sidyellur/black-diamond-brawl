@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type Phaser from 'phaser';
 import { ATTACK_SWING_MS, JUMP_AIRTIME_MS, LANE_TWEEN_MS, PLAYER_START_Z, ROCK_TUMBLE_MS } from '../src/config';
-import { ACTION_BUFFER_MS, bindPlayerInput, PlayerInputController, STEER_REPEAT_DELAY_MS, STEER_REPEAT_MS } from '../src/entities/input';
+import { ACTION_BUFFER_MS, MAX_FRESH_FRAME_MS, bindPlayerInput, PlayerInputController, STEER_REPEAT_DELAY_MS, STEER_REPEAT_MS } from '../src/entities/input';
 import { Player } from '../src/entities/player';
 import { oncePerKeyEvent } from '../src/input/keyboardEvents';
 
@@ -398,5 +398,101 @@ check('touch-only scenes work with no keyboard plugin', () => {
   assert.equal(player.airborne, true);
   events.emit('shutdown');
   assert.equal(gameEvents.listenerCount('blur'), 0);
+});
+check('a complete quick touch tap survives its first slow render frame exactly once', () => {
+  const { player, input, age } = rig();
+  input.setAction('right', true, 'touch:1');
+  age(30);
+  input.setAction('right', false, 'touch:1');
+  age(210); //240ms wall time elapsed; physics still advances at most50ms.
+  input.update(50, 250);
+  assert.equal(player.leanDirection, 1);
+  player.update(LANE_TWEEN_MS);
+  assert.equal(player.laneIndex, 3);
+  age(250);
+  input.update(50, 250);
+  player.update(LANE_TWEEN_MS);
+  assert.equal(player.laneIndex, 3);
+  assert.equal(player.leanDirection, 0);
+});
+check('fresh jump and attack taps get the same first-frame opportunity', () => {
+  const { player, input, age } = rig();
+  input.setAction('jump', true, 'touch:2');
+  input.setAction('jump', false, 'touch:2');
+  input.setAction('attack', true, 'touch:3');
+  input.setAction('attack', false, 'touch:3');
+  age(390);
+  input.update(50, 400);
+  assert.equal(player.airborne, true);
+  assert.equal(input.attackJustPressed(), true);
+  assert.equal(input.attackJustPressed(), false);
+});
+check('older-frame hit-stop taps cannot borrow the latest slow frame budget', () => {
+  const { player, input, age } = rig();
+  for (const action of ['right', 'jump', 'attack'] as const) {
+    input.setAction(action, true); input.setAction(action, false);
+  }
+  age(410); //Multiple skipped hit-stop frames; latest frame was only200ms.
+  input.update(50, 200);
+  assert.equal(player.leanDirection, 0);
+  assert.equal(player.airborne, false);
+  assert.equal(input.attackJustPressed(), false);
+});
+check('a previously observed locked jump retains its original 160ms deadline', () => {
+  const { player, input, age } = rig();
+  player.jump(false);
+  player.update(JUMP_AIRTIME_MS - 100);
+  input.setAction('jump', true); input.setAction('jump', false);
+  age(60);
+  input.update(50, 400); //Observed while locked, within ordinary forgiveness.
+  player.update(100); //Land before the following update.
+  age(120); //180ms since press, despite a large current render interval.
+  input.update(50, 400);
+  assert.equal(player.airborne, false);
+});
+check('a slow-frame first observation cannot create a new jump buffer while locked', () => {
+  const { player, input, age } = rig();
+  player.startSwing();
+  input.setAction('jump', true); input.setAction('jump', false);
+  age(220);
+  input.update(50, 250); //The first chance was valid, but swing still locks jump.
+  player.update(ATTACK_SWING_MS);
+  age(20);
+  input.update(50, 250);
+  assert.equal(player.airborne, false);
+});
+check('fresh-frame forgiveness is capped even after a multi-second hitch', () => {
+  const { player, input, age } = rig();
+  for (const action of ['left', 'jump', 'attack'] as const) {
+    input.setAction(action, true); input.setAction(action, false);
+  }
+  age(MAX_FRESH_FRAME_MS + 1);
+  input.update(50, 5000);
+  assert.equal(player.leanDirection, 0);
+  assert.equal(player.airborne, false);
+  assert.equal(input.attackJustPressed(), false);
+});
+check('invalid render intervals never create an unlimited input deadline', () => {
+  for (const frameElapsed of [NaN, Infinity, -100]) {
+    const { player, input, age } = rig();
+    input.setAction('right', true); input.setAction('right', false);
+    age(ACTION_BUFFER_MS + 1);
+    input.update(50, frameElapsed);
+    assert.equal(player.leanDirection, 0);
+  }
+});
+check('pause still discards a pending tap even inside the extended fresh-frame budget', () => {
+  const { player, input, age } = rig();
+  input.setAction('right', true); input.setAction('right', false);
+  input.setAction('jump', true); input.setAction('jump', false);
+  input.setAction('attack', true); input.setAction('attack', false);
+  age(100);
+  input.setEnabled(false);
+  age(100);
+  input.setEnabled(true);
+  input.update(50, 400);
+  assert.equal(player.leanDirection, 0);
+  assert.equal(player.airborne, false);
+  assert.equal(input.attackJustPressed(), false);
 });
 console.log(`\n=== ${checks} control regressions passed ===\n`);

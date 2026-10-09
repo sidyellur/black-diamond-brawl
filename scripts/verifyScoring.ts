@@ -28,6 +28,9 @@ function obstacle(kind: Obstacle['kind'], lane: number, z: number): Obstacle {
 function rig(obstacles: Obstacle[] = [], riders: AIRider[] = []) {
   setDeterministicRuntime(71);
   const player = new Player();
+  // Isolated scoring fixtures use this explicit origin, independent of the
+  // production camera/start-line offset. Their obstacles/rivals sit at 1300.
+  player.worldZ = 1200;
   player.speed = MAX_SPEED;
   const collisions = new CollisionSystem();
   const combat = new CombatSystem(player, riders, obstacles);

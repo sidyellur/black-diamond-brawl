@@ -7,6 +7,8 @@ import {
   MAX_ENTITY_SCREEN_FRACTION,
   MAX_SPEED,
   PLAYER_START_Z,
+  RIDER_WIDTH_FRACTION,
+  RIDER_JUMP_HEIGHT_WORLD,
   SCREEN_H,
   SCREEN_W,
   SEGMENT_LENGTH
@@ -45,8 +47,8 @@ import { oncePerKeyEvent } from '../input/keyboardEvents';
 // the player's `dz` is constant, so its on-screen size is stable — but its
 // position now comes from the same projection the road and rivals use, which
 // is what puts all five racers into one coherent scale model.
-const PLAYER_WIDTH_FRACTION = 0.17; // of the projected road half-width at its depth
-const PLAYER_JUMP_HEIGHT_WORLD = 520; // world-units at jump apex, fed through projection
+const PLAYER_WIDTH_FRACTION = RIDER_WIDTH_FRACTION; // of the projected road half-width at its depth
+const PLAYER_JUMP_HEIGHT_WORLD = RIDER_JUMP_HEIGHT_WORLD; // world-units at jump apex, fed through projection
 
 // World units behind the finish line the player rests at after crossing —
 // keeps the banner in front of the camera instead of sitting exactly at
@@ -113,6 +115,7 @@ export class RaceScene extends Phaser.Scene {
   private previousCharges = 0;
   private previousHitReaction = false;
   private worldRoll = 0;
+  private previousUpdateAt = 0;
 
   /** True once the run has ended (finish or wipeout) and `ResultScene` has
    *  been started — guards against re-triggering the transition on a later
@@ -138,6 +141,7 @@ export class RaceScene extends Phaser.Scene {
     this.previousCharges = 0;
     this.previousHitReaction = false;
     this.worldRoll = 0;
+    this.previousUpdateAt = performance.now();
     this.worldObjects = [];
     this.prevWiped = false;
     this.prevTumbling = false;
@@ -291,6 +295,12 @@ export class RaceScene extends Phaser.Scene {
   }
 
   update(_wallTime: number, frameDelta: number): void {
+    // Match the input event clock, not RAF's possibly delayed timestamp. Tick
+    // every render attempt, including pause/hit-stop, so a stale command can
+    // never borrow the entire interruption as its fresh-frame allowance.
+    const updateAt = performance.now();
+    const inputFrameElapsedMs = Math.max(0, updateAt - this.previousUpdateAt);
+    this.previousUpdateAt = updateAt;
     if (this.paused) return;
     // Bound a frame's travel below the collision window. A slow/background
     // frame must never teleport through a tree or consume a whole jump.
@@ -338,7 +348,7 @@ export class RaceScene extends Phaser.Scene {
     // handler-driven attack would resolve combat inside the freeze on a stale
     // clock. A press with no eligible target is refused by `attemptAttack`
     // itself and costs nothing.
-    this.playerInput.update(delta);
+    this.playerInput.update(delta, inputFrameElapsedMs);
     if (this.playerInput.attackJustPressed()) {
       this.combat.attemptAttack(time);
     }

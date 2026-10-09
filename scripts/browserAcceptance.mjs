@@ -75,6 +75,16 @@ async function gamePoint(x, y) {
   return { x: box.x + x * box.width / 960, y: box.y + y * box.height / 540 };
 }
 
+async function canvasFitsViewport() {
+  await page.waitForFunction(() => {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return false;
+    const box = canvas.getBoundingClientRect();
+    const fit = Math.min(window.innerWidth / 960, window.innerHeight / 540);
+    return Math.abs(box.width - 960 * fit) <= 2 && Math.abs(box.height - 540 * fit) <= 2;
+  });
+}
+
 async function clickGame(x, y, touch = false) {
   const point = await gamePoint(x, y);
   if (touch) await page.touchscreen.tap(point.x, point.y);
@@ -106,6 +116,7 @@ try {
   await ready();
   await page.screenshot({ path: `${OUT}/08-mobile-race.png` });
   await page.setViewportSize({ width: 844, height: 390 });
+  await canvasFitsViewport();
   await page.screenshot({ path: `${OUT}/11-mobile-landscape.png` });
   await page.context().close();
 
@@ -351,12 +362,38 @@ try {
   await touchSession.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
   await page.waitForTimeout(200);
   check('canceling a real touch on Drop In cannot activate the button', await page.evaluate(() => window.__game.scene.isActive('TitleScene')));
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 12, y: 240, id: 1 }] });
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 12, y: 540, id: 1 }] });
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  check('real touch drag keeps the game viewport fixed and normal capture enabled', await page.evaluate(() =>
+    window.scrollX === 0 && window.scrollY === 0 &&
+    (window.visualViewport?.scale ?? 1) === 1 && window.__game.input.touch.capture));
   await clickGame(178, 351, true);
   await scene('RaceScene');
   await ready();
   await quietCourse();
   const box = await page.locator('canvas').boundingBox();
   check('portrait canvas fits inside the viewport', box.x >= -1 && box.y >= -1 && box.x + box.width <= 391 && box.y + box.height <= 845);
+  await page.evaluate(() => {
+    const sc = window.__game.scene.getScene('RaceScene');
+    const input = sc.playerInput;
+    const trace = window.__qaTouchTrace = [];
+    const record = (event, details = {}) => {
+      if (trace.length >= 180) return;
+      trace.push({ event, at: performance.now(), frame: sc.game.loop.frame,
+        rawDelta: sc.game.loop.rawDelta, paused: sc.paused, countdown: sc.countdownMs,
+        lane: sc.player.laneIndex, airborne: sc.player.airborne, ...details });
+    };
+    const setAction = input.setAction;
+    input.setAction = (...args) => { record('setAction', { args }); return setAction(...args); };
+    const update = input.update;
+    input.update = (...args) => { record('before-update', { args }); const result = update(...args); record('after-update', { args }); return result; };
+    const right = sc.hud.objects.find((object) => object.input && object.x === 142 && object.y === 497);
+    for (const event of ['pointerover', 'pointerdown', 'pointerup', 'pointerout']) {
+      right?.on(event, (pointer) => record(event, { pointer: pointer.id, nativeEvent: pointer.event?.type, x: pointer.x, y: pointer.y }));
+    }
+    record('ready-to-tap', { rightInputEnabled: right?.input?.enabled });
+  });
   await clickGame(142, 497, true);
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').player.laneIndex === 3);
   await clickGame(812, 497, true);
@@ -424,11 +461,14 @@ try {
   await scene('TitleScene');
   check('touch pause menu returns to the lodge', await page.evaluate(() => window.__game.scene.isActive('TitleScene')));
   await page.setViewportSize({ width: 844, height: 390 });
+  await canvasFitsViewport();
   await clickGame(178, 351, true);
   await ready();
   await page.screenshot({ path: `${OUT}/11-mobile-landscape.png` });
   const landscape = await page.locator('canvas').boundingBox();
-  check('landscape touch canvas fits the viewport', landscape.x >= -1 && landscape.y >= -1 && landscape.x + landscape.width <= 845 && landscape.y + landscape.height <= 391);
+  check('landscape touch canvas fills the available height and fits the viewport', landscape.width >= 690 && landscape.height >= 387 && landscape.x >= -1 && landscape.y >= -1 && landscape.x + landscape.width <= 845 && landscape.y + landscape.height <= 391);
+  const touchTrace = await page.evaluate(() => window.__qaTouchTrace ?? null);
+  if (touchTrace) writeFileSync(`${OUT}/touch-input-trace.json`, JSON.stringify(touchTrace, null, 2));
   await page.context().close();
 
   phase = 'Canvas compatibility';
@@ -489,6 +529,8 @@ try {
   if (page && !page.isClosed()) {
     const trace = await page.evaluate(() => window.__qaResumeTrace ?? null).catch(() => null);
     if (trace) writeFileSync(`${OUT}/resume-pointer-trace.json`, JSON.stringify(trace, null, 2));
+    const touchTrace = await page.evaluate(() => window.__qaTouchTrace ?? null).catch(() => null);
+    if (touchTrace) writeFileSync(`${OUT}/touch-input-trace.json`, JSON.stringify(touchTrace, null, 2));
   }
   writeFileSync(`${OUT}/acceptance-report.txt`, [...notes, ...(failure ? [failure] : []), ...errors.map((error) => `BROWSER ERROR ${error}`)].join('\n') + '\n');
   await browser?.close();

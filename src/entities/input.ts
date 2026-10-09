@@ -11,11 +11,16 @@ export const STEER_REPEAT_DELAY_MS = 210;
 export const STEER_REPEAT_MS = 170;
 /** A late press can survive a landing, but never a whole jump or tumble. */
 export const ACTION_BUFFER_MS = 160;
+/** One slow rendered frame can contain a complete physical tap. This ceiling
+ * applies only to its first observation, never to already-buffered actions. */
+export const MAX_FRESH_FRAME_MS = 500;
 
 export interface PlayerInput {
   /** Call once per active simulation frame, before polling attack and updating
    * the player. Skip this during hit-stop; events only record intent. */
-  update(deltaMs: number): void;
+  // frameElapsedMs is the latest raw render interval, NOT capped physics time
+  // or the total time spent paused/in hit-stop. Omit for the normal 160ms budget.
+  update(deltaMs: number, frameElapsedMs?: number): void;
   attackJustPressed(): boolean;
   /** Disabling clears pending actions and requires held controls to be released. */
   setEnabled(enabled: boolean): void;
@@ -36,6 +41,7 @@ export class PlayerInputController implements PlayerInput {
   private blockedSources = new Set<string>();
   private lanePress: { direction: -1 | 1; at: number } | null = null;
   private jumpPressedAt: number | null = null;
+  private jumpObserved = false;
   private attackPressedAt: number | null = null;
   private attackReady = false;
   private repeatDirection: -1 | 0 | 1 = 0;
@@ -68,22 +74,29 @@ export class PlayerInputController implements PlayerInput {
       this.lanePress = { direction: action === 'left' ? -1 : 1, at };
     } else if (action === 'jump') {
       this.jumpPressedAt = at;
+      this.jumpObserved = false;
     } else {
       this.attackPressedAt = at;
     }
   }
 
-  update(deltaMs: number): void {
+  update(deltaMs: number, frameElapsedMs = deltaMs): void {
     this.attackReady = false;
     if (!this.enabled || !this.focused || this.destroyed || this.player.wipedOut) return;
     const now = this.now();
     const delta = Math.max(0, Number.isFinite(deltaMs) ? deltaMs : 0);
+    // Touch callbacks can arrive between render frames, unlike keyboard events
+    // delivered in Phaser pre-update. Give an unobserved tap from this latest
+    // frame one opportunity to execute, even if slow rendering exceeded 160ms.
+    // This never accumulates skipped hit-stop frames into a bigger deadline.
+    const freshAgeLimit = Math.max(ACTION_BUFFER_MS,
+      Math.min(MAX_FRESH_FRAME_MS, Number.isFinite(frameElapsedMs) ? Math.max(0, frameElapsedMs) : 0));
     const left = this.isDown('left');
     const right = this.isDown('right');
     const direction = left === right ? 0 : left ? -1 : 1;
     let shifted = false;
 
-    if (this.lanePress && now - this.lanePress.at <= ACTION_BUFFER_MS && !(left && right)) {
+    if (this.lanePress && now - this.lanePress.at <= freshAgeLimit && !(left && right)) {
       this.player.requestLaneShift(this.lanePress.direction);
       shifted = true;
     }
@@ -107,16 +120,23 @@ export class PlayerInputController implements PlayerInput {
     }
 
     if (this.jumpPressedAt !== null) {
-      if (now - this.jumpPressedAt > ACTION_BUFFER_MS) {
+      const age = now - this.jumpPressedAt;
+      const limit = this.jumpObserved ? ACTION_BUFFER_MS : freshAgeLimit;
+      this.jumpObserved = true;
+      if (age > limit) {
         this.jumpPressedAt = null;
       } else if (this.player.canJump) {
         this.jumpPressedAt = null;
         // Decide mogul/trick launch at execution, not at the buffered press.
         this.onJump();
+      } else if (age > ACTION_BUFFER_MS) {
+        // It had its first chance but remained locked. Slow-frame forgiveness
+        // cannot turn into a new landing/swing buffer or a delayed jump.
+        this.jumpPressedAt = null;
       }
     }
     if (this.attackPressedAt !== null) {
-      this.attackReady = now - this.attackPressedAt <= ACTION_BUFFER_MS;
+      this.attackReady = now - this.attackPressedAt <= freshAgeLimit;
       this.attackPressedAt = null;
     }
   }
@@ -151,6 +171,7 @@ export class PlayerInputController implements PlayerInput {
     this.sources.forEach((_action, source) => this.blockedSources.add(source));
     this.lanePress = null;
     this.jumpPressedAt = null;
+    this.jumpObserved = false;
     this.attackPressedAt = null;
     this.attackReady = false;
     this.repeatDirection = 0;
@@ -243,7 +264,7 @@ export function bindPlayerInput(
   scene.events.once('shutdown', destroy);
 
   return {
-    update: (delta) => controller.update(delta),
+    update: (delta, frameElapsed) => controller.update(delta, frameElapsed),
     attackJustPressed: () => controller.attackJustPressed(),
     setEnabled: (enabled) => controller.setEnabled(enabled),
     reset: () => controller.reset(),
