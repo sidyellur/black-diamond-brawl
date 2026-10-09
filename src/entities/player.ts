@@ -79,6 +79,12 @@ export class Player implements Collidable {
    */
   hitReactionMsRemaining = 0;
 
+  /** Accepted movement, not raw key presses. Used by timed evade detection. */
+  maneuverSerial = 0;
+  maneuverAgeMs = Infinity;
+  maneuverKind: 'steer' | 'jump' | null = null;
+  maneuverFromFraction = LANES[CENTER_LANE_INDEX];
+
   airborne = false;
   private jumpElapsedMs = 0;
   /** Airtime of the CURRENT/most-recent jump (§4.3): normal or extended. */
@@ -108,6 +114,7 @@ export class Player implements Collidable {
       return; // run-ending wipeout: frozen until the result screen restarts the race
     }
 
+    this.maneuverAgeMs += deltaMs;
     const deltaSeconds = deltaMs / 1000;
 
     // Auto-acceleration toward MAX_SPEED (§4.1) — no brake/tuck control in v1.
@@ -178,7 +185,7 @@ export class Player implements Collidable {
    * or crest trick launch; a normal jump is ~600ms. No-op while airborne (no
    * double-jump) or frozen by a run-ending wipeout.
    */
-  jump(extended: boolean): void {
+  jump(extended: boolean, voluntary = true): void {
     if (this.airborne || this.wipedOut || this.tumbling) {
       return;
     }
@@ -189,6 +196,7 @@ export class Player implements Collidable {
       // commits you unless you press the other button".
       return;
     }
+    if (voluntary) this.recordManeuver('jump');
     this.airborne = true;
     this.jumpElapsedMs = 0;
     this.extendedJump = extended;
@@ -300,8 +308,8 @@ export class Player implements Collidable {
    * reachable in practice: an airborne player is never a valid combat
    * target, but guarded defensively).
    */
-  applyKnockback(targetLaneIndex: number, speedLossFactor: number): void {
-    if (this.wipedOut || this.airborne) {
+  applyKnockback(targetLaneIndex: number, speedLossFactor: number, allowAirborne = false): void {
+    if (this.wipedOut || (this.airborne && !allowAirborne)) {
       return;
     }
     this.speed *= 1 - speedLossFactor;
@@ -365,7 +373,15 @@ export class Player implements Collidable {
     if (target === this._laneIndex) {
       return; // already at the road edge; nothing to do
     }
+    this.recordManeuver('steer');
     this.tween = { fromLane: this._laneIndex, toLane: target, elapsedMs: 0 };
+  }
+
+  private recordManeuver(kind: 'steer' | 'jump'): void {
+    this.maneuverSerial++;
+    this.maneuverAgeMs = 0;
+    this.maneuverKind = kind;
+    this.maneuverFromFraction = this.laneOffsetFraction;
   }
 
   private updateLaneTween(deltaMs: number): void {

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
+import { MountainTheme, themeAtSegment } from '../track/mountain';
 import { RUMBLE, SNOW, mix } from './palette';
 import { project } from './project';
 
@@ -18,7 +19,9 @@ const OFF_PISTE_DARK = SNOW.offPisteAlt;
 
 // A sculpted shoulder, with sparse marker poles instead of a highway curb.
 const EDGE_WIDTH_RATIO = 1.012;
-const SNOWBANK_WIDTH_RATIO = 1.13;
+const THEMES: readonly MountainTheme[] = ['forest', 'ridge', 'bowl'];
+const THEME_INDEX: Record<MountainTheme, number> = { forest: 0, ridge: 1, bowl: 2 };
+const BANK_WIDTH: Record<MountainTheme, number> = { forest: 1.13, ridge: 1.08, bowl: 1.72 };
 const SURFACE_BANDS = 16;
 
 /** How far the off-piste fill overshoots each screen edge. The world is drawn
@@ -92,6 +95,7 @@ interface SurfaceShades {
   bankShadow: number;
   seam: number;
   corduroy: number;
+  terrain: number;
 }
 
 /**
@@ -103,8 +107,8 @@ interface SurfaceShades {
 export class RoadRenderer {
   private readonly graphics: Phaser.GameObjects.Graphics;
   private lastFogColor = -1;
-  private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS }, () => ({
-    snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0
+  private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS * THEMES.length }, () => ({
+    snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0, terrain: 0
   }));
   private readonly markers = Array.from({ length: 20 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
   private markerCount = 0;
@@ -257,7 +261,9 @@ export class RoadRenderer {
       // test is not "can I see haze" but "does a surface at distance still
       // keep its own local contrast" — hence the 0.82 ceiling, which leaves
       // far geometry legible instead of dissolving it into flat fog.
-      const colors = this.shades[i * SURFACE_BANDS + surfaceBand];
+      const theme = themeAtSegment(segment);
+      const bankWidth = BANK_WIDTH[theme];
+      const colors = this.shades[(THEME_INDEX[theme] * DRAW_DISTANCE + i) * SURFACE_BANDS + surfaceBand];
 
       // Off-piste fills the full screen width behind the road (unaffected by
       // the curve offset).
@@ -269,21 +275,38 @@ export class RoadRenderer {
         colors.offPiste
       );
 
+      // Ridge rock faces hug the narrow snow spine; bowl walls curve far
+      // outward into a wide amphitheatre. Only scenery changes width: poles,
+      // lane centres, road projection and collision still agree exactly.
+      if (theme !== 'forest' && i < 55) {
+        const outer = theme === 'ridge' ? 2.4 + Math.sin(segIndex * 0.12) * 0.25 : 2.3;
+        const inner = theme === 'ridge' ? bankWidth : 1.85;
+        for (const side of [-1, 1]) {
+          this.fillTrapezoid(
+            near.screenX + side * near.screenW * inner,
+            near.screenX + side * near.screenW * outer, near.screenY,
+            far.screenX + side * far.screenW * inner,
+            far.screenX + side * far.screenW * outer, far.screenY,
+            colors.terrain
+          );
+        }
+      }
+
       // Sculpted snow shoulders: their light and shadow make the playable
       // boundary legible without turning the mountain into a striped highway.
       if (i < 45) {
         this.fillTrapezoid(
-          near.screenX - near.screenW * SNOWBANK_WIDTH_RATIO,
+          near.screenX - near.screenW * bankWidth,
           near.screenX - near.screenW * EDGE_WIDTH_RATIO, near.screenY,
-          far.screenX - far.screenW * SNOWBANK_WIDTH_RATIO,
+          far.screenX - far.screenW * bankWidth,
           far.screenX - far.screenW * EDGE_WIDTH_RATIO, far.screenY,
           colors.bankLit
         );
         this.fillTrapezoid(
           near.screenX + near.screenW * EDGE_WIDTH_RATIO,
-          near.screenX + near.screenW * SNOWBANK_WIDTH_RATIO, near.screenY,
+          near.screenX + near.screenW * bankWidth, near.screenY,
           far.screenX + far.screenW * EDGE_WIDTH_RATIO,
-          far.screenX + far.screenW * SNOWBANK_WIDTH_RATIO, far.screenY,
+          far.screenX + far.screenW * bankWidth, far.screenY,
           colors.bankShadow
         );
       }
@@ -373,17 +396,26 @@ export class RoadRenderer {
   private prepareShades(fogColor: number): void {
     if (fogColor === this.lastFogColor) return;
     this.lastFogColor = fogColor;
-    for (let i = 0; i < DRAW_DISTANCE; i++) {
-      const fog = Math.min(0.82, Math.pow(i / DRAW_DISTANCE, 1.7) * 1.15);
-      for (let band = 0; band < SURFACE_BANDS; band++) {
-        const colors = this.shades[i * SURFACE_BANDS + band];
-        const variation = band / (SURFACE_BANDS - 1);
-        colors.snow = mix(mix(SNOW_LIGHT, SNOW_DARK, variation * 0.32), fogColor, fog);
-        colors.offPiste = mix(mix(OFF_PISTE_LIGHT, OFF_PISTE_DARK, variation * 0.42), fogColor, fog);
-        colors.bankLit = mix(SNOW.packed, fogColor, fog);
-        colors.bankShadow = mix(SNOW.shadow, fogColor, fog);
-        colors.seam = mix(colors.snow, SNOW.shadow, 0.22 * Math.max(0, 1 - i / 42));
-        colors.corduroy = mix(colors.snow, SNOW.shadow, 0.16 * Math.max(0, 1 - i / CORDUROY_SEGMENTS));
+    for (let themeIndex = 0; themeIndex < THEMES.length; themeIndex++) {
+      const theme = THEMES[themeIndex];
+      // Preserve the packed-snow palette for hazard contrast in every theme.
+      // Only non-colliding terrain changes tint and relief.
+      const offPiste = theme === 'ridge' ? mix(OFF_PISTE_LIGHT, SNOW.shadow, 0.32)
+        : theme === 'bowl' ? mix(OFF_PISTE_LIGHT, SNOW.shadow, 0.06) : OFF_PISTE_LIGHT;
+      const terrain = theme === 'ridge' ? mix(SNOW.shadow, 0x667482, 0.58) : SNOW.shadow;
+      for (let i = 0; i < DRAW_DISTANCE; i++) {
+        const fog = Math.min(0.82, Math.pow(i / DRAW_DISTANCE, 1.7) * 1.15);
+        for (let band = 0; band < SURFACE_BANDS; band++) {
+          const colors = this.shades[(themeIndex * DRAW_DISTANCE + i) * SURFACE_BANDS + band];
+          const variation = band / (SURFACE_BANDS - 1);
+          colors.snow = mix(mix(SNOW_LIGHT, SNOW_DARK, variation * 0.32), fogColor, fog);
+          colors.offPiste = mix(mix(offPiste, OFF_PISTE_DARK, variation * 0.42), fogColor, fog);
+          colors.bankLit = mix(SNOW.packed, fogColor, fog);
+          colors.bankShadow = mix(SNOW.shadow, fogColor, fog);
+          colors.terrain = mix(terrain, fogColor, fog);
+          colors.seam = mix(colors.snow, SNOW.shadow, 0.22 * Math.max(0, 1 - i / 42));
+          colors.corduroy = mix(colors.snow, SNOW.shadow, 0.16 * Math.max(0, 1 - i / CORDUROY_SEGMENTS));
+        }
       }
     }
   }

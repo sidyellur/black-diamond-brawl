@@ -10,6 +10,8 @@ import {
 } from '../config';
 import { Obstacle, ObstacleKind, segmentCentreZ } from '../entities/obstacle';
 import { Prng, randInt } from './prng';
+import type { Segment } from './segment';
+import type { MountainTheme } from './mountain';
 
 const LANE_COUNT = LANES.length;
 const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
@@ -39,13 +41,16 @@ function shuffle<T>(arr: T[], prng: Prng): T[] {
 }
 
 /** Weighted kind pick. */
-function pickKind(prng: Prng): ObstacleKind {
-  const kinds = Object.keys(KIND_WEIGHTS) as ObstacleKind[];
-  const total = kinds.reduce((s, k) => s + KIND_WEIGHTS[k], 0);
+function pickKind(prng: Prng, theme?: MountainTheme): ObstacleKind {
+  const weights = theme === 'forest' ? { tree: 62, rock: 30, mogul: 8 }
+    : theme === 'ridge' ? { tree: 0, rock: 78, mogul: 22 }
+    : theme === 'bowl' ? { tree: 0, rock: 60, mogul: 40 } : KIND_WEIGHTS;
+  const kinds = Object.keys(weights) as ObstacleKind[];
+  const total = kinds.reduce((s, k) => s + weights[k], 0);
   let roll = prng() * total;
   for (const k of kinds) {
-    roll -= KIND_WEIGHTS[k];
-    if (roll <= 0) {
+    roll -= weights[k];
+    if (roll < 0) {
       return k;
     }
   }
@@ -66,6 +71,8 @@ function dilate(from: Set<number>, maxShift: number): Set<number> {
 }
 
 export interface PlacementInput {
+  /** Optional for compatibility with geometry-only callers and fixtures. */
+  segments?: readonly Segment[];
   crestApexes: number[];
   /** First segment index obstacles may occupy (after the warm-up). */
   placeableStart: number;
@@ -114,6 +121,9 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
   // every crest apex (the apex itself plus BLIND_LANDING_SEGMENTS after it —
   // the apex is the launch point, the rest is the obstacle-free landing).
   const forbidden = new Array<boolean>(placeableEnd).fill(false);
+  if (input.segments) {
+    for (let s = placeableStart; s < placeableEnd; s++) forbidden[s] = !!input.segments[s]?.safeZone;
+  }
   for (const apex of crestApexes) {
     const end = Math.min(placeableEnd - 1, apex + BLIND_LANDING_SEGMENTS);
     for (let s = apex; s <= end; s++) {
@@ -151,11 +161,17 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
   const treeForbiddenUntil = new Array<number>(LANE_COUNT).fill(-1);
 
   let seg = placeableStart;
+  let forestGateLeft = 1;
+  let forestSection: number | undefined;
   while (seg < placeableEnd) {
     const t = seg / COURSE_LENGTH_SEGMENTS;
-    const rowsPer100 = lerp(OBSTACLE_ROWS_PER_100_START, OBSTACLE_ROWS_PER_100_END, t);
+    const themeBeforeGap = input.segments?.[seg]?.theme;
+    const density = themeBeforeGap === 'bowl' ? 0.58 : themeBeforeGap === 'ridge' ? 0.8 : 1;
+    const rowsPer100 = lerp(OBSTACLE_ROWS_PER_100_START, OBSTACLE_ROWS_PER_100_END, t) * density;
     const expectedGap = 100 / rowsPer100;
-    const lo = Math.max(MIN_ROW_GAP, Math.round(expectedGap * 0.6));
+    // A forest gate can switch its clear pair across three lanes. Give at
+    // least 12 segments to read that switch; the DP still checks reachability.
+    const lo = Math.max(themeBeforeGap === 'forest' ? 12 : MIN_ROW_GAP, Math.round(expectedGap * 0.6));
     const hi = Math.max(lo + 2, Math.round(expectedGap * 1.4));
     seg += randInt(prng, lo, hi);
 
@@ -179,18 +195,37 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
 
     // A guaranteed-clear lane, chosen from the lanes actually reachable here.
     const arrivalArr = [...arrival];
-    const safe = arrivalArr[randInt(prng, 0, arrivalArr.length - 1)];
+    const segment = input.segments?.[seg];
+    const theme = segment?.theme;
+    let safe = arrivalArr[randInt(prng, 0, arrivalArr.length - 1)];
+    let forestOpening: number[] | undefined;
+    if (theme === 'forest' && segment?.slalomLane !== undefined) {
+      if (forestSection !== segment.sectionIndex) forestGateLeft = 1;
+      forestSection = segment.sectionIndex;
+      const desiredLeft = segment.slalomLane === 1 ? 0 : LANE_COUNT - 2;
+      // Adjacent openings overlap by a lane. This creates a readable slalom
+      // instead of suddenly asking for a blind three-lane traverse. The
+      // opening still travels across the full slope over consecutive gates.
+      forestGateLeft += Math.sign(desiredLeft - forestGateLeft);
+      forestOpening = [forestGateLeft, forestGateLeft + 1];
+      const reachableOpening = forestOpening.filter((lane) => arrival.has(lane));
+      if (reachableOpening.length) safe = reachableOpening[0];
+      else forestOpening = undefined; // the reachability invariant wins
+    }
 
     // How many lanes to block this row: ramps from 1 (t=0) up to 3 (t=1),
     // always leaving ≥1 clear lane (`safe`).
     const maxBlock = Math.min(LANE_COUNT - 1, 1 + Math.round(2 * t));
-    const blockCount = randInt(prng, 1, maxBlock);
+    const blockCount = randInt(prng, 1, theme === 'bowl' ? 1 : maxBlock);
 
     const candidates = shuffle(ALL_LANES.filter((l) => l !== safe), prng);
-    const blocked = candidates.slice(0, blockCount);
+    // Forest gates leave a two-lane opening that follows the alternating
+    // bends. Bowls deliberately keep four lanes free even outside the arena.
+    const blocked = forestOpening
+      ? candidates.filter((lane) => !forestOpening.includes(lane)) : candidates.slice(0, blockCount);
 
     for (const lane of blocked) {
-      let kind = pickKind(prng);
+      let kind = pickKind(prng, theme);
       // Enforce the tree-free constraints: a tree may not sit in a lane still
       // inside a mogul's downstream launch window, NOR inside a rock's
       // no-steer tumble window. Both are cases where the rider is committed to
