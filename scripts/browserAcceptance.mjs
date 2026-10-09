@@ -93,7 +93,7 @@ async function newPage(options = {}) {
 try {
   browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH || undefined,
-    args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader']
+    args: ['--use-gl=angle', '--use-angle=swiftshader']
   });
   page = await newPage();
   phase = 'title and countdown';
@@ -105,6 +105,10 @@ try {
   check('new mountain changes the title seed without starting a race', chosenSeed !== originalSeed && await page.evaluate(() => window.__game.scene.isActive('TitleScene')));
   await clickGame(178, 351);
   await scene('RaceScene');
+  // Freeze the short wall-clock countdown immediately, before diagnostics and
+  // audio assertions spend time on a software-rendered CI frame.
+  await page.keyboard.press('KeyP');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
   await quietCourse();
   const start = await state();
   check('drop in starts the selected mountain', start.seed, chosenSeed);
@@ -113,8 +117,6 @@ try {
   check('Drop In gesture unlocks the real audio context', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.context.state), 'running');
   await page.keyboard.down('ArrowRight');
   await page.keyboard.down('KeyW');
-  await page.keyboard.press('KeyP');
-  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
   const pausedCountdown = (await state()).countdown;
   await page.waitForTimeout(300);
   check('pausing the countdown preserves its remaining time', (await state()).countdown, pausedCountdown);
@@ -240,6 +242,12 @@ try {
   await page.goto(`${BASE_URL}/?seed=202&touch=1`, { waitUntil: 'networkidle' });
   await scene('TitleScene');
   await page.screenshot({ path: `${OUT}/07-mobile-title.png` });
+  const touchSession = await page.context().newCDPSession(page);
+  const dropIn = await gamePoint(178, 351);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...dropIn, id: 1 }] });
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await page.waitForTimeout(200);
+  check('canceling a real touch on Drop In cannot activate the button', await page.evaluate(() => window.__game.scene.isActive('TitleScene')));
   await clickGame(178, 351, true);
   await scene('RaceScene');
   await ready();
@@ -264,6 +272,25 @@ try {
   const afterDrag = (await state()).lane;
   await page.waitForTimeout(400);
   check('dragging out of a control cannot leave steering held', (await state()).lane, afterDrag);
+
+  const beforeMultiTouch = await state();
+  const jump = await gamePoint(812, 497);
+  await touchSession.send('Input.dispatchTouchEvent', {
+    type: 'touchStart', touchPoints: [{ ...left, id: 1 }, { ...jump, id: 2 }]
+  });
+  await page.waitForFunction((lane) => {
+    const player = window.__game.scene.getScene('RaceScene').player;
+    return player.airborne && player.laneIndex < lane;
+  }, beforeMultiTouch.lane);
+  check('two real touches can steer and jump simultaneously', (await state()).airborne);
+  await touchSession.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').player.airborne);
+  const canceled = await state();
+  await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, canceled.elapsed);
+  const settledCancel = await state();
+  await page.waitForFunction((elapsed) => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= elapsed + 450, settledCancel.elapsed);
+  check('touchcancel releases held steering after the current motion settles', (await state()).lane, settledCancel.lane);
+  await touchSession.detach();
   await clickGame(902, 77, true);
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
   await clickGame(480, 375, true);
@@ -288,6 +315,40 @@ try {
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').player.laneIndex === 3);
   check('Canvas fallback starts a race and accepts steering', (await state()).lane, 3);
   await page.screenshot({ path: `${OUT}/12-canvas-race.png` });
+
+  phase = 'ten-retry resource stability';
+  const resources = () => page.evaluate(() => {
+    const game = window.__game;
+    const sc = game.scene.getScene('RaceScene');
+    return {
+      cameras: sc.cameras.cameras.length,
+      textures: Object.keys(game.textures.list).length,
+      displayObjects: sc.children.length,
+      pointers: sc.input.manager.pointersTotal,
+      down: sc.input.keyboard.listenerCount('keydown'),
+      up: sc.input.keyboard.listenerCount('keyup'),
+      blur: game.events.listenerCount('blur')
+    };
+  });
+  const resourceBaseline = await resources();
+  const resourceHistory = [];
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await page.keyboard.press('KeyP');
+    await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
+    await page.keyboard.press('KeyR');
+    await page.waitForFunction(() => {
+      const sc = window.__game.scene.getScene('RaceScene');
+      return !sc.paused && sc.countdownMs > 0 && sc.elapsedRaceMs === 0;
+    });
+    await ready();
+    resourceHistory.push(await resources());
+  }
+  writeFileSync(`${OUT}/replay-resources.json`, JSON.stringify({ resourceBaseline, resourceHistory }, null, 2));
+  const stable = ['cameras', 'textures', 'pointers', 'down', 'up', 'blur'];
+  check('ten retries preserve camera, texture, pointer and listener counts', resourceHistory.every((sample) => stable.every((key) => sample[key] === resourceBaseline[key])));
+  // A few lazily allocated scenery sprites can vary with a sampled frame;
+  // bound that variation rather than mistaking legitimate pool warmup for a leak.
+  check('ten retries keep display-object allocation bounded', resourceHistory.every((sample) => sample.displayObjects <= resourceBaseline.displayObjects + 12));
   check('no console or uncaught browser errors', errors, []);
 } catch (error) {
   failure = `FAIL during ${phase}: ${error.stack || error.message || String(error)}`;

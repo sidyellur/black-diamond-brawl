@@ -255,7 +255,7 @@ export class RaceScene extends Phaser.Scene {
     const mute = () => this.hud.setMuted(this.audio.toggle());
     const blur = () => this.setPaused(true);
     const unlock = () => this.audio.unlock();
-    keyboard?.addKeys('P,ESC,R,M');
+    const lifecycleKeys = keyboard?.addKeys('P,ESC,R,M') as Record<string, Phaser.Input.Keyboard.Key> | undefined;
     keyboard?.on('keydown-P', pause);
     keyboard?.on('keydown-ESC', pause);
     keyboard?.on('keydown-R', restart);
@@ -270,6 +270,8 @@ export class RaceScene extends Phaser.Scene {
       keyboard?.off('keydown-R', restart);
       keyboard?.off('keydown-M', mute);
       keyboard?.off('keydown', unlock);
+      Object.values(lifecycleKeys ?? {}).forEach(key => keyboard?.removeKey(key, true, true));
+      keyboard?.removeCapture('P,ESC,R,M');
       this.input.off('pointerdown', unlock);
       this.game.events.off(Phaser.Core.Events.BLUR, blur);
       this.game.events.off(Phaser.Core.Events.HIDDEN, blur);

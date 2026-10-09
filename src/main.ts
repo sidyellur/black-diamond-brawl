@@ -11,6 +11,9 @@ const config: Phaser.Types.Core.GameConfig = {
   // playable when a device cannot create a WebGL context. No game mechanic
   // relies on a WebGL-only post-process. Explicit canvas mode is also tested.
   type: new URLSearchParams(window.location.search).get('renderer') === 'canvas' ? Phaser.CANVAS : Phaser.AUTO,
+  // Our gesture-unlocked procedural mixer owns audio; avoid a second,
+  // unused Phaser AudioContext and its autoplay warning at boot.
+  audio: { noAudio: true },
   width: SCREEN_W,
   height: SCREEN_H,
   scale: {

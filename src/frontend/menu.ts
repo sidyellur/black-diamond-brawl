@@ -35,7 +35,7 @@ export function menuButton(
   const key = menuText(scene, width - 15, 26, shortcut, 11, primary ? UI.panel : UI.inkMid, true)
     .setOrigin(1, 0.5).setFontFamily(MONO);
   const hit = scene.add.zone(0, 0, width, height).setOrigin(0).setInteractive({ useHandCursor: true });
-  let pressed = false;
+  let pressedPointer: number | null = null;
   const paint = (hover = false, down = false): void => {
     plate.clear();
     plate.fillStyle(primary ? (hover ? 0xffbe4f : UI.accentWarn) : (hover ? UI.panelEdge : 0x1b2836), 1);
@@ -48,12 +48,18 @@ export function menuButton(
     }
   };
   paint();
-  hit.on('pointerover', () => paint(true, pressed));
-  hit.on('pointerout', () => { pressed = false; paint(); });
-  hit.on('pointerdown', () => { pressed = true; paint(true, true); });
-  hit.on('pointerup', () => {
-    const activate = pressed;
-    pressed = false;
+  hit.on('pointerover', () => paint(true, pressedPointer !== null));
+  hit.on('pointerout', (pointer: Phaser.Input.Pointer) => {
+    if (pressedPointer === pointer.id) pressedPointer = null;
+    if (pressedPointer === null) paint();
+  });
+  hit.on('pointerdown', (pointer: Phaser.Input.Pointer) => { if (pressedPointer === null) { pressedPointer = pointer.id; paint(true, true); } });
+  hit.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+    // Phaser maps touchcancel to pointerup too. A cancelled gesture must
+    // never start/retry/leave a race just because the finger began here.
+    if (pressedPointer !== pointer.id) return;
+    const activate = pointer.event?.type !== 'touchcancel';
+    pressedPointer = null;
     paint(true);
     if (activate) action();
   });

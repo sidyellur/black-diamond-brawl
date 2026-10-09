@@ -72,3 +72,15 @@ This report will be updated with final implementation details, evidence, remaini
 - Local final-pass checks at this stage: production build; 262 actual-art checks over 41 buffers; palette; rendering geometry/finish arch; 38 combat; 27 scoring; 21 controls; records; 1,000 solvability seeds. All passed.
 - Actual sprite generation measured about 1.4–1.5 seconds in this environment; packed RGBA atlases 5.77 MiB. This excludes browser/GPU startup. Browser navigation/postrender timings are being recorded separately.
 - Modern full-scene visual acceptance, audio/Canvas fallback browser checks and final publication are pending the next CI run.
+
+### 2026-10-09 08:23 UTC / 01:23 PDT — modern visual acceptance and CI repairs
+
+- Published modern head `37250134514f2e3d40ea4dc37817ed24967d9011`. Independent review of actual title, early/mid-race, wide desktop, attack and results screenshots passes the modern illustrated art direction.
+- [Run 37903551430](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37903551430): production build, all model/asset gates and all 11 WebGL smoke checks **passed**. Browser acceptance **failed** because its audio diagnostics delayed the Pause key until after the now-correct short countdown. Reordered the test to pause immediately on scene entry; countdown-freeze assertions remain unchanged. The replacement run is pending.
+- Chromium logs identified rejected legacy GL launch flags. Tests now use Chromium's supported ANGLE/SwiftShader backend. Software-rendered race frames were approximately 6 FPS on that runner; this is not a hardware-device performance result. Title first post-render was about 2.09 seconds. Movement intentionally caps long simulation frames for collision safety; very slow devices can therefore run below real-time speed.
+- Review fixed real touch-cancel activation and multi-pointer ownership defects in menu/HUD buttons, enlarged Pause/Sound touch targets, fixed the clock's minute rollover, and removed lifecycle keyboard captures explicitly on shutdown.
+- Reproduced and fixed sequential stale-tab record overwrites. Records refresh/merge newer best scores, faster finish times and attempt counts before mutation, and recover in-memory improvements after quota failure. Expanded storage regressions pass. Truly simultaneous cross-process localStorage writes are not transactional.
+- Disabled Phaser's unused audio subsystem; the single gesture-unlocked procedural audio context owns game sound.
+- Expanded browser coverage with real touch cancellation, simultaneous steer/jump, Canvas fallback, audio/mute persistence and ten repeated scene restarts. Added clearly labeled mid-course curve/crest visual fixtures; these are not claimed as complete playthroughs.
+- Corrected the leading-racer guidance so first place does not say to close the gap. Ordinary rival-pack pacing is under measurement before final sign-off.
+- Local follow-on production build, 21 control checks, 27 scoring checks and expanded records checks pass. [Issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21) tracks remaining release acceptance; no merge or deployment has occurred.

@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { SCREEN_H, SCREEN_W } from '../config';
 import { UI } from '../render/palette';
+import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
 
 const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
-const formatTime = (ms: number): string => `${Math.floor(ms / 60000)}:${((ms % 60000) / 1000).toFixed(1).padStart(4, '0')}`;
 
 export interface HudState {
   score: number;
@@ -74,7 +74,7 @@ export class RaceHud {
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
     this.button(902, 77, 62, 25, 'PAUSE', actions.pause, 10);
-    this.muteLabel = this.button(687, 30, 74, 23, 'M SOUND', () => this.setMuted(actions.mute()), 10);
+    this.muteLabel = this.button(687, 30, 74, 23, this.touch ? 'SOUND' : 'M SOUND', () => this.setMuted(actions.mute()), 10);
 
     if (this.touch) {
       if (scene.input.manager.pointersTotal < 4) scene.input.addPointer(4 - scene.input.manager.pointersTotal);
@@ -99,18 +99,21 @@ export class RaceHud {
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
-    const controls = scene.add.text(SCREEN_W / 2, 217, 'A D / ← →  carve   SPACE / W  jump   F / K  fight', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
+    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT' : 'A D / ← →  carve   SPACE / W  jump   F / K  fight', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
     this.pauseOverlay.add([shade, panel, heading, sub, controls]);
     for (const [label, y, callback] of [
-      ['RESUME   ESC / P', 267, actions.resume],
-      ['RETRY MOUNTAIN   R', 321, actions.restart],
+      [this.touch ? 'RESUME' : 'RESUME   ESC / P', 267, actions.resume],
+      [this.touch ? 'RETRY MOUNTAIN' : 'RETRY MOUNTAIN   R', 321, actions.restart],
       ['BACK TO LODGE', 375, actions.menu]
     ] as const) {
       const b = scene.add.rectangle(SCREEN_W / 2, y, 340, 40, UI.panelEdge).setInteractive({ useHandCursor: true });
       const t = scene.add.text(SCREEN_W / 2, y, label, { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px', color: hex(UI.inkHigh), fontStyle: 'bold' }).setOrigin(0.5);
-      b.on('pointerover', () => b.setFillStyle(0x38536a)).on('pointerout', () => b.setFillStyle(UI.panelEdge)).on('pointerdown', callback);
+      this.bindButton(b, callback);
       this.pauseOverlay.add([b, t]);
     }
+    this.pauseOverlay.add(scene.add.text(SCREEN_W / 2, 426, 'Clean hits, close calls and landings build Flow. Damage breaks it.', {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: hex(UI.inkLow)
+    }).setOrigin(0.5));
     this.objects.push(this.pauseOverlay);
   }
 
@@ -123,9 +126,27 @@ export class RaceHud {
   private button(x: number, y: number, width: number, height: number, label: string, action: () => void, fontSize: number): Phaser.GameObjects.Text {
     const b = this.scene.add.rectangle(x, y, width, height, UI.panelEdge).setDepth(10003).setInteractive({ useHandCursor: true });
     const t = this.text(x, y, label, fontSize, UI.inkHigh, true).setOrigin(0.5).setDepth(10004);
-    b.on('pointerdown', action).on('pointerover', () => b.setFillStyle(0x38536a)).on('pointerout', () => b.setFillStyle(UI.panelEdge));
+    if (this.touch) b.setInteractive(new Phaser.Geom.Rectangle(-10, -18, width + 20, height + 36), Phaser.Geom.Rectangle.Contains);
+    this.bindButton(b, action);
     this.objects.push(b);
     return t;
+  }
+
+  private bindButton(button: Phaser.GameObjects.Rectangle, action: () => void): void {
+    let pressedPointer: number | null = null;
+    button.on('pointerover', () => button.setFillStyle(0x38536a));
+    button.on('pointerout', (pointer: Phaser.Input.Pointer) => {
+      if (pressedPointer === pointer.id) pressedPointer = null;
+      if (pressedPointer === null) button.setFillStyle(UI.panelEdge);
+    });
+    button.on('pointerdown', (pointer: Phaser.Input.Pointer) => { if (pressedPointer === null) { pressedPointer = pointer.id; button.setFillStyle(0x38536a); } });
+    button.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pressedPointer !== pointer.id) return;
+      const activate = pointer.event?.type !== 'touchcancel';
+      pressedPointer = null;
+      button.setFillStyle(UI.panelEdge);
+      if (activate) action();
+    });
   }
 
   showMessage(text: string, color: number = UI.accentWarn): void {
@@ -140,15 +161,15 @@ export class RaceHud {
 
   setPaused(paused: boolean): void { this.pauseOverlay.setVisible(paused); }
   setCountdown(label: string): void { this.countdown.setText(label); }
-  setMuted(muted: boolean): void { this.muteLabel.setText(muted ? 'M MUTED' : 'M SOUND'); }
+  setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 
   update(s: HudState): void {
     this.place.setText(`${s.position}${['', 'ST', 'ND', 'RD', 'TH', 'TH'][s.position]} / 5`);
-    this.clock.setText(formatTime(s.elapsedMs));
+    this.clock.setText(formatTime(s.elapsedMs / 1000));
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);
     this.progress.setText(`MOUNTAIN RUN   ${Math.min(100, Math.floor(s.progress * 100))}%`);
-    this.attack.setText(s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? 'F / K  HIT · YOU HAVE THE ADVANTAGE' : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : 'CLOSE THE GAP · FOLLOW THE AMBER MARKER');
+    this.attack.setText(s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
     this.attack.setColor(hex(s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
     this.status.setText(s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');

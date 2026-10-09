@@ -20,14 +20,15 @@ function nonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
-function readRecords(): Records {
-  if (records) return records;
-  records = { bestScore: 0, courses: {} };
+/** Parse storage independently of the live cache: another tab may have saved
+ * a better run since this one opened. Never trust malformed external data. */
+function readStoredRecords(): Records {
+  const stored: Records = { bestScore: 0, courses: {} };
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    if (!raw || typeof raw !== 'object') return records;
+    if (!raw || typeof raw !== 'object') return stored;
     const saved = raw as Partial<Records>;
-    if (nonNegative(saved.bestScore)) records.bestScore = saved.bestScore;
+    if (nonNegative(saved.bestScore)) stored.bestScore = saved.bestScore;
     if (saved.courses && typeof saved.courses === 'object') {
       const entries = Object.entries(saved.courses)
         .filter(([seed, course]) => /^\d{1,10}$/.test(seed) && Number(seed) <= 0xffffffff &&
@@ -37,18 +38,57 @@ function readRecords(): Records {
         .sort(([, a], [, b]) => b.lastPlayed - a.lastPlayed)
         .slice(0, MAX_COURSES);
       for (const [seed, course] of entries) {
-        records.courses[seed] = { ...course, attempts: Math.floor(course.attempts) };
+        stored.courses[seed] = {
+          bestScore: course.bestScore,
+          bestTimeSeconds: course.bestTimeSeconds,
+          attempts: Math.floor(course.attempts),
+          lastPlayed: course.lastPlayed
+        };
       }
     }
   } catch {
     // Blocked storage, private browsing, corrupt JSON, and SSR all remain playable.
   }
+  return stored;
+}
+
+function trimCourses(saved: Records, keepKey?: string): void {
+  const newest = Object.keys(saved.courses)
+    .filter(key => key !== keepKey)
+    .sort((a, b) => saved.courses[b].lastPlayed - saved.courses[a].lastPlayed);
+  if (keepKey !== undefined) newest.unshift(keepKey);
+  for (const expired of newest.slice(MAX_COURSES)) delete saved.courses[expired];
+}
+
+function readRecords(): Records {
+  const stored = readStoredRecords();
+  if (!records) return records = stored;
+  // Merge, rather than replacing the cache: quota/denied writes can leave
+  // newer results only in memory. Scores/times must never move backwards.
+  records.bestScore = Math.max(records.bestScore, stored.bestScore);
+  for (const [seed, incoming] of Object.entries(stored.courses)) {
+    const current = records.courses[seed];
+    if (!current) {
+      records.courses[seed] = incoming;
+      continue;
+    }
+    current.bestScore = Math.max(current.bestScore, incoming.bestScore);
+    if (incoming.bestTimeSeconds !== null &&
+      (current.bestTimeSeconds === null || incoming.bestTimeSeconds < current.bestTimeSeconds)) {
+      current.bestTimeSeconds = incoming.bestTimeSeconds;
+    }
+    // Snapshots describe the same attempts, so adding counts would duplicate
+    // them. A new completion increments only after this refresh has merged.
+    current.attempts = Math.max(current.attempts, incoming.attempts);
+    current.lastPlayed = Math.max(current.lastPlayed, incoming.lastPlayed);
+  }
+  trimCourses(records);
   return records;
 }
 
-function saveRecords(): void {
+function saveRecords(saved: Records): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(readRecords()));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
   } catch {
     // A full quota or denied storage must never interrupt a race or replay.
   }
@@ -64,7 +104,7 @@ export function recordScore(score: number): { best: number; isNewBest: boolean }
   const isNewBest = nonNegative(score) && score > saved.bestScore;
   if (isNewBest) {
     saved.bestScore = score;
-    saveRecords();
+    saveRecords(saved);
   }
   return { best: saved.bestScore, isNewBest };
 }
@@ -93,13 +133,8 @@ export function recordCourse(
     lastPlayed: Date.now()
   };
   saved.courses[key] = record;
-  const oldest = Object.keys(saved.courses).sort((a, b) => saved.courses[a].lastPlayed - saved.courses[b].lastPlayed);
-  while (oldest.length > MAX_COURSES) {
-    const expired = oldest.shift()!;
-    // Preserve the course just played even if the system clock moved backwards.
-    if (expired !== key) delete saved.courses[expired];
-    else oldest.push(expired);
-  }
-  saveRecords();
+  // Preserve the course just played even if the system clock moved backwards.
+  trimCourses(saved, key);
+  saveRecords(saved);
   return { record: { ...record }, isNewScore, isNewTime, previousBestTime };
 }
