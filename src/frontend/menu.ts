@@ -24,7 +24,23 @@ export function menuText(
   });
 }
 
-/** A pointer/touch target with visible hover and pressed states. */
+interface MenuFocus {
+  buttons: Array<{ action: () => void; focus: (value: boolean) => void }>;
+  index: number;
+}
+const focusByScene = new WeakMap<Phaser.Scene, MenuFocus>();
+
+function focusState(scene: Phaser.Scene): MenuFocus {
+  let state = focusByScene.get(scene);
+  if (!state) {
+    state = { buttons: [], index: -1 };
+    focusByScene.set(scene, state);
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => focusByScene.delete(scene));
+  }
+  return state;
+}
+
+/** A pointer/touch target with visible hover, keyboard focus and pressed states. */
 export function menuButton(
   scene: Phaser.Scene, x: number, y: number, width: number,
   label: string, shortcut: string, action: () => void, primary = false
@@ -37,12 +53,16 @@ export function menuButton(
   const key = menuText(scene, width - 15, 26, shortcut, 11, primary ? UI.panel : UI.inkMid, true)
     .setOrigin(1, 0.5).setFontFamily(MONO);
   const hit = scene.add.zone(0, 0, width, height).setOrigin(0).setInteractive({ useHandCursor: true });
+  // Never let a long label collide with its keyboard shortcut.
+  const available = width - 36 - (shortcut ? key.width + 18 : 0);
+  if (title.width > available) title.setFontSize(Math.max(11, Math.floor(17 * available / title.width)));
   let pressedPointer: number | null = null;
+  let focused = false;
   const paint = (hover = false, down = false): void => {
     plate.clear();
     plate.fillStyle(primary ? (hover ? 0xffbe4f : UI.accentWarn) : (hover ? UI.panelEdge : 0x1b2836), 1);
     plate.fillRoundedRect(0, down ? 2 : 0, width, height - (down ? 2 : 0), 5);
-    plate.lineStyle(1, primary ? 0xffc36b : UI.panelEdge, 1);
+    plate.lineStyle(focused ? 3 : 1, focused ? UI.inkHigh : primary ? 0xffc36b : UI.panelEdge, 1);
     plate.strokeRoundedRect(0, down ? 2 : 0, width, height - (down ? 2 : 0), 5);
     if (primary && !down) {
       plate.fillStyle(0xb66b1d, 1);
@@ -50,6 +70,8 @@ export function menuButton(
     }
   };
   paint();
+  focusState(scene).buttons.push({ action, focus: value => { focused = value; paint(value); } });
+  container.setName(label);
   const cancel = (): void => { pressedPointer = null; paint(); };
   scene.game.events.on(CANCEL_INPUT, cancel);
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => scene.game.events.off(CANCEL_INPUT, cancel));
@@ -76,11 +98,35 @@ export function menuButton(
 export function menuKeys(scene: Phaser.Scene, callback: (code: string) => void): void {
   const keyboard = scene.input.keyboard;
   if (!keyboard) return;
+  // Capture at the original DOM event; Phaser emits queued key events later,
+  // too late for preventDefault alone to keep Tab inside the canvas menu.
+  keyboard.addCapture('TAB');
   const listener = oncePerKeyEvent((event): void => {
-    if (!event.repeat && isAppActive(scene.game)) callback(event.code);
+    if (event.repeat || !isAppActive(scene.game)) return;
+    const focus = focusState(scene);
+    if (event.code === 'Tab') {
+      event.preventDefault();
+      if (focus.buttons.length) {
+        if (focus.index >= 0) focus.buttons[focus.index].focus(false);
+        focus.index = focus.index < 0
+          ? event.shiftKey ? focus.buttons.length - 1 : 0
+          : (focus.index + (event.shiftKey ? -1 : 1) + focus.buttons.length) % focus.buttons.length;
+        focus.buttons[focus.index].focus(true);
+      }
+      return;
+    }
+    if ((event.code === 'Enter' || event.code === 'Space') && focus.index >= 0) {
+      event.preventDefault();
+      focus.buttons[focus.index].action();
+      return;
+    }
+    callback(event.code);
   });
   keyboard.on('keydown', listener);
-  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => keyboard.off('keydown', listener));
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    keyboard.off('keydown', listener);
+    keyboard.removeCapture('TAB');
+  });
 }
 
 export function formatPoints(value: number): string {

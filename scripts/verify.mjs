@@ -71,10 +71,15 @@ try {
   await step('interrupted mobile audio recovery', () => run('node', ['--import', 'tsx', 'scripts/verifyAudioRecovery.ts']));
   await step('native and browser storage', () => run('node', ['--import', 'tsx', 'scripts/verifyStorage.ts']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
-  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains']) {
+  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains', 'verifyProgression', 'verifyGhosts', 'verifyPractice', 'verifyNaturalRaceDriver']) {
     await step(script, () => run('node', ['--import', 'tsx', `scripts/${script}.ts`]));
   }
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
+
+  if (process.argv.includes('--models-only')) {
+    console.log('=== BUILD AND MODEL GATES PASSED (browser/native not run) ===');
+    process.exit(0);
+  }
 
   const PORT = 4173;
   const server = await serveDist(resolve('dist'), PORT);
@@ -85,7 +90,9 @@ try {
     for (const [label, script] of [
       ['visual smoke test', 'scripts/smokeTest.mjs'],
       ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs'],
-      ['WebKit iPhone acceptance', 'scripts/mobileAcceptance.mjs']
+      ['WebKit iPhone acceptance', 'scripts/mobileAcceptance.mjs'],
+      ['expanded gameplay acceptance', 'scripts/expansionAcceptance.mjs'],
+      ['cup daily locker menus', 'scripts/verifyMenus.mjs']
     ]) {
       try {
         await step(label, () => run('node', [script, `--url=http://127.0.0.1:${PORT}`]));

@@ -23,9 +23,14 @@ import { ObstacleRenderer } from '../entities/obstacleRenderer';
 import { collectPickups, Pickup } from '../entities/pickup';
 import { PickupRenderer } from '../entities/pickupRenderer';
 import { Player } from '../entities/player';
-import { PLAYER_FRAME_SIZE, PLAYER_FRAMES, PLAYER_TEXTURE_KEY } from '../entities/playerSprite';
+import { PLAYER_FRAME_SIZE, PLAYER_FRAMES, PLAYER_TEXTURE_KEY, getSelectedPlayerTexture } from '../entities/playerSprite';
 import { computePlayerPosition, ScoreTracker } from '../entities/scoring';
-import { recordScore } from '../entities/session';
+import { FixedRaceClock, RaceOptions, createQuickRace, retryRace, normalizeRaceOptions, cupRivalParams,
+  recordRun, awardRun, completeCupRound, GhostRecorder, GhostRecording, loadGhost, saveGhost,
+  sampleGhost, CheckpointTracker, checkpointWorldZs } from '../progression';
+import { menuButton, menuText, menuKeys } from '../frontend/menu';
+import { PRACTICE_LESSONS, PracticeObjectives } from '../practice/lessons';
+import { MountainSection, sectionAtZ } from '../track/mountain';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
 import { ShadowRenderer } from '../render/ShadowRenderer';
@@ -56,7 +61,9 @@ const PLAYER_JUMP_HEIGHT_WORLD = RIDER_JUMP_HEIGHT_WORLD; // world-units at jump
 // dz=0, where project() culls it.
 const FINISH_HOLD_BACK = SEGMENT_LENGTH * 8;
 
-interface RaceSceneData {
+interface RaceSceneData extends Partial<RaceOptions> {
+  practiceLesson?: number;
+  practiceFeedback?: string;
   /** Course seed (design-spec §4.2/§4.8) — passed by `TitleScene`'s initial
    *  "press key to start" or `ResultScene`'s restart (same seed / new seed).
    *  Falls back to `resolveSeed()` only if `RaceScene` is ever started
@@ -118,12 +125,30 @@ export class RaceScene extends Phaser.Scene {
   private worldRoll = 0;
   private previousUpdateAt = 0;
   private resumePending = false;
+  private fixedClock = new FixedRaceClock();
+  private simulationHitStopMs = 0;
+  private frameStruckRiders: AIRider[] = [];
+  private reducedMotion = false;
+  private options!: RaceOptions;
+  private mountainSections: MountainSection[] = [];
+  private practiceLesson = 0;
+  private practiceObjective: PracticeObjectives | null = null;
+  private practiceFeedback = '';
+  private practiceAdvanceAt = 0;
+  private practiceMogulZ = 0;
+  private practiceLaunched = false;
+  private counterCount = 0;
+  private practiceComplete = false;
+  private ghost: GhostRecording | null = null;
+  private ghostRecorder!: GhostRecorder;
+  private ghostSprite!: Phaser.GameObjects.Sprite;
+  private checkpoints!: CheckpointTracker;
+  private ghostSplit = '';
 
   /** True once the run has ended (finish or wipeout) and `ResultScene` has
    *  been started — guards against re-triggering the transition on a later
    *  frame this same scene instance might still process. */
   private raceOver = false;
-  private prevWorldZ = PLAYER_START_Z;
   /** Every world-space display object, so the UI camera can ignore them all. */
   private worldObjects: Phaser.GameObjects.GameObject[] = [];
 
@@ -136,7 +161,10 @@ export class RaceScene extends Phaser.Scene {
     // instance across restarts, so a field's inline initializer (`= false`,
     // `= 0`) only ever runs once, at construction — NOT on every `create()`.
     this.raceOver = false;
-    this.prevWorldZ = PLAYER_START_Z;
+    this.fixedClock.reset();
+    this.simulationHitStopMs = 0;
+    this.frameStruckRiders = [];
+    this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.elapsedRaceMs = 0;
     this.paused = false;
     this.countdownMs = 1800;
@@ -157,14 +185,27 @@ export class RaceScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(horizonFogColor());
 
     this.seed = data?.seed ?? resolveSeed();
+    this.options = normalizeRaceOptions(data?.mode && data.runId ? data as RaceOptions : { ...createQuickRace(this.seed), ...data, seed: this.seed });
+    this.practiceLesson = Math.max(0, Math.min(2, data?.practiceLesson ?? 0));
+    this.practiceObjective = this.options.mode === 'practice' && !this.options.dailyDate ? new PracticeObjectives(this.practiceLesson) : null;
+    this.practiceFeedback = data?.practiceFeedback ?? PRACTICE_LESSONS[this.practiceLesson].hint;
+    this.practiceAdvanceAt = 0;
+    this.practiceLaunched = false;
+    this.counterCount = 0;
+    this.practiceComplete = false;
     const generated = generateTrack(this.seed);
     this.track = generated.segments;
+    this.mountainSections = generated.sections;
     this.obstacles = generated.obstacles;
     this.pickups = generated.pickups;
     // Precompute world-Z of each jumpable crest apex (centre of the apex
     // segment) for the auto-launch crossing test (§4.3).
     this.crestApexZs = generated.crestApexes.map((i) => i * SEGMENT_LENGTH + SEGMENT_LENGTH / 2);
     this.finishSegment = this.track.find((segment) => segment.isFinish);
+    this.ghost = this.practiceObjective ? null : loadGhost(this.seed);
+    this.ghostRecorder = new GhostRecorder(this.seed, this.finishSegment!.z);
+    this.checkpoints = new CheckpointTracker(checkpointWorldZs(PLAYER_START_Z, this.finishSegment!.z));
+    this.ghostSplit = this.practiceObjective ? '' : this.ghost ? 'PERSONAL GHOST · CHECKPOINT 1 AHEAD' : 'FINISH TO SET YOUR PERSONAL GHOST';
 
     this.skyRenderer = new SkyRenderer(this);
     this.roadRenderer = new RoadRenderer(this);
@@ -181,12 +222,14 @@ export class RaceScene extends Phaser.Scene {
     // CollisionSystem instance — the `hit` set inside CollisionSystem is
     // per-rider, so sharing one across riders would let one rider's dodge
     // failure silently clear an obstacle for everyone else.
-    this.aiRiders = generated.aiRiders.map((params) => new AIRider(params));
+    this.aiRiders = generated.aiRiders.map((params, i) => new AIRider(cupRivalParams(i, params)));
     this.aiCollisions = this.aiRiders.map(() => new CollisionSystem());
     this.aiRiderRenderer = new AIRiderRenderer(this, this.registerWorld);
+    this.aiRiderRenderer.reducedMotion = this.reducedMotion;
     this.pickupRenderer = new PickupRenderer(this, this.registerWorld);
 
     this.player = new Player();
+    if (this.practiceObjective) this.configurePractice();
     this.combat = new CombatSystem(this.player, this.aiRiders, this.obstacles);
     // Steering no longer intercepts into combat — it always steers. Attacking
     // is its own key, polled in `update`.
@@ -200,10 +243,14 @@ export class RaceScene extends Phaser.Scene {
 
     this.scoreTracker = new ScoreTracker(this.player, this.aiRiders, this.obstacles, this.collisions, this.combat);
 
-    this.playerSprite = this.add.sprite(SCREEN_W / 2, SCREEN_H * 0.8, PLAYER_TEXTURE_KEY, PLAYER_FRAMES.CENTER);
+    this.playerSprite = this.add.sprite(SCREEN_W / 2, SCREEN_H * 0.8, getSelectedPlayerTexture(this), PLAYER_FRAMES.CENTER);
     this.playerSprite.setOrigin(0.5, 1);
     this.playerSprite.setDepth(DEPTH.PLAYER);
     this.registerWorld(this.playerSprite);
+    this.ghostSprite = this.add.sprite(0, 0, PLAYER_TEXTURE_KEY, PLAYER_FRAMES.CENTER)
+      .setOrigin(0.5, 1).setAlpha(0.32).setTint(0x88f6ff).setVisible(false);
+    this.registerWorld(this.ghostSprite);
+    this.ghostRecorder.capture(0, this.ghostPose());
 
     // Every world-space object must be registered, not just the pooled
     // sprites: the UI camera draws the whole display list minus what it
@@ -244,7 +291,7 @@ export class RaceScene extends Phaser.Scene {
     this.hud = new RaceHud(this, this.seed, {
       pause: () => this.setPaused(true),
       resume: () => this.setPaused(false),
-      restart: () => this.scene.restart({ seed: this.seed }),
+      restart: () => this.scene.restart({ ...retryRace(this.options), practiceLesson: this.practiceLesson }),
       menu: () => this.scene.start('TitleScene'),
       mute: () => this.audio.toggle(),
       control: (action, down, source) => this.playerInput.setAction(action, down, source)
@@ -260,7 +307,7 @@ export class RaceScene extends Phaser.Scene {
   private bindRaceLifecycle(): void {
     const keyboard = this.input.keyboard;
     const pause = oncePerKeyEvent(event => { if (!event.repeat && isAppActive(this.game)) this.setPaused(!this.paused); });
-    const restart = oncePerKeyEvent(event => { if (!event.repeat && this.paused && isAppActive(this.game)) this.scene.restart({ seed: this.seed }); });
+    const restart = oncePerKeyEvent(event => { if (!event.repeat && this.paused && !this.practiceComplete && !this.raceOver && isAppActive(this.game)) this.scene.restart({ ...retryRace(this.options), practiceLesson: this.practiceLesson }); });
     const mute = oncePerKeyEvent(event => { if (!event.repeat) this.hud.setMuted(this.audio.toggle()); });
     const blur = () => this.setPaused(true);
     const cancel = () => { this.playerInput.reset(); this.hud.cancelInput(); };
@@ -298,12 +345,13 @@ export class RaceScene extends Phaser.Scene {
   }
 
   private setPaused(paused: boolean): void {
-    if (this.raceOver || (!paused && !isAppActive(this.game))) return;
+    if (this.practiceComplete || this.raceOver || (!paused && !isAppActive(this.game))) return;
     if (this.paused === paused) {
       if (paused) { this.playerInput.reset(); this.hud.cancelInput(); }
       return;
     }
     this.paused = paused;
+    this.fixedClock.discardPending();
     this.hud.setPaused(paused);
     if (paused) this.audio.ride(0);
     this.playerInput.setEnabled(!paused && this.countdownMs === 0);
@@ -344,132 +392,16 @@ export class RaceScene extends Phaser.Scene {
         this.audio.play('go');
       }
       delta = 0;
-    } else {
-      this.elapsedRaceMs += delta;
     }
     const time = this.elapsedRaceMs;
-
-    if (this.raceOver) {
-      return; // frozen: ResultScene has already been started this frame
-    }
-
-    // Hit-stop: freeze the SIMULATION for a few frames after an impact while
-    // rendering and VFX keep running. Those frozen frames are what give a
-    // collision its sense of mass — without them the rider simply continues
-    // through the hit and it registers as a number changing.
-    //
-    // Only the world stops. The juice timer, particles and camera shake all
-    // keep advancing, so the freeze reads as impact rather than as a stall,
-    // and the HUD stays live on its own camera.
-    if (this.juice.frozen) {
-      this.juice.tick(delta);
-      this.juice.renderSpeed(this.player.speed, time);
-      return;
-    }
-
-    // Attack is polled here rather than fired from a key handler: handlers
-    // still run during hit-stop, when this method early-returns above, so a
-    // handler-driven attack would resolve combat inside the freeze on a stale
-    // clock. A press with no eligible target is refused by `attemptAttack`
-    // itself and costs nothing.
-    this.playerInput.update(delta, inputFrameElapsedMs);
-    if (this.playerInput.attackJustPressed()) {
-      this.combat.attemptAttack(time);
-    }
-
-    const prevZ = this.prevWorldZ;
-    this.player.update(delta);
-
-    // Crest auto-launch (§4.3): crossing a jumpable crest's apex fires an
-    // extended trick jump with NO jump press — the crest acts as a ramp. No
-    // speed threshold (spec §4.3 note 14). `jump()` no-ops if already airborne
-    // (e.g. launched off a mogul just before the crest) or wiped out.
-    for (const apexZ of this.crestApexZs) {
-      if (prevZ < apexZ && this.player.worldZ >= apexZ) {
-        this.player.jump(true);
-        break;
-      }
-    }
-
-    // Player-vs-obstacle collision (§4.4).
-    this.collisions.update(this.player, this.obstacles);
-
-    // AI riders. Every rider updates (race + dodge + bump) EVERY frame
-    // regardless of whether it's currently on-screen — off-screen simulation
-    // keeps world-Z/speed/lane honest so a rider re-entering draw distance
-    // appears at the right spot instead of teleporting. No AI-vs-AI collision
-    // (design-spec §4.5 v1 simplification): only each rider's own obstacle
-    // collisions are checked, never rider-vs-rider.
-    for (let i = 0; i < this.aiRiders.length; i++) {
-      const rider = this.aiRiders[i];
-      rider.update(delta, this.obstacles, this.player);
-      if (this.finishSegment && rider.finishTimeMs === null && rider.worldZ >= this.finishSegment.z) {
-        rider.finishTimeMs = time;
-      }
-      if (rider.finishTimeMs !== null) {
-        // Hold a finished rider at the line rather than letting it run past
-        // the end of the (fixed-length, non-looping) track array.
-        rider.worldZ = this.finishSegment!.z;
-      }
-      this.aiCollisions[i].update(rider, this.obstacles);
-    }
-
-    // Combat resolution runs AFTER every rider has moved and taken its own
-    // obstacle collision this frame, so same-lane checks and knockout
-    // attribution (a rider's wipedOut transition) see final state.
-    this.combat.update(delta, time);
-
-    // Ski-pole pickup (§4.6): collected by lane + Z, including while
-    // airborne — unlike obstacles, never gated on `player.airborne`.
-    collectPickups(this.player, this.pickups);
-    if (this.player.weaponCharges > this.previousCharges) {
-      this.hud.showMessage('SKI POLE · 3 POWER HITS', UI.accentWarn);
-      this.audio.play('pickup');
-    }
-    this.previousCharges = this.player.weaponCharges;
-
-    // Combat feedback is emitted AFTER the render pass (`emitCombatFeedback`)
-    // so the struck rival can be projected with THIS frame's offset-walk
-    // data — but the riders must be captured here, because
-    // `ScoreTracker.update()` below drains `combat.events`.
-    const struckRiders = this.combat.events.map((event) => event.rider);
-
-    // Collision feedback, fired on state TRANSITIONS so neither the collision
-    // system nor combat needs to know anything is watching.
-    this.emitCollisionFeedback();
-
-    // Scoring reads this frame's settled combat/collision/pickup state —
-    // must run after all of the above.
-    this.scoreTracker.update(delta);
-    const feedback = this.scoreTracker.feedback;
-    if (feedback.length > 0) {
-      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
-      const total = feedback.reduce((sum, e) => sum + e.points, 0);
-      this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
-      if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
-    }
-
-    // Wipeout ends the run immediately (§4.4/§4.7/§4.8): capture score and
-    // position ONCE and hand off to ResultScene. Checked before the finish
-    // check below since a tree collision can never itself put the player
-    // past the finish line.
-    // Gated on the hit-stop still running: a tree wipeout sets `wipedOut` and
-    // triggers the heaviest impact in the game on the SAME frame, so ending
-    // the race here immediately would cut to the result screen before a
-    // single frozen frame — or any of the shake and spray — had been drawn.
-    // Holding the transition until the freeze expires lets the crash land.
-    if (this.player.wipedOut && !this.juice.frozen) {
-      this.endRace(false, time);
-      return;
-    }
-
-    // The course is a fixed, non-looping length (design-spec §4.2) — crossing
-    // the finish line ends the run (§4.7/§4.8): capture score/position once
-    // and hand off to ResultScene.
-    if (this.finishSegment && this.player.worldZ >= this.finishSegment.z) {
-      this.endRace(true, time);
-      return;
-    }
+    if (this.raceOver) return;
+    this.frameStruckRiders = [];
+    this.fixedClock.advance(delta, (step) => {
+      if (this.raceOver || this.paused || this.practiceComplete) return false;
+      this.simulate(step, inputFrameElapsedMs);
+      return !this.raceOver && !this.paused && !this.practiceComplete;
+    });
+    if (this.raceOver) return;
 
     // Camera follows the player (§4.1): camZ/camX derive from the player's
     // world-Z and lane offset. Camera height comes from the ROAD's elevation
@@ -489,7 +421,7 @@ export class RaceScene extends Phaser.Scene {
     // Sky draws behind the road but needs this frame's curve offset and the
     // road's measured top edge, so it renders after.
     this.skyRenderer.render(result.farCurveOffset, camX, result.topScreenY);
-    this.worldRoll = Phaser.Math.Linear(this.worldRoll, -this.player.leanDirection * 0.008, 0.12);
+    this.worldRoll = this.reducedMotion ? 0 : Phaser.Math.Linear(this.worldRoll, -this.player.leanDirection * 0.008, 0.12);
     this.cameras.main.setRotation(this.worldRoll);
     this.sceneryRenderer.render(this.track, result.drawnSegments, { x: camX, y: camY, z: camZ });
     this.shadows.begin();
@@ -521,9 +453,10 @@ export class RaceScene extends Phaser.Scene {
       { x: camX, y: camY, z: camZ },
       this.shadows
     );
+    this.renderGhost(camX, camY, camZ, result.drawnSegments);
     this.updatePlayerSprite(camX, camY, camZ, result.drawnSegments);
     this.renderTargetMarker(camX, camY, camZ, result.drawnSegments);
-    this.emitCombatFeedback(struckRiders, camX, camY, camZ, result.drawnSegments);
+    this.emitCombatFeedback(this.frameStruckRiders, camX, camY, camZ, result.drawnSegments);
     this.shadows.end();
 
     // Carve spray off the board edge, and speed lines whose intensity tracks
@@ -542,7 +475,223 @@ export class RaceScene extends Phaser.Scene {
     this.updateHud();
     this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0);
 
-    this.prevWorldZ = this.player.worldZ;
+  }
+
+  private configurePractice(): void {
+    // Explicit training fixture: real controllers/physics/combat on a forgiving
+    // flat run. It never enters career, ghost, daily or cup record paths.
+    for (const segment of this.track) { segment.curve = 0; segment.y = 0; }
+    this.obstacles.splice(0);
+    this.pickups.splice(0);
+    this.crestApexZs = [];
+    const personality = (['bully', 'line-defender', 'daredevil'] as const)[this.practiceLesson];
+    // Teach the same named personalities the player will meet in every race.
+    const rosterIndex = [1, 0, 3][this.practiceLesson];
+    const rider = new AIRider({ ...this.aiRiders[rosterIndex].params, personality, behaviorSeed: 700 + this.practiceLesson,
+      startLane: this.practiceLesson === 1 ? 2 : 1,
+      startZOffset: PLAYER_START_Z + (this.practiceLesson === 1 ? 600 : this.practiceLesson === 2 ? 700 : 90),
+      aggression: this.practiceLesson === 0 ? 0 : 0.9,
+      cruiseSpeedFactor: this.practiceLesson === 1 ? 0.92 : 1 });
+    this.aiRiders.splice(0, this.aiRiders.length, rider);
+    this.aiCollisions = [new CollisionSystem()];
+    this.player.speed = MAX_SPEED;
+    rider.speed = MAX_SPEED * rider.params.cruiseSpeedFactor;
+    this.practiceMogulZ = PLAYER_START_Z + 5400;
+    if (this.practiceLesson === 2) {
+      this.obstacles.push({ kind: 'mogul', lane: 2, z: this.practiceMogulZ, segIndex: Math.floor(this.practiceMogulZ / SEGMENT_LENGTH) },
+        { kind: 'mogul', lane: 1, z: this.practiceMogulZ - 200, segIndex: Math.floor((this.practiceMogulZ - 200) / SEGMENT_LENGTH) });
+    }
+  }
+
+  private advancePractice(): boolean {
+    const objective = this.practiceObjective!;
+    const rider = this.aiRiders[0];
+    if (this.practiceLesson === 0 && !this.practiceLaunched && this.elapsedRaceMs >= 850) {
+      this.practiceLaunched = rider.requestTelegraphedAttack(this.player);
+    }
+    if (this.practiceLesson === 1 && this.player.worldZ > rider.worldZ + 160 &&
+        Math.abs(this.player.laneOffsetFraction - rider.laneOffsetFraction) >= 0.35) objective.passed = true;
+    if (this.practiceLesson === 2) {
+      if (this.player.airborne && this.player.extendedJump && this.player.worldZ >= this.practiceMogulZ - 800) objective.jumped = true;
+      if (objective.jumped && !this.player.airborne && this.player.worldZ > this.practiceMogulZ && !this.player.stumbling) objective.landed = true;
+    }
+    if (objective.complete && this.practiceAdvanceAt === 0) {
+      this.practiceFeedback = this.practiceLesson === 0 ? 'COUNTER LANDED! You turned their attack against them.' : this.practiceLesson === 1 ? 'CLEAN PASS! You kept your speed and avoided the fight.' : 'TRICK LANDED! You are ready for the circuit.';
+      this.practiceAdvanceAt = this.elapsedRaceMs + 1400;
+      this.hud.showMessage('LESSON COMPLETE', UI.accentGood);
+      this.audio.play('score');
+    }
+    if (this.practiceAdvanceAt && this.elapsedRaceMs >= this.practiceAdvanceAt) {
+      if (this.practiceLesson < 2) {
+        this.raceOver = true;
+        this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson + 1 });
+      } else this.finishPractice();
+      return true;
+    }
+    if (!objective.complete && (this.elapsedRaceMs > 8500 || this.player.wipedOut)) {
+      this.raceOver = true;
+      this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson,
+        practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : 'Try again: stay in the center and JUMP just before the mound.' });
+      return true;
+    }
+    return false;
+  }
+
+  private finishPractice(): void {
+    if (this.practiceComplete) return;
+    this.practiceComplete = true;
+    this.raceOver = true;
+    this.paused = true;
+    this.playerInput.setEnabled(false);
+    this.hud.setPracticeComplete();
+    this.audio.ride(0);
+    const before = new Set(this.children.list);
+    this.add.rectangle(480, 270, 960, 540, UI.panel, 0.96).setDepth(12000);
+    menuText(this, 480, 137, 'READY FOR THE CIRCUIT', 34, UI.accentGood, true).setOrigin(0.5).setDepth(12001);
+    menuText(this, 480, 212, 'Read the bully. Pass the defender. Fly with the daredevil.', 18, UI.inkHigh, true).setOrigin(0.5).setDepth(12001);
+    menuText(this, 480, 254, 'Practice complete · No scores or records were changed.', 14, UI.inkMid).setOrigin(0.5).setDepth(12001);
+    const replay = () => this.scene.restart({ ...this.options, practiceLesson: 0 });
+    const lodge = () => this.scene.start('TitleScene');
+    menuButton(this, 180, 326, 285, 'PRACTICE AGAIN', 'ENTER', replay, true);
+    menuButton(this, 495, 326, 285, 'BASE CAMP', 'ESC', lodge);
+    const added = this.children.list.filter(obj => !before.has(obj));
+    for (const obj of added) { if ('setDepth' in obj) (obj as unknown as Phaser.GameObjects.Components.Depth).setDepth(12001); }
+    this.cameras.main.ignore(added);
+    menuKeys(this, code => { if (code === 'Enter') replay(); if (code === 'Escape') lodge(); });
+  }
+
+  /** Fixed 60 Hz gameplay. Rendering, particle RNG and display refresh do not
+   * participate in competitive simulation or opponent decision streams. */
+  private simulate(delta: number, inputFrameElapsedMs: number): void {
+    this.elapsedRaceMs += delta;
+    const time = this.elapsedRaceMs;
+    if (this.simulationHitStopMs > 0) {
+      this.simulationHitStopMs = Math.max(0, this.simulationHitStopMs - delta);
+      return;
+    }
+    // Attack is polled here rather than fired from a key handler: handlers
+    // still run during hit-stop, when this method early-returns above, so a
+    // handler-driven attack would resolve combat inside the freeze on a stale
+    // clock. A press with no eligible target is refused by `attemptAttack`
+    // itself and costs nothing.
+    this.playerInput.update(delta, inputFrameElapsedMs);
+    if (this.playerInput.attackJustPressed()) {
+      this.combat.attemptAttack(time);
+    }
+
+    const prevZ = this.player.worldZ;
+    this.player.update(delta);
+
+    // Crest auto-launch (§4.3): crossing a jumpable crest's apex fires an
+    // extended trick jump with NO jump press — the crest acts as a ramp. No
+    // speed threshold (spec §4.3 note 14). `jump()` no-ops if already airborne
+    // (e.g. launched off a mogul just before the crest) or wiped out.
+    for (const apexZ of this.crestApexZs) {
+      if (prevZ < apexZ && this.player.worldZ >= apexZ) {
+        this.player.jump(true, false);
+        break;
+      }
+    }
+
+    // Player-vs-obstacle collision (§4.4).
+    this.collisions.update(this.player, this.obstacles);
+
+    // AI riders. Every rider updates (race + dodge + bump) EVERY frame
+    // regardless of whether it's currently on-screen — off-screen simulation
+    // keeps world-Z/speed/lane honest so a rider re-entering draw distance
+    // appears at the right spot instead of teleporting. No AI-vs-AI collision
+    // (design-spec §4.5 v1 simplification): only each rider's own obstacle
+    // collisions are checked, never rider-vs-rider.
+    for (let i = 0; i < this.aiRiders.length; i++) {
+      const rider = this.aiRiders[i];
+      rider.update(delta, this.obstacles, this.player);
+      if (this.finishSegment && rider.finishTimeMs === null && rider.worldZ >= this.finishSegment.z) {
+        rider.finishTimeMs = time;
+      }
+      if (rider.finishTimeMs !== null) {
+        // Hold a finished rider at the line rather than letting it run past
+        // the end of the (fixed-length, non-looping) track array.
+        rider.worldZ = this.finishSegment!.z;
+      }
+      this.aiCollisions[i].update(rider, this.obstacles);
+    }
+
+    // Combat resolution runs AFTER every rider has moved and taken its own
+    // obstacle collision this frame, so same-lane checks and knockout
+    // attribution (a rider's wipedOut transition) see final state.
+    this.combat.update(delta, time);
+    for (const event of this.combat.skillEvents.splice(0)) {
+      this.practiceObjective?.combat(event.type);
+      if (event.type === 'evade') { this.hud.showMessage('EVADED · COUNTER NOW!', UI.accentGood); this.audio.play('score'); }
+      if (event.type === 'counter') { this.counterCount++; this.hud.showMessage('COUNTER HIT!', UI.accentGood); }
+    }
+    if (this.practiceObjective && this.advancePractice()) return;
+
+    // Ski-pole pickup (§4.6): collected by lane + Z, including while
+    // airborne — unlike obstacles, never gated on `player.airborne`.
+    collectPickups(this.player, this.pickups);
+    if (this.player.weaponCharges > this.previousCharges) {
+      this.hud.showMessage('SKI POLE · 3 POWER HITS', UI.accentWarn);
+      this.audio.play('pickup');
+    }
+    this.previousCharges = this.player.weaponCharges;
+
+    // Combat feedback is emitted AFTER the render pass (`emitCombatFeedback`)
+    // so the struck rival can be projected with THIS frame's offset-walk
+    // data — but the riders must be captured here, because
+    // `ScoreTracker.update()` below drains `combat.events`.
+    this.frameStruckRiders.push(...this.combat.events.map((event) => event.rider));
+    if (this.combat.events.length) this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 50);
+
+    // Collision feedback, fired on state TRANSITIONS so neither the collision
+    // system nor combat needs to know anything is watching.
+    if (this.player.wipedOut && !this.prevWiped) this.simulationHitStopMs = 133.33333333333334;
+    else if (this.player.tumbling && !this.prevTumbling) this.simulationHitStopMs = 83.33333333333334;
+    this.emitCollisionFeedback();
+
+    // Scoring reads this frame's settled combat/collision/pickup state —
+    // must run after all of the above.
+    this.scoreTracker.update(delta);
+    const feedback = this.scoreTracker.feedback;
+    if (feedback.length > 0) {
+      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
+      const total = feedback.reduce((sum, e) => sum + e.points, 0);
+      this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
+      if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
+    }
+
+    if (!this.practiceObjective) {
+      this.ghostRecorder.capture(time, this.ghostPose());
+      const splits = this.checkpoints.update(prevZ, this.player.worldZ, time - delta, time, this.ghost ?? undefined);
+      for (const split of splits) {
+        this.ghostSplit = split.deltaMs === null ? `CHECKPOINT ${split.index + 1} · ${(split.timeMs / 1000).toFixed(1)}s` :
+          `SPLIT ${split.index + 1} · ${split.deltaMs <= 0 ? '−' : '+'}${(Math.abs(split.deltaMs) / 1000).toFixed(2)}s TO GHOST`;
+        this.hud.showMessage(this.ghostSplit, split.deltaMs !== null && split.deltaMs < 0 ? UI.accentGood : UI.accentInfo);
+      }
+    }
+
+    // Wipeout ends the run immediately (§4.4/§4.7/§4.8): capture score and
+    // position ONCE and hand off to ResultScene. Checked before the finish
+    // check below since a tree collision can never itself put the player
+    // past the finish line.
+    // Gated on the hit-stop still running: a tree wipeout sets `wipedOut` and
+    // triggers the heaviest impact in the game on the SAME frame, so ending
+    // the race here immediately would cut to the result screen before a
+    // single frozen frame — or any of the shake and spray — had been drawn.
+    // Holding the transition until the freeze expires lets the crash land.
+    if (this.player.wipedOut && this.simulationHitStopMs <= 0) {
+      this.endRace(false, time);
+      return;
+    }
+
+    // The course is a fixed, non-looping length (design-spec §4.2) — crossing
+    // the finish line ends the run (§4.7/§4.8): capture score/position once
+    // and hand off to ResultScene.
+    if (this.finishSegment && this.player.worldZ >= this.finishSegment.z) {
+      this.endRace(true, time);
+      return;
+    }
+
   }
 
   /**
@@ -556,6 +705,8 @@ export class RaceScene extends Phaser.Scene {
   private endRace(finished: boolean, nowMs: number): void {
     this.raceOver = true;
     this.playerInput.setEnabled(false);
+    const recording = this.ghostRecorder.finish(this.elapsedRaceMs, this.ghostPose(), finished);
+    const ghostSaved = recording ? saveGhost(this.options, recording) : false;
     if (finished) {
       // Held a couple of segments BEHIND the finish line rather than exactly
       // on it: project() culls anything at dz <= 0, so parking the camera
@@ -568,14 +719,26 @@ export class RaceScene extends Phaser.Scene {
     const playerFinishTimeMs = finished ? nowMs : null;
     const position = computePlayerPosition(this.player, this.aiRiders, playerFinishTimeMs);
     const breakdown = this.scoreTracker.finalize(finished, this.elapsedRaceMs, position);
-    const { best, isNewBest } = recordScore(breakdown.total);
-
-    this.scene.start('ResultScene', { seed: this.seed, breakdown, bestScore: best, isNewBest });
+    const course = recordRun(this.options, breakdown);
+    const awards = awardRun(this.options, breakdown);
+    const cup = this.options.mode === 'cup' ? completeCupRound(this.options, [
+      { id: 'player', worldZ: this.player.worldZ, finishTimeMs: playerFinishTimeMs, wipedOut: !finished },
+      ...this.aiRiders.map((r, i) => ({ id: `rival-${i}` as 'rival-0' | 'rival-1' | 'rival-2' | 'rival-3', worldZ: r.worldZ, finishTimeMs: r.finishTimeMs, wipedOut: r.wipedOut }))
+    ]) : null;
+    this.scene.start('ResultScene', { seed: this.seed, breakdown, bestScore: course.bestScore,
+      isNewBest: course.isNewBest, options: this.options, course, awards, cup, ghostSaved });
   }
 
   private updateHud(): void {
     const courseLength = (this.finishSegment?.z ?? COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH) - PLAYER_START_Z;
     this.hud.update({
+      sectionName: this.practiceObjective ? 'TRAINING SLOPE' : sectionAtZ(this.mountainSections, this.player.worldZ)?.name,
+      modeLabel: this.options.mode === 'daily' ? `DAILY ${this.options.dailyDate} UTC` : this.options.mode === 'cup' ? `CUP · RACE ${(this.options.roundIndex ?? 0) + 1} / 3` : this.practiceObjective ? 'PRACTICE' : this.options.dailyDate ? `${this.options.dailyDate} · PRACTICE` : 'MOUNTAIN RUN',
+      incomingAttack: this.combat.incomingAttack ? 'WIND UP' : undefined,
+      counterReady: this.combat.counterReady,
+      ghostSplit: this.ghostSplit,
+      practice: this.practiceObjective && this.countdownMs === 0 ? { ...PRACTICE_LESSONS[this.practiceLesson], feedback: this.practiceFeedback } : undefined,
+      riderCount: this.aiRiders.length + 1,
       score: this.scoreTracker.runningScore,
       speed: this.player.speed / MAX_SPEED,
       position: computePlayerPosition(this.player, this.aiRiders, null),
@@ -589,8 +752,25 @@ export class RaceScene extends Phaser.Scene {
       recovering: this.player.tumbling,
       chain: this.scoreTracker.chain,
       chainRemaining: this.scoreTracker.chainRemaining,
-      rivals: this.aiRiders.map((r, i) => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[i], out: r.wipedOut }))
+      rivals: this.aiRiders.map(r => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[r.params.paletteIndex], out: r.wipedOut }))
     });
+  }
+
+  private ghostPose(): { worldZ: number; laneOffset: number; jumpHeight: number; lean: number } {
+    return { worldZ: this.player.worldZ, laneOffset: this.player.laneOffsetFraction,
+      jumpHeight: this.player.jumpArcHeight, lean: this.player.leanDirection };
+  }
+
+  private renderGhost(camX: number, camY: number, camZ: number, drawn: Map<number, DrawnSegment>): void {
+    const pose = this.ghost ? sampleGhost(this.ghost, this.elapsedRaceMs) : null;
+    if (!pose) { this.ghostSprite.setVisible(false); return; }
+    const projected = projectEntity(pose.laneOffset, pose.worldZ, this.track, drawn,
+      { x: camX, y: camY, z: camZ }, pose.jumpHeight * PLAYER_JUMP_HEIGHT_WORLD);
+    if (!projected) { this.ghostSprite.setVisible(false); return; }
+    const width = softClampWidth(projected.screenW * PLAYER_WIDTH_FRACTION, SCREEN_W * MAX_ENTITY_SCREEN_FRACTION);
+    this.ghostSprite.setVisible(true).setPosition(projected.screenX, projected.screenY)
+      .setScale(width / PLAYER_FRAME_SIZE).setDepth(DEPTH.ENTITY - pose.worldZ)
+      .setFrame(pose.jumpHeight > 0 ? PLAYER_FRAMES.JUMP : pose.lean < 0 ? PLAYER_FRAMES.LEAN_LEFT : pose.lean > 0 ? PLAYER_FRAMES.LEAN_RIGHT : PLAYER_FRAMES.CENTER);
   }
 
   private updatePlayerSprite(
@@ -713,7 +893,7 @@ export class RaceScene extends Phaser.Scene {
     const y = projected.screenY + 3;
     // A chevron rather than a ring: it points at the rider, survives being
     // small, and cannot be mistaken for a contact shadow.
-    this.targetMarker.fillStyle(UI.accentWarn, 0.92);
+    this.targetMarker.fillStyle(this.combat.counterReady ? UI.accentGood : UI.accentWarn, 0.92);
     this.targetMarker.beginPath();
     this.targetMarker.moveTo(x, y + w * 0.30);
     this.targetMarker.lineTo(x - w * 0.34, y);

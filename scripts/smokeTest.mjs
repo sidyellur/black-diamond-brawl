@@ -220,55 +220,56 @@ async function run() {
 
   // The attack button, end to end: park a rival in reach, press F, and assert
   // the game registered a deliberate attack rather than silently doing nothing.
-  const attackResult = await page.evaluate(async () => {
-    const g = window.__game;
-    const sc = g && g.scene.getScene('RaceScene');
-    if (!sc || !sc.combat) return { ok: false, why: 'no scene' };
+  const attackResult = await page.evaluate(() => {
+    const sc = window.__game?.scene.getScene('RaceScene');
+    if (!sc?.combat) return { ok: false, why: 'no scene' };
     const r = sc.aiRiders[0];
-    // Seat the rival in the ADJACENT lane. Attacks reach 1.2 lanes while body
-    // checks only trigger same-lane, so this is reachable by a press but never
-    // by passive contact — which keeps the test measuring the attack path
-    // instead of racing the automatic body check and its pair immunity.
-    r.params.aggression = 0; // and stop it bumping its way back into our lane
-    // Rivals cruise at up to 105% of MAX_SPEED and re-accelerate toward it, so
-    // a rival left at a nominally lower speed can be FASTER than the player by
-    // the time the press lands — which flips who wins and makes the player the
-    // one who recoils. Pin it slow so the outcome under test is unambiguous.
-    r.params.cruiseSpeedFactor = 0.5;
+    // Explicit neutral encounter fixture. A line-defender otherwise returns
+    // to its original lane after repositioning, correctly leaving reach.
+    // Keep its protected line aligned with this fixture, and clear nearby
+    // hazards/other actors so this check measures a deliberate Attack only.
+    const lane = sc.player.laneIndex < 4 ? sc.player.laneIndex + 1 : sc.player.laneIndex - 1;
+    r.params.aggression = 0;
+    r.params.cruiseSpeedFactor = 0.98;
+    r.homeLane = lane;
+    r._laneIndex = lane;
+    r.tween = null;
+    r.worldZ = sc.player.worldZ;
+    r.speed = 2940;
     r.wipedOut = false;
     r.finishTimeMs = null;
-    r._laneIndex = sc.player.laneIndex + 1;
-    r.tween = null;
-    r.worldZ = sc.player.worldZ;
-    // Must keep pace: parking it at speed 0 while the player runs at 3000 u/s
-    // puts it thousands of units behind within a frame, far outside reach.
-    // Slightly slower so the player still wins the exchange.
-    r.speed = 2900;
+    r.airborne = false;
+    r.tumbleMsRemaining = 0;
+    r.immunityMsRemaining = 0;
+    r.hitReactionMsRemaining = 0;
+    r.attack?.cancel();
+    sc.player.airborne = false;
+    sc.player.tumbleMsRemaining = 0;
+    sc.player.immunityMsRemaining = 0;
     sc.player.speed = 3000;
-    await new Promise((res) => setTimeout(res, 200));
-    // A slower rival falls behind fast (the gap grows at the speed difference),
-    // so re-seat it alongside just before the press. Safe to do here precisely
-    // because it is in a DIFFERENT lane: no entering-edge body check can fire,
-    // so this cannot contaminate the attack under test.
-    r.worldZ = sc.player.worldZ;
-    r._laneIndex = sc.player.laneIndex + 1;
-    r.tween = null;
-    await new Promise((res) => setTimeout(res, 60));
-    r.worldZ = sc.player.worldZ;
-    return { ok: true, targeted: sc.combat.target !== null, cooldown: sc.combat.attackOnCooldown };
+    sc.player.tween = null;
+    sc.obstacles.splice(0, sc.obstacles.length, ...sc.obstacles.filter(o => Math.abs(o.z-sc.player.worldZ)>3000));
+    sc.aiRiders.slice(1).forEach(other => { other.worldZ = sc.player.worldZ - 100000; });
+    sc.combat.pairImmunityMs.clear();
+    sc.combat.attackCooldownMs = 0;
+    sc.combat.currentTarget = null;
+    sc.combat.update(0, sc.elapsedRaceMs);
+    // Observe the real post-update swing once, rather than sampling a short
+    // animation after a nondeterministic browser/CI round trip. No state is forced.
+    window.__attackObservation = null;
+    const observeAttack = () => {
+      if (!sc.player.swinging) return;
+      window.__attackObservation = { swinging: sc.player.swingMsRemaining > 0,
+        riderRecoiling: r.hitReactionMsRemaining > 0, onCooldown: sc.combat.attackOnCooldown };
+      sc.events.off('postupdate', observeAttack);
+    };
+    sc.events.on('postupdate', observeAttack);
+    return { ok: true, targeted: sc.combat.target === r, cooldown: sc.combat.attackOnCooldown };
   });
 
   await page.keyboard.press('KeyF');
-  await page.waitForTimeout(120);
-
-  const afterAttack = await page.evaluate(() => {
-    const sc = window.__game.scene.getScene('RaceScene');
-    return {
-      swinging: sc.player.swingMsRemaining > 0,
-      riderRecoiling: sc.aiRiders[0].hitReactionMsRemaining > 0,
-      onCooldown: sc.combat.attackOnCooldown
-    };
-  });
+  await page.waitForFunction(() => window.__attackObservation !== null);
+  const afterAttack = await page.evaluate(() => window.__attackObservation);
   await page.screenshot({ path: `${OUT}/05-attack.png` });
 
   check('a rival in reach becomes the attack target', attackResult.ok && attackResult.targeted, JSON.stringify(attackResult));

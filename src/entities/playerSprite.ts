@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { COSMETICS, getCareer } from '../progression';
 import { PixelCanvas, registerTexture } from '../render/pixel';
 import {
   drawRider,
@@ -10,6 +11,20 @@ import {
 
 export const PLAYER_TEXTURE_KEY = 'player-sheet';
 export const PLAYER_FRAME_SIZE = RIDER_FRAME_SIZE;
+
+/** Lazily bake the equipped jacket and board together. Every gameplay pose
+ * receives the same palette, so cosmetics remain visible while carving,
+ * jumping, attacking and falling. Immutable keys avoid replacing live textures. */
+export function getSelectedPlayerTexture(scene: Phaser.Scene): string {
+  const equipped = getCareer().equipped;
+  const jacket = COSMETICS.find(item => item.slot === 'jacket' && item.id === equipped.jacket);
+  const board = COSMETICS.find(item => item.slot === 'board' && item.id === equipped.board);
+  const palette = { suit: jacket?.color ?? PLAYER_RIDER_PALETTE.suit, board: board?.color ?? PLAYER_RIDER_PALETTE.board };
+  const key = `player-equipped-${palette.suit.toString(16)}-${palette.board.toString(16)}`;
+  generateRiderSheet(scene, key, palette);
+  return key;
+}
+
 
 /**
  * Frame layout: seven high-resolution frames in a single row, left to
