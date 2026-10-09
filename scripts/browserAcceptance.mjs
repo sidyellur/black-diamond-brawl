@@ -76,13 +76,37 @@ async function gamePoint(x, y) {
 }
 
 async function canvasFitsViewport() {
-  await page.waitForFunction(() => {
-    const canvas = document.querySelector('canvas');
-    if (!canvas) return false;
-    const box = canvas.getBoundingClientRect();
-    const fit = Math.min(window.innerWidth / 960, window.innerHeight / 540);
-    return Math.abs(box.width - 960 * fit) <= 2 && Math.abs(box.height - 540 * fit) <= 2;
-  });
+  try {
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector('canvas');
+      if (!canvas) return false;
+      const box = canvas.getBoundingClientRect();
+      const fit = Math.min(window.innerWidth / 960, window.innerHeight / 540);
+      return Math.abs(box.width - 960 * fit) <= 2 && Math.abs(box.height - 540 * fit) <= 2;
+    });
+  } finally {
+    const bounds = await page.evaluate(() => {
+      const scale = window.__game?.scale;
+      const rect = (element) => element?.getBoundingClientRect().toJSON();
+      const size = (value) => value && ({ width: value.width, height: value.height });
+      return {
+        innerWidth, innerHeight, devicePixelRatio, scrollX, scrollY,
+        visualViewport: window.visualViewport && {
+          width: visualViewport.width, height: visualViewport.height,
+          scale: visualViewport.scale, offsetLeft: visualViewport.offsetLeft, offsetTop: visualViewport.offsetTop
+        },
+        canvas: rect(document.querySelector('canvas')), app: rect(document.getElementById('app')),
+        body: rect(document.body), html: rect(document.documentElement),
+        scale: scale && {
+          parentSize: size(scale.parentSize), displaySize: size(scale.displaySize),
+          gameSize: size(scale.gameSize), baseSize: size(scale.baseSize),
+          dirty: scale.dirty, parentIsWindow: scale.parentIsWindow,
+          canvasBounds: scale.canvasBounds, parent: scale.parent?.id || scale.parent?.tagName
+        }
+      };
+    }).catch((error) => ({ error: String(error) }));
+    writeFileSync(`${OUT}/viewport-${phase.replaceAll(' ', '-')}.json`, JSON.stringify(bounds, null, 2));
+  }
 }
 
 async function clickGame(x, y, touch = false) {

@@ -7,6 +7,7 @@ import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { TitleScene } from './scenes/TitleScene';
 
 const config: Phaser.Types.Core.GameConfig = {
+  parent: 'app',
   // Prefer accelerated WebGL, while keeping the same sprite/Graphics game
   // playable when a device cannot create a WebGL context. No game mechanic
   // relies on a WebGL-only post-process. Explicit canvas mode is also tested.

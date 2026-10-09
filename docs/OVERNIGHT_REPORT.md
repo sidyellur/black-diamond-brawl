@@ -4,7 +4,36 @@
 
 Preserve the Road Rash-on-snowboards identity while improving graphics, controls, gameplay, and repeat play. The user authorized a feature PR and merge after verification. No new hosting service or paid infrastructure is being introduced.
 
-## Status log
+## Release snapshot
+
+- Feature PR: [#20](https://github.com/sidyellur/black-diamond-brawl/pull/20).
+- Latest publication/merge status and artifact links: [release issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21). This is updated after merge and main verification, rather than predicting a future merge inside a pre-merge commit.
+- Current tested source snapshot: `96de1946b522dfedaf5c52faa7b64d5b0768ea6c`. Local build/model gates pass; complete browser acceptance is being re-run on that exact head.
+- Hosting: no public site, Pages configuration, deployment workflow or existing homepage was found. No new hosting, account, billing or security settings were introduced.
+
+## What changed
+
+- **Art and mountain:** original 192px antialiased riders in seven poses, detailed snow hazards/pickups, three fir silhouettes, layered mountain scenery, off-piste forest, smoother snow banks, improved lighting/haze and an open finish arch.
+- **Controls and racing:** responsive tap/hold steering, keyboard/touch support, short forgiveness buffers, countdown, pause/focus protection, clear target/attack readiness, larger touch targets and interruption-safe menus.
+- **Game feel and replay:** Flow rewards, score feedback, impact/landing effects, procedural wind/effects with mute, richer title/results, same/new-mountain replay and persistent browser records.
+- **Road Rash feel:** bounded rival catch-up preserves earned setbacks; wider camera framing keeps the local pack readable without shrinking the hero or changing collision/attack rules.
+- **Reliability:** scoring edge cases, rapid-key queue replay, immediate Resume routing, touch cancellation, storage failures and sequential stale-tab overwrites now have targeted regressions.
+
+## How to run
+
+Use Node 22 (the CI-tested runtime), run `npm ci`, then `npm run dev` and open the printed localhost URL. For a production build, run `npm run build` then `npm run preview`. Use `?seed=202` to repeat a mountain; `?touch=1` exposes touch controls; `?renderer=canvas` requests the fallback renderer. Landscape is recommended on phones.
+
+For the complete local test gate, install Chromium once with `npx playwright install chromium`, then run `npm run verify`. CI retains screenshots/reports for 7 days and successful production-build artifacts for 14 days; source remains in GitHub.
+
+## Remaining limits
+
+- Real browser checks use CI Chromium and real dispatched keyboard/touch events with emulated mobile viewports. Physical iPhone/Safari and hardware GPU performance have not been verified.
+- The software WebGL runner renders around 6 FPS. Long physics frames are deliberately capped to avoid collision tunneling, so very slow devices can run below real time. Canvas fallback is available; do not interpret software-runner timings as a device benchmark.
+- Local records have no cloud sync. Sequential stale tabs merge safely; truly simultaneous cross-process localStorage writes are not transactional.
+- Rivals still suffer real race-ending crashes and are never resurrected. A depleted pack can leave a quieter late race.
+- Full-course completion measurements use a deterministic legal-input model driver. Browser finish/curve/crest views use clearly labeled position fixtures; they are not claimed as human full-course playthroughs.
+
+## Chronological implementation and validation log
 
 ### 2026-10-09 07:47 UTC / 00:47 PDT — baseline and implementation
 
@@ -13,7 +42,7 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 - Controls, procedural visuals, title/results, and race HUD/game-feel are being improved in parallel.
 - No deployment workflow is checked into the repository. Existing GitHub deployment configuration is still being investigated.
 
-## Issues and resolutions
+### Baseline issue inventory (historical; resolutions recorded below)
 
 | Issue | State | Resolution / next step |
 | --- | --- | --- |
@@ -25,7 +54,7 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 | Inputs fire directly during hit-stop and lack lifecycle cleanup | Fix in progress | Poll-based inputs, explicit enabled state, shutdown cleanup, controlled hold steering, short forgiveness buffers. |
 | No pause or touch input, minimal controls onboarding | Fix in progress | Pause/resume/retry flow, touch controls, full first-run controls and useful race HUD. |
 
-## Validation
+### Baseline validation (07:47 UTC)
 
 - Passed: baseline TypeScript + Vite production build.
 - Passed: baseline palette contrast.
@@ -34,7 +63,7 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 - Not yet run successfully: browser smoke/visual tests, touch tests, final integrated build.
 - Publication: not pushed, PR not opened, not merged, live deployment not verified.
 
-This report will be updated with final implementation details, evidence, remaining limitations, and publication links.
+The entries below preserve the actual progression, including failed runs and the fixes they drove.
 
 ### 2026-10-09 07:54 UTC / 00:54 PDT — integrated feature pass
 
@@ -109,3 +138,9 @@ This report will be updated with final implementation details, evidence, remaini
 - Modern mobile/finish screenshot review passes portrait presentation and finish/results. Landscape capture caught an unsettled resize, so both rotated screenshot paths now wait for the correct FIT dimensions and verify useful minimum fill, not merely that a tiny canvas fits.
 - A geometry-reviewed camera adjustment widens local pack visibility: centered same-depth outer rivals move from entirely off-screen to x≈77/883, while the hero remains ≈97 px tall at y≈461 and jump height stays ≈98 px. Shared rider scaling, physics and collision rules remain coherent. Renderer, combat, controls, scoring, pacing and solvability rechecks pass locally; actual new-framing screenshots remain pending.
 - The camera's start offset is derived from its trailing distance. Isolated scoring tests now explicitly set their fixture origin rather than relying on that presentation-dependent default. With the final offset, the same 12-seed model comparison measures nearby-pack time 52.56%→76.64%, flat-camera proximity band 63.84%→68.22%, and natural hits/body checks 28→33; rival wipeouts stay 29/48.
+
+### 2026-10-09 09:09 UTC / 02:09 PDT — camera smoke approved; rotation sizing repair
+
+- [Run 37908815092](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37908815092) at `96de194`: build, all 31 control checks, touchcancel guard, remaining model/asset gates and all 13 WebGL smoke checks **passed**. The new camera keeps a 97 px hero and readable combat effects.
+- The strengthened landscape sizing assertion failed in the early mobile pass: the canvas remained at its prior small portrait fit rather than filling the rotated viewport. Therefore this run did **not** yet reach the deeper quick-tap confirmation; no pass is claimed for it.
+- Gave Phaser an explicit fixed, viewport-sized `#app` mount instead of relying on body/canvas sizing. The minimum landscape-fill assertion is retained, with sizing diagnostics for any recurrence. Production build passes locally; the browser rotation/touch/replay gate will be rerun.

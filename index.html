@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Black Diamond Brawl</title>
     <style>
+      html, body { width: 100%; height: 100%; }
       body {
         margin: 0;
         padding: 0;
@@ -14,6 +15,9 @@
         overscroll-behavior: none;
         font-family: monospace;
       }
+      /* A viewport-sized mount, independent of the old canvas margins/size.
+         Phaser FIT can then grow as well as shrink after phone rotation. */
+      #app { position: fixed; inset: 0; overflow: hidden; }
       canvas { display: block; }
       #loading {
         position: fixed; inset: 0; display: grid; place-content: center;
