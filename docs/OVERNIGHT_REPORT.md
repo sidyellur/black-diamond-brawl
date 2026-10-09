@@ -8,7 +8,7 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 
 - Feature PR: [#20](https://github.com/sidyellur/black-diamond-brawl/pull/20).
 - Latest publication/merge status and artifact links: [release issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21). This is updated after merge and main verification, rather than predicting a future merge inside a pre-merge commit.
-- Current tested source snapshot: `96de1946b522dfedaf5c52faa7b64d5b0768ea6c`. Local build/model gates pass; complete browser acceptance is being re-run on that exact head.
+- Latest published source before this follow-on: `2d5797c2edd582a59549c6cd6035fba3f550bdd5`. Build/model/WebGL smoke gates pass; complete browser acceptance remains pending the rotation fix below. The linked release issue records the final exact verified head.
 - Hosting: no public site, Pages configuration, deployment workflow or existing homepage was found. No new hosting, account, billing or security settings were introduced.
 
 ## What changed
@@ -144,3 +144,10 @@ The entries below preserve the actual progression, including failed runs and the
 - [Run 37908815092](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37908815092) at `96de194`: build, all 31 control checks, touchcancel guard, remaining model/asset gates and all 13 WebGL smoke checks **passed**. The new camera keeps a 97 px hero and readable combat effects.
 - The strengthened landscape sizing assertion failed in the early mobile pass: the canvas remained at its prior small portrait fit rather than filling the rotated viewport. Therefore this run did **not** yet reach the deeper quick-tap confirmation; no pass is claimed for it.
 - Gave Phaser an explicit fixed, viewport-sized `#app` mount instead of relying on body/canvas sizing. The minimum landscape-fill assertion is retained, with sizing diagnostics for any recurrence. Production build passes locally; the browser rotation/touch/replay gate will be rerun.
+
+### 2026-10-09 09:19 UTC / 02:19 PDT — diagnosed and repaired orientation refresh ordering
+
+- [Run 37909586814](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37909586814) at `2d5797c`: build, model/asset gates and 13 WebGL smoke checks **passed**; the strict early landscape FIT check still **failed**.
+- Recorded DOM and Phaser diagnostics prove the mount was already correct at 844×390 while the canvas retained the old 390×219.375 fit. Phaser 3.90's orientation handler fits using cached parent bounds, then updates that cache too late; its next dirty check sees no change and never refits.
+- Added a game-owned resize observer and viewport listeners that sample current parent bounds before calling the public scale refresh. Duplicate events and zero-size mounts do no work; game destruction removes all listeners/observation. No per-frame resize or new dependencies were added.
+- New ordered-fit, repeated-rotation, same-size stability, idempotency and cleanup regressions **pass** locally, as do the production build and whitespace checks. Browser acceptance now also verifies portrait→landscape→portrait→landscape with separate diagnostics. Actual rotation, quick-tap and later touch/Canvas checks remain pending the replacement CI run; no assertions were relaxed.

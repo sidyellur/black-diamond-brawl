@@ -141,6 +141,15 @@ try {
   await page.screenshot({ path: `${OUT}/08-mobile-race.png` });
   await page.setViewportSize({ width: 844, height: 390 });
   await canvasFitsViewport();
+  check('portrait-to-landscape rotation fills the fitted viewport', true);
+  phase = 'rotation round-trip portrait';
+  await page.setViewportSize({ width: 390, height: 844 });
+  await canvasFitsViewport();
+  check('rotating back to portrait restores the fitted viewport', true);
+  phase = 'rotation round-trip landscape';
+  await page.setViewportSize({ width: 844, height: 390 });
+  await canvasFitsViewport();
+  check('repeated landscape rotation remains correctly fitted', true);
   await page.screenshot({ path: `${OUT}/11-mobile-landscape.png` });
   await page.context().close();
 
