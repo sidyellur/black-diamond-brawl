@@ -2,19 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Black Diamond Brawl</title>
     <style>
       body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background-color: #000;
+        background-color: #101923;
+        touch-action: none;
+        overscroll-behavior: none;
+        font-family: monospace;
+      }
+      canvas { display: block; }
+      #rotate-hint { display: none; }
+      @media (orientation: portrait) and (max-width: 600px) {
+        #rotate-hint {
+          display: block; position: fixed; left: 16px; right: 16px;
+          bottom: max(24px, env(safe-area-inset-bottom)); color: #c3d0de;
+          text-align: center; font-size: 14px; line-height: 1.6; pointer-events: none;
+        }
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <p id="rotate-hint">Turn your phone sideways for the best ride.<br>Touch controls are on the slope.</p>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

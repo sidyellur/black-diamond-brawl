@@ -1,27 +1,23 @@
 import Phaser from 'phaser';
-import { ROAD_WIDTH, SCREEN_W } from '../config';
-import { RUMBLE, shade } from '../render/palette';
-import { project, ProjectedPoint } from '../render/project';
+import { SCREEN_H, SCREEN_W } from '../config';
+import { RUMBLE, SNOW, UI, shade } from '../render/palette';
+import { Camera, projectEntity } from '../render/projectEntity';
+import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from './segment';
 
-// World-Y height of the banner arch above the road surface.
+// The hanging fabric is only the top of the arch. Everything below it stays
+// open so the finish reads as a place to ride through, never as a solid wall.
 const BANNER_HEIGHT = 1800;
-const CHECKER_COLUMNS = 8;
-const CHECKER_COLOR_A = RUMBLE.warn;
-const CHECKER_COLOR_B = 0xf4f7fb;
-/** Pole thickness in world units, projected like any other width. */
+const BANNER_FABRIC_HEIGHT = 260;
+const CHECKER_COLUMNS = 12;
+const CHECKER_ROWS = 2;
 const POLE_WORLD_WIDTH = 46;
 const POLE_COLOR = 0x8b93a1;
-const POLE_SHADE = shade(0x8b93a1, 'shadow');
+const POLE_SHADE = shade(POLE_COLOR, 'shadow');
 
-/**
- * Draws the finish banner: a checkered bar spanning the road at the finish
- * segment, with a pole at each edge. Task 6 hasn't formalized a general
- * entity-projection system yet, so this projects its own corner points
- * directly with `project()` (the same function `RoadRenderer` uses for
- * segment edges) rather than building one — a deliberately minimal "sprite"
- * for this task, not a general entity.
- */
+/** A genuine overhead finish arch, attached to the same curved/elevated
+ * segment as the riders. projectEntity owns all visibility decisions: an
+ * arch beyond draw distance or behind a crest cannot float over the skyline. */
 export class FinishBanner {
   private readonly graphics: Phaser.GameObjects.Graphics;
 
@@ -29,96 +25,59 @@ export class FinishBanner {
     this.graphics = scene.add.graphics();
   }
 
-  /** See `SkyRenderer.displayObjects`. */
   get displayObjects(): Phaser.GameObjects.GameObject[] {
     return [this.graphics];
   }
 
-  /** Sets the banner graphics' render depth (design-spec §3.6 render order). */
   setDepth(depth: number): void {
     this.graphics.setDepth(depth);
   }
 
-  render(finishSegment: Segment | undefined, camX: number, camY: number, camZ: number): void {
+  render(
+    finishSegment: Segment | undefined,
+    track: Segment[],
+    drawnSegments: Map<number, DrawnSegment>,
+    camera: Camera
+  ): void {
     this.graphics.clear();
-    if (!finishSegment) {
-      return;
-    }
+    if (!finishSegment) return;
 
-    const z = finishSegment.z;
-    const roadY = finishSegment.y;
+    const ground = projectEntity(0, finishSegment.z, track, drawnSegments, camera);
+    if (!ground) return;
 
-    const baseLeft = project(-ROAD_WIDTH, roadY, z, camX, camY, camZ);
-    const baseRight = project(ROAD_WIDTH, roadY, z, camX, camY, camZ);
-    const topLeft = project(-ROAD_WIDTH, roadY + BANNER_HEIGHT, z, camX, camY, camZ);
-    const topRight = project(ROAD_WIDTH, roadY + BANNER_HEIGHT, z, camX, camY, camZ);
+    const halfWidth = ground.screenW * 1.035;
+    const left = ground.screenX - halfWidth;
+    const right = ground.screenX + halfWidth;
+    const top = ground.screenY - ground.scale * BANNER_HEIGHT * (SCREEN_H / 2);
+    const barHeight = Math.max(2, ground.scale * BANNER_FABRIC_HEIGHT * (SCREEN_H / 2));
+    const poleWidth = Math.max(1.5, ground.scale * POLE_WORLD_WIDTH * (SCREEN_W / 2));
 
-    if (!baseLeft || !baseRight || !topLeft || !topRight) {
-      return; // behind the camera; nothing to draw this frame
-    }
+    this.drawPole(left, ground.screenY, top, poleWidth);
+    this.drawPole(right, ground.screenY, top, poleWidth);
 
-    this.drawPole(baseLeft, topLeft);
-    this.drawPole(baseRight, topRight);
-    this.drawCheckeredBar(baseLeft, baseRight, topLeft, topRight);
-  }
-
-  private drawPole(base: ProjectedPoint, top: ProjectedPoint): void {
-    // `scale` is the raw projection factor, not a pixel measurement — turning
-    // it into screen pixels needs the same `SCREEN_W / 2` term `project()`
-    // applies to every other width. Without it the expression only exceeded
-    // 1px for dz < 25 world units, which is inside the near plane and
-    // therefore unreachable, so the poles rendered as hairlines for the
-    // entire race.
-    const widthPx = Math.max(2, base.scale * POLE_WORLD_WIDTH * (SCREEN_W / 2));
-    this.graphics.lineStyle(widthPx, POLE_SHADE, 1);
-    this.graphics.lineBetween(base.screenX, base.screenY, top.screenX, top.screenY);
-    // A narrower lit core offset toward the sun gives the pole a round read
-    // instead of a flat bar.
-    this.graphics.lineStyle(Math.max(1, widthPx * 0.42), POLE_COLOR, 1);
-    this.graphics.lineBetween(
-      base.screenX - widthPx * 0.18,
-      base.screenY,
-      top.screenX - widthPx * 0.18,
-      top.screenY
-    );
-  }
-
-  private drawCheckeredBar(baseLeft: ProjectedPoint, baseRight: ProjectedPoint, topLeft: ProjectedPoint, topRight: ProjectedPoint): void {
-    for (let col = 0; col < CHECKER_COLUMNS; col++) {
-      const fracA = col / CHECKER_COLUMNS;
-      const fracB = (col + 1) / CHECKER_COLUMNS;
-      const color = col % 2 === 0 ? CHECKER_COLOR_A : CHECKER_COLOR_B;
-
-      this.fillQuad(
-        lerpPoint(baseLeft, baseRight, fracA),
-        lerpPoint(baseLeft, baseRight, fracB),
-        lerpPoint(topLeft, topRight, fracB),
-        lerpPoint(topLeft, topRight, fracA),
-        color
-      );
+    // Fabric header/footer seams keep the white checks readable against snow.
+    this.graphics.fillStyle(UI.panel);
+    this.graphics.fillRect(left, top - 1, right - left, barHeight + 2);
+    const cellWidth = (right - left) / CHECKER_COLUMNS;
+    const cellHeight = barHeight / CHECKER_ROWS;
+    for (let row = 0; row < CHECKER_ROWS; row++) {
+      for (let column = 0; column < CHECKER_COLUMNS; column++) {
+        this.graphics.fillStyle((row + column) % 2 === 0 ? RUMBLE.warn : SNOW.packed);
+        this.graphics.fillRect(
+          left + column * cellWidth, top + row * cellHeight,
+          cellWidth + 0.25, cellHeight
+        );
+      }
     }
   }
 
-  private fillQuad(p1: ScreenPoint, p2: ScreenPoint, p3: ScreenPoint, p4: ScreenPoint, color: number): void {
-    this.graphics.fillStyle(color);
-    this.graphics.beginPath();
-    this.graphics.moveTo(p1.x, p1.y);
-    this.graphics.lineTo(p2.x, p2.y);
-    this.graphics.lineTo(p3.x, p3.y);
-    this.graphics.lineTo(p4.x, p4.y);
-    this.graphics.closePath();
-    this.graphics.fillPath();
+  private drawPole(x: number, baseY: number, topY: number, width: number): void {
+    this.graphics.lineStyle(width, POLE_SHADE, 1);
+    this.graphics.lineBetween(x, baseY, x, topY);
+    this.graphics.lineStyle(Math.max(1, width * 0.42), POLE_COLOR, 1);
+    this.graphics.lineBetween(x - width * 0.18, baseY, x - width * 0.18, topY);
+    // Small snow feet plant the poles on the surface without a giant shadow.
+    this.graphics.fillStyle(SNOW.shadow, 0.7);
+    this.graphics.fillEllipse(x + width * 0.35, baseY, width * 2.2, width * 0.55);
   }
-}
-
-interface ScreenPoint {
-  x: number;
-  y: number;
-}
-
-function lerpPoint(a: ProjectedPoint, b: ProjectedPoint, t: number): ScreenPoint {
-  return {
-    x: a.screenX + (b.screenX - a.screenX) * t,
-    y: a.screenY + (b.screenY - a.screenY) * t
-  };
 }

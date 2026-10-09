@@ -7,12 +7,14 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "verify": "node scripts/verify.mjs",
-    "verify:palette": "tsx scripts/verifyPalette.ts",
-    "verify:combat": "tsx scripts/verifyCombat.ts",
-    "verify:solvability": "tsx scripts/verifySolvability.ts",
+    "verify:palette": "node --import tsx scripts/verifyPalette.ts",
+    "verify:combat": "node --import tsx scripts/verifyCombat.ts",
+    "verify:solvability": "node --import tsx scripts/verifySolvability.ts",
     "verify:visual": "node scripts/smokeTest.mjs",
-    "measure:rocklock": "tsx scripts/measureRockLock.ts",
-    "lab": "node scripts/spriteLab.mjs"
+    "measure:rocklock": "node --import tsx scripts/measureRockLock.ts",
+    "lab": "node scripts/spriteLab.mjs",
+    "verify:controls": "node --import tsx scripts/verifyControls.ts",
+    "verify:scoring": "node --import tsx scripts/verifyScoring.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0"

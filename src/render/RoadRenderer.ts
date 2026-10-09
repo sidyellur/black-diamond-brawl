@@ -16,15 +16,10 @@ const SNOW_DARK = SNOW.packedAlt;
 const OFF_PISTE_LIGHT = SNOW.offPiste;
 const OFF_PISTE_DARK = SNOW.offPisteAlt;
 
-// The rumble alternation used to be red against pure white — a 4x asymmetry
-// that read as flickering dashes rather than a strip, because only one half
-// of the pattern carried any weight against the snow behind it. Both halves
-// are now warning-coloured and differ in value instead.
-const RUMBLE_LIGHT = RUMBLE.warn;
-const RUMBLE_DARK = RUMBLE.warnAlt;
-
-// Rumble strip half-width as a multiple of the road's projected half-width.
-const RUMBLE_WIDTH_RATIO = 1.1;
+// A sculpted shoulder, with sparse marker poles instead of a highway curb.
+const EDGE_WIDTH_RATIO = 1.012;
+const SNOWBANK_WIDTH_RATIO = 1.13;
+const SURFACE_BANDS = 16;
 
 /** How far the off-piste fill overshoots each screen edge. The world is drawn
  *  in screen space with camera scroll pinned at 0, so a `camera.shake()` on
@@ -90,6 +85,15 @@ export interface RenderResult {
   farCurveOffset: number;
 }
 
+interface SurfaceShades {
+  snow: number;
+  offPiste: number;
+  bankLit: number;
+  bankShadow: number;
+  seam: number;
+  corduroy: number;
+}
+
 /**
  * Draws the road (design-spec §3.6 steps 1-2). Implements curves via the
  * corrected near/far-edge offset walk (§3.3), per-segment elevation and the
@@ -98,6 +102,17 @@ export interface RenderResult {
  */
 export class RoadRenderer {
   private readonly graphics: Phaser.GameObjects.Graphics;
+  private lastFogColor = -1;
+  private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS }, () => ({
+    snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0
+  }));
+  private readonly markers = Array.from({ length: 20 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
+  private markerCount = 0;
+  // Projection records are consumed during this frame only. Reusing the
+  // containers and slots avoids 100 tiny objects plus Map/Set each frame.
+  private readonly offsetPool: DrawnSegment[] = Array.from(
+    { length: DRAW_DISTANCE }, () => ({ nearOffsetX: 0, farOffsetX: 0, clipped: false })
+  );
 
   /** Segments clipped behind a crest on the most recent frame (§3.4). Public
    *  so Task 6 can reuse the same clip decision for entity/sprite hiding. */
@@ -123,11 +138,13 @@ export class RoadRenderer {
 
   render(track: Segment[], camX: number, camY: number, camZ: number, fogColor: number): RenderResult {
     this.graphics.clear();
+    this.prepareShades(fogColor);
+    this.markerCount = 0;
 
-    const clippedSegments = new Set<number>();
-    this.clippedSegments = clippedSegments;
-    const drawnSegments = new Map<number, DrawnSegment>();
-    this.drawnSegments = drawnSegments;
+    const clippedSegments = this.clippedSegments;
+    const drawnSegments = this.drawnSegments;
+    clippedSegments.clear();
+    drawnSegments.clear();
 
     let topScreenY = SCREEN_H;
     let farCurveOffset = 0;
@@ -210,7 +227,11 @@ export class RoadRenderer {
       // clipped segment is recognised and hidden via `clipped`, not left to
       // float because its segment was simply absent from the map).
       const clipped = far.screenY >= minScreenY;
-      drawnSegments.set(segIndex, { nearOffsetX, farOffsetX, clipped });
+      const offsets = this.offsetPool[i];
+      offsets.nearOffsetX = nearOffsetX;
+      offsets.farOffsetX = farOffsetX;
+      offsets.clipped = clipped;
+      drawnSegments.set(segIndex, offsets);
       if (clipped) {
         clippedSegments.add(segIndex);
         continue;
@@ -221,7 +242,10 @@ export class RoadRenderer {
         farCurveOffset = farOffsetX;
       }
 
-      const dark = segment.colorBand === 0;
+      // Slow, world-anchored snow variation replaces the old short zebra
+      // bands. Sixteen cached tones keep it smooth without a color blend/frame.
+      const surfaceBand = Math.min(SURFACE_BANDS - 1,
+        Math.floor((0.5 + Math.sin(segIndex * 0.085) * 0.5) * SURFACE_BANDS));
 
       // Aerial perspective. Distant snow loses contrast and drifts toward the
       // colour of the air in front of it — without this the road holds full
@@ -233,8 +257,7 @@ export class RoadRenderer {
       // test is not "can I see haze" but "does a surface at distance still
       // keep its own local contrast" — hence the 0.82 ceiling, which leaves
       // far geometry legible instead of dissolving it into flat fog.
-      const distanceT = i / DRAW_DISTANCE;
-      const fog = Math.min(0.82, Math.pow(distanceT, 1.7) * 1.15);
+      const colors = this.shades[i * SURFACE_BANDS + surfaceBand];
 
       // Off-piste fills the full screen width behind the road (unaffected by
       // the curve offset).
@@ -243,23 +266,69 @@ export class RoadRenderer {
       this.fillTrapezoid(
         -SHAKE_BLEED_PX, SCREEN_W + SHAKE_BLEED_PX, near.screenY,
         -SHAKE_BLEED_PX, SCREEN_W + SHAKE_BLEED_PX, far.screenY,
-        mix(dark ? OFF_PISTE_DARK : OFF_PISTE_LIGHT, fogColor, fog)
+        colors.offPiste
       );
 
-      const nearRumbleW = near.screenW * RUMBLE_WIDTH_RATIO;
-      const farRumbleW = far.screenW * RUMBLE_WIDTH_RATIO;
-      this.fillTrapezoid(
-        near.screenX - nearRumbleW, near.screenX + nearRumbleW, near.screenY,
-        far.screenX - farRumbleW, far.screenX + farRumbleW, far.screenY,
-        mix(dark ? RUMBLE_DARK : RUMBLE_LIGHT, fogColor, fog)
-      );
+      // Sculpted snow shoulders: their light and shadow make the playable
+      // boundary legible without turning the mountain into a striped highway.
+      if (i < 45) {
+        this.fillTrapezoid(
+          near.screenX - near.screenW * SNOWBANK_WIDTH_RATIO,
+          near.screenX - near.screenW * EDGE_WIDTH_RATIO, near.screenY,
+          far.screenX - far.screenW * SNOWBANK_WIDTH_RATIO,
+          far.screenX - far.screenW * EDGE_WIDTH_RATIO, far.screenY,
+          colors.bankLit
+        );
+        this.fillTrapezoid(
+          near.screenX + near.screenW * EDGE_WIDTH_RATIO,
+          near.screenX + near.screenW * SNOWBANK_WIDTH_RATIO, near.screenY,
+          far.screenX + far.screenW * EDGE_WIDTH_RATIO,
+          far.screenX + far.screenW * SNOWBANK_WIDTH_RATIO, far.screenY,
+          colors.bankShadow
+        );
+      }
 
-      const surface = mix(dark ? SNOW_DARK : SNOW_LIGHT, fogColor, fog);
+      const surface = colors.snow;
       this.fillTrapezoid(
         near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
         far.screenX - far.screenW, far.screenX + far.screenW, far.screenY,
         surface
       );
+
+      // Piste markers belong to exact world segments and are rendered after
+      // the terrain pass so further snow cannot paint over their raised tops.
+      if (segIndex % 12 === 0 && i < 70) {
+        const height = far.scale * 340 * (SCREEN_H / 2);
+        if (height >= 3) {
+          for (let side = -1; side <= 1; side += 2) {
+            const marker = this.markers[this.markerCount++];
+            marker.x = far.screenX + side * far.screenW * 1.09;
+            marker.y = far.screenY;
+            marker.height = height;
+            marker.width = Math.max(1, far.scale * 22 * (SCREEN_W / 2));
+            marker.alpha = 1 - i / (DRAW_DISTANCE * 1.2);
+          }
+        }
+      }
+
+      // Four shallow seams divide the five rideable lanes. These sit on the
+      // actual lane boundaries (not the centres), giving a clear dodge/jump
+      // corridor without painted road markings or competing with hazards.
+      if (i < 36) {
+        const seamColor = colors.seam;
+        for (let lane = 1; lane < 5; lane++) {
+          const edge = lane * 0.4 - 1;
+          const nearHalf = Math.max(0.35, near.screenW * 0.0019);
+          const farHalf = Math.max(0.25, far.screenW * 0.0019);
+          this.fillTrapezoid(
+            near.screenX + edge * near.screenW - nearHalf,
+            near.screenX + edge * near.screenW + nearHalf, near.screenY,
+            far.screenX + edge * far.screenW - farHalf,
+            far.screenX + edge * far.screenW + farHalf, far.screenY,
+            seamColor
+          );
+        }
+      }
 
       // Groomer corduroy — the parallel ridges a piste basher leaves. Drawn
       // only for the nearest segments: beyond that the lines fall below a
@@ -267,8 +336,7 @@ export class RoadRenderer {
       // ~800 fill paths a frame on top of the existing ~300 for no visible
       // gain. This is a LOD, not a shortcut.
       if (i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
-        const fade = 1 - i / CORDUROY_SEGMENTS;
-        const groove = mix(surface, SNOW.shadow, 0.16 * fade);
+        const groove = colors.corduroy;
         for (let g = 1; g < CORDUROY_LINES; g++) {
           const t = g / CORDUROY_LINES - 0.5;
           this.fillTrapezoid(
@@ -280,7 +348,44 @@ export class RoadRenderer {
       }
     }
 
+    this.drawMarkers();
     return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
+  }
+
+  private drawMarkers(): void {
+    for (let i = this.markerCount - 1; i >= 0; i--) {
+      const marker = this.markers[i];
+      if (marker.x < -16 || marker.x > SCREEN_W + 16) continue;
+      const top = marker.y - marker.height;
+      this.graphics.lineStyle(marker.width, SNOW.shadow, marker.alpha);
+      this.graphics.lineBetween(marker.x, marker.y, marker.x, top);
+      this.graphics.lineStyle(marker.width * 1.5, RUMBLE.warn, marker.alpha);
+      this.graphics.lineBetween(marker.x, top, marker.x, top + marker.height * 0.32);
+      this.graphics.lineStyle(marker.width, SNOW.packed, marker.alpha);
+      this.graphics.lineBetween(marker.x, top + marker.height * 0.32,
+        marker.x, top + marker.height * 0.43);
+    }
+  }
+
+  /** All six depth ramps are stable for a given atmosphere. Cache them
+   * instead of creating RGB objects and doing gamma conversions hundreds of
+   * times per frame; extra piste detail has no extra colour-math churn. */
+  private prepareShades(fogColor: number): void {
+    if (fogColor === this.lastFogColor) return;
+    this.lastFogColor = fogColor;
+    for (let i = 0; i < DRAW_DISTANCE; i++) {
+      const fog = Math.min(0.82, Math.pow(i / DRAW_DISTANCE, 1.7) * 1.15);
+      for (let band = 0; band < SURFACE_BANDS; band++) {
+        const colors = this.shades[i * SURFACE_BANDS + band];
+        const variation = band / (SURFACE_BANDS - 1);
+        colors.snow = mix(mix(SNOW_LIGHT, SNOW_DARK, variation * 0.32), fogColor, fog);
+        colors.offPiste = mix(mix(OFF_PISTE_LIGHT, OFF_PISTE_DARK, variation * 0.42), fogColor, fog);
+        colors.bankLit = mix(SNOW.packed, fogColor, fog);
+        colors.bankShadow = mix(SNOW.shadow, fogColor, fog);
+        colors.seam = mix(colors.snow, SNOW.shadow, 0.22 * Math.max(0, 1 - i / 42));
+        colors.corduroy = mix(colors.snow, SNOW.shadow, 0.16 * Math.max(0, 1 - i / CORDUROY_SEGMENTS));
+      }
+    }
   }
 
   private fillTrapezoid(

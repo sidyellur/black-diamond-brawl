@@ -27,7 +27,9 @@ import { recordScore } from '../entities/session';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
 import { ShadowRenderer } from '../render/ShadowRenderer';
-import { UI } from '../render/palette';
+import { RIVAL_SUITS, UI } from '../render/palette';
+import { RaceHud } from '../ui/RaceHud';
+import { getRaceAudio, RaceAudio } from '../audio/RaceAudio';
 import { projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment, RoadRenderer } from '../render/RoadRenderer';
 import { horizonFogColor, SkyRenderer } from '../render/SkyRenderer';
@@ -48,14 +50,6 @@ const PLAYER_JUMP_HEIGHT_WORLD = 520; // world-units at jump apex, fed through p
 // keeps the banner in front of the camera instead of sitting exactly at
 // dz=0, where project() culls it.
 const FINISH_HOLD_BACK = SEGMENT_LENGTH * 8;
-
-// Bare-bones HUD layout (design-spec §3.6 step 5 / §4.7): score, speed,
-// progress bar, weapon charges.
-const HUD_X = 20;
-const HUD_Y = 16;
-const PROGRESS_BAR_W = 220;
-const PROGRESS_BAR_H = 10;
-const HUD_LINE_HEIGHT = 20;
 
 interface RaceSceneData {
   /** Course seed (design-spec §4.2/§4.8) — passed by `TitleScene`'s initial
@@ -108,12 +102,13 @@ export class RaceScene extends Phaser.Scene {
   private scoreTracker!: ScoreTracker;
 
   private seed = 0;
-  private progressBarBg!: Phaser.GameObjects.Graphics;
-  private progressBarFill!: Phaser.GameObjects.Graphics;
-  private attackPip!: Phaser.GameObjects.Graphics;
-  private scoreText!: Phaser.GameObjects.Text;
-  private speedText!: Phaser.GameObjects.Text;
-  private weaponText!: Phaser.GameObjects.Text;
+  private hud!: RaceHud;
+  private audio!: RaceAudio;
+  private paused = false;
+  private countdownMs = 1800;
+  private elapsedRaceMs = 0;
+  private previousCharges = 0;
+  private previousHitReaction = false;
 
   /** True once the run has ended (finish or wipeout) and `ResultScene` has
    *  been started — guards against re-triggering the transition on a later
@@ -122,13 +117,6 @@ export class RaceScene extends Phaser.Scene {
   private prevWorldZ = PLAYER_START_Z;
   /** Every world-space display object, so the UI camera can ignore them all. */
   private worldObjects: Phaser.GameObjects.GameObject[] = [];
-  /** `this.time.now` at the instant this race started (design-spec §4.7's
-   *  finish time is race-elapsed time, not wall-clock time since the game
-   *  booted) — Phaser's `update(time, delta)` `time` argument is the GLOBAL
-   *  game clock shared by every scene, never reset on a scene restart, so
-   *  finish time must be computed as `time - raceStartMs`, never `time`
-   *  directly (see `endRace`). */
-  private raceStartMs = 0;
 
   constructor() {
     super({ key: 'RaceScene' });
@@ -140,7 +128,11 @@ export class RaceScene extends Phaser.Scene {
     // `= 0`) only ever runs once, at construction — NOT on every `create()`.
     this.raceOver = false;
     this.prevWorldZ = PLAYER_START_Z;
-    this.raceStartMs = this.time.now;
+    this.elapsedRaceMs = 0;
+    this.paused = false;
+    this.countdownMs = 1800;
+    this.previousCharges = 0;
+    this.previousHitReaction = false;
     this.worldObjects = [];
     this.prevWiped = false;
     this.prevTumbling = false;
@@ -210,7 +202,10 @@ export class RaceScene extends Phaser.Scene {
     this.roadRenderer.displayObjects.forEach(this.registerWorld);
     this.finishBanner.displayObjects.forEach(this.registerWorld);
 
+    this.audio = getRaceAudio();
     this.buildHud();
+    this.bindRaceLifecycle();
+    this.playerInput.setEnabled(false);
 
     // Built after the HUD so the UI camera already exists — every juice
     // object registers as world-space and must be ignored by it.
@@ -232,61 +227,79 @@ export class RaceScene extends Phaser.Scene {
   };
 
   private buildHud(): void {
-    const hud: Phaser.GameObjects.GameObject[] = [];
-    const ink = (v: number): string => `#${v.toString(16).padStart(6, '0')}`;
-
-    const seedText = this.add.text(HUD_X, HUD_Y, `seed: ${this.seed}`, {
-      fontSize: '13px',
-      color: ink(UI.inkLow)
+    this.hud = new RaceHud(this, this.seed, {
+      pause: () => this.setPaused(true),
+      resume: () => this.setPaused(false),
+      restart: () => this.scene.restart({ seed: this.seed }),
+      menu: () => this.scene.start('TitleScene'),
+      mute: () => this.audio.toggle(),
+      control: (action, down, source) => this.playerInput.setAction(action, down, source)
     });
-    this.scoreText = this.add.text(HUD_X, HUD_Y + HUD_LINE_HEIGHT, '', {
-      fontSize: '15px',
-      color: ink(UI.inkHigh),
-      fontStyle: 'bold'
-    });
-    this.speedText = this.add.text(HUD_X, HUD_Y + HUD_LINE_HEIGHT * 2, '', {
-      fontSize: '14px',
-      color: ink(UI.inkMid)
-    });
-    this.weaponText = this.add.text(HUD_X, HUD_Y + HUD_LINE_HEIGHT * 3, '', {
-      fontSize: '14px',
-      color: ink(UI.accentWarn)
-    });
-
-    // The bar's background never changes for the whole race — drawn once
-    // here rather than every frame in updateHud(), unlike progressBarFill's
-    // width, which genuinely does change every frame.
-    const barY = HUD_Y + HUD_LINE_HEIGHT * 4;
-    this.progressBarBg = this.add.graphics();
-    this.progressBarBg.fillStyle(UI.panel, 0.55);
-    this.progressBarBg.fillRect(HUD_X - 2, barY - 2, PROGRESS_BAR_W + 4, PROGRESS_BAR_H + 4);
-    this.progressBarBg.fillStyle(UI.panelEdge, 0.9);
-    this.progressBarBg.fillRect(HUD_X, barY, PROGRESS_BAR_W, PROGRESS_BAR_H);
-
-    this.progressBarFill = this.add.graphics();
-    this.attackPip = this.add.graphics();
-
-    hud.push(
-      seedText,
-      this.scoreText,
-      this.speedText,
-      this.weaponText,
-      this.progressBarBg,
-      this.progressBarFill,
-      this.attackPip
-    );
-
-    // A dedicated UI camera keeps the HUD still while the world camera shakes
-    // on impact — and keeps postFX (vignette, bloom) off the text, which
-    // would otherwise darken the HUD corners and blow out white glyphs.
+    this.hud.setMuted(this.audio.isMuted);
     this.uiCamera = this.cameras.add(0, 0, SCREEN_W, SCREEN_H);
     this.uiCamera.setName('ui');
     this.uiCamera.transparent = true;
     this.uiCamera.ignore(this.worldObjects);
-    this.cameras.main.ignore(hud);
+    this.cameras.main.ignore(this.hud.objects);
   }
 
-  update(time: number, delta: number): void {
+  private bindRaceLifecycle(): void {
+    const keyboard = this.input.keyboard;
+    const pause = () => this.setPaused(!this.paused);
+    const restart = () => { if (this.paused) this.scene.restart({ seed: this.seed }); };
+    const mute = () => this.hud.setMuted(this.audio.toggle());
+    const blur = () => this.setPaused(true);
+    const unlock = () => this.audio.unlock();
+    keyboard?.addKeys('P,ESC,R,M');
+    keyboard?.on('keydown-P', pause);
+    keyboard?.on('keydown-ESC', pause);
+    keyboard?.on('keydown-R', restart);
+    keyboard?.on('keydown-M', mute);
+    keyboard?.on('keydown', unlock);
+    this.input.on('pointerdown', unlock);
+    this.game.events.on(Phaser.Core.Events.BLUR, blur);
+    this.game.events.on(Phaser.Core.Events.HIDDEN, blur);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      keyboard?.off('keydown-P', pause);
+      keyboard?.off('keydown-ESC', pause);
+      keyboard?.off('keydown-R', restart);
+      keyboard?.off('keydown-M', mute);
+      keyboard?.off('keydown', unlock);
+      this.input.off('pointerdown', unlock);
+      this.game.events.off(Phaser.Core.Events.BLUR, blur);
+      this.game.events.off(Phaser.Core.Events.HIDDEN, blur);
+      this.playerInput.destroy();
+    });
+  }
+
+  private setPaused(paused: boolean): void {
+    if (this.raceOver || this.paused === paused) return;
+    this.paused = paused;
+    this.hud.setPaused(paused);
+    this.playerInput.setEnabled(!paused && this.countdownMs === 0);
+    if (!paused) this.audio.unlock();
+  }
+
+  update(_wallTime: number, frameDelta: number): void {
+    if (this.paused) return;
+    // Bound a frame's travel below the collision window. A slow/background
+    // frame must never teleport through a tree or consume a whole jump.
+    let delta = Math.min(50, Math.max(0, frameDelta));
+    this.hud.tick(delta);
+    if (this.countdownMs > 0) {
+      this.countdownMs = Math.max(0, this.countdownMs - delta);
+      this.hud.setCountdown(this.countdownMs > 1200 ? '3' : this.countdownMs > 600 ? '2' : this.countdownMs > 0 ? '1' : '');
+      if (this.countdownMs === 0) {
+        this.playerInput.setEnabled(true);
+        this.hud.showMessage('DROP IN!', UI.accentGood);
+        this.audio.play('go');
+      }
+      delta = 0;
+    } else {
+      this.elapsedRaceMs += delta;
+    }
+    const time = this.elapsedRaceMs;
+
     if (this.raceOver) {
       return; // frozen: ResultScene has already been started this frame
     }
@@ -310,6 +323,7 @@ export class RaceScene extends Phaser.Scene {
     // handler-driven attack would resolve combat inside the freeze on a stale
     // clock. A press with no eligible target is refused by `attemptAttack`
     // itself and costs nothing.
+    this.playerInput.update(delta);
     if (this.playerInput.attackJustPressed()) {
       this.combat.attemptAttack(time);
     }
@@ -359,6 +373,11 @@ export class RaceScene extends Phaser.Scene {
     // Ski-pole pickup (§4.6): collected by lane + Z, including while
     // airborne — unlike obstacles, never gated on `player.airborne`.
     collectPickups(this.player, this.pickups);
+    if (this.player.weaponCharges > this.previousCharges) {
+      this.hud.showMessage('SKI POLE · 3 POWER HITS', UI.accentWarn);
+      this.audio.play('pickup');
+    }
+    this.previousCharges = this.player.weaponCharges;
 
     // Combat feedback is emitted AFTER the render pass (`emitCombatFeedback`)
     // so the struck rival can be projected with THIS frame's offset-walk
@@ -372,7 +391,14 @@ export class RaceScene extends Phaser.Scene {
 
     // Scoring reads this frame's settled combat/collision/pickup state —
     // must run after all of the above.
-    this.scoreTracker.update();
+    this.scoreTracker.update(delta);
+    const feedback = this.scoreTracker.feedback;
+    if (feedback.length > 0) {
+      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
+      const total = feedback.reduce((sum, e) => sum + e.points, 0);
+      this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain}× FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
+      if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
+    }
 
     // Wipeout ends the run immediately (§4.4/§4.7/§4.8): capture score and
     // position ONCE and hand off to ResultScene. Checked before the finish
@@ -415,7 +441,7 @@ export class RaceScene extends Phaser.Scene {
     // road's measured top edge, so it renders after.
     this.skyRenderer.render(result.farCurveOffset, camX, result.topScreenY);
     this.shadows.begin();
-    this.finishBanner.render(this.finishSegment, camX, camY, camZ);
+    this.finishBanner.render(this.finishSegment, this.track, result.drawnSegments, { x: camX, y: camY, z: camZ });
     // Obstacles project with the SAME frame's offset-walk / crest-clip data so
     // they slide through curves and vanish behind crests exactly like the road.
     this.obstacleRenderer.render(
@@ -476,6 +502,7 @@ export class RaceScene extends Phaser.Scene {
    */
   private endRace(finished: boolean, nowMs: number): void {
     this.raceOver = true;
+    this.playerInput.setEnabled(false);
     if (finished) {
       // Held a couple of segments BEHIND the finish line rather than exactly
       // on it: project() culls anything at dz <= 0, so parking the camera
@@ -483,47 +510,33 @@ export class RaceScene extends Phaser.Scene {
       // render — not that ResultScene needs it, but keeps worldZ sane.
       this.player.worldZ = Math.max(0, this.finishSegment!.z - FINISH_HOLD_BACK);
     }
-    // `computePlayerPosition` only ever compares `finishTimeMs` values against
-    // EACH OTHER (relative order, never against a fixed constant), so the raw
-    // (wall-clock-since-boot) `nowMs`/`rider.finishTimeMs` pairing is fine
-    // there. `ScoreTracker.finalize`'s time bonus is different: it compares
-    // finish time against the fixed `PAR_TIME` constant, so it needs the
-    // RACE-elapsed duration, not time-since-game-booted — see `raceStartMs`.
+    // All finish stamps use the same pause-aware race clock. Menu dwell,
+    // countdown, and time spent in the pause overlay never reduce time bonus.
     const playerFinishTimeMs = finished ? nowMs : null;
     const position = computePlayerPosition(this.player, this.aiRiders, playerFinishTimeMs);
-    const breakdown = this.scoreTracker.finalize(finished, nowMs - this.raceStartMs, position);
+    const breakdown = this.scoreTracker.finalize(finished, this.elapsedRaceMs, position);
     const { best, isNewBest } = recordScore(breakdown.total);
 
     this.scene.start('ResultScene', { seed: this.seed, breakdown, bestScore: best, isNewBest });
   }
 
   private updateHud(): void {
-    this.scoreText.setText(`score: ${Math.round(this.scoreTracker.runningScore)}`);
-    this.speedText.setText(`speed: ${Math.round((this.player.speed / MAX_SPEED) * 100)}%`);
-    this.weaponText.setText(this.player.armed ? `pole: ${this.player.weaponCharges}` : '');
-
-    // Attack readiness. An invisible cooldown is another way to generate
-    // "I pressed attack and nothing happened".
-    const pipY = HUD_Y + HUD_LINE_HEIGHT * 3 + 4;
-    const pipX = HUD_X + 92;
-    this.attackPip.clear();
-    if (this.combat.attackOnCooldown) {
-      this.attackPip.fillStyle(UI.inkLow, 0.5);
-      this.attackPip.fillRect(pipX, pipY, 34, 5);
-      this.attackPip.fillStyle(UI.inkMid, 0.9);
-      this.attackPip.fillRect(pipX, pipY, 34 * (1 - this.combat.attackCooldownFraction), 5);
-    } else {
-      this.attackPip.fillStyle(this.combat.target ? UI.accentWarn : UI.inkLow, this.combat.target ? 1 : 0.45);
-      this.attackPip.fillRect(pipX, pipY, 34, 5);
-    }
-
-    const courseLength = COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH;
-    const progress = courseLength > 0 ? Phaser.Math.Clamp(this.player.worldZ / courseLength, 0, 1) : 0;
-    const barY = HUD_Y + HUD_LINE_HEIGHT * 4;
-
-    this.progressBarFill.clear();
-    this.progressBarFill.fillStyle(0xffcc33, 1);
-    this.progressBarFill.fillRect(HUD_X, barY, PROGRESS_BAR_W * progress, PROGRESS_BAR_H);
+    const courseLength = (this.finishSegment?.z ?? COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH) - PLAYER_START_Z;
+    this.hud.update({
+      score: this.scoreTracker.runningScore,
+      speed: this.player.speed / MAX_SPEED,
+      position: computePlayerPosition(this.player, this.aiRiders, null),
+      elapsedMs: this.elapsedRaceMs,
+      progress: Phaser.Math.Clamp((this.player.worldZ - PLAYER_START_Z) / courseLength, 0, 1),
+      charges: this.player.weaponCharges,
+      attackCooldown: this.combat.attackCooldownFraction,
+      target: this.combat.target !== null,
+      airborne: this.player.airborne,
+      recovering: this.player.tumbling,
+      chain: this.scoreTracker.chain,
+      chainRemaining: this.scoreTracker.chainRemaining,
+      rivals: this.aiRiders.map((r, i) => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[i], out: r.wipedOut }))
+    });
   }
 
   private updatePlayerSprite(
@@ -583,6 +596,12 @@ export class RaceScene extends Phaser.Scene {
       SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
     );
     this.playerSprite.setScale(widthPx / PLAYER_FRAME_SIZE);
+    // A little articulated board lean bridges the discrete illustration poses.
+    // It is presentation only: the collision line remains the exact lane tween.
+    const targetAngle = this.player.tumbling ? Math.sin(this.elapsedRaceMs / 90) * 32
+      : this.player.hitReacting ? -11 : this.player.swinging ? 8
+      : this.player.airborne ? Math.sin(this.elapsedRaceMs / 180) * 5 : lean * 7;
+    this.playerSprite.setAngle(Phaser.Math.Linear(this.playerSprite.angle, targetAngle, 0.28));
     this.playerSprite.setPosition(projected.screenX + stumbleShimmy, projected.screenY);
 
     // The shadow tracks the ROAD, not the sprite — projected again at zero
@@ -673,6 +692,7 @@ export class RaceScene extends Phaser.Scene {
     camZ: number,
     drawnSegments: Map<number, DrawnSegment>
   ): void {
+    if (struckRiders.length > 0) this.audio.play('hit');
     for (const rider of struckRiders) {
       const projected = projectEntity(rider.laneOffsetFraction, rider.worldZ, this.track, drawnSegments, {
         x: camX,
@@ -704,17 +724,29 @@ export class RaceScene extends Phaser.Scene {
     // Tree: run-ending. The heaviest hit in the game, so it gets the most.
     if (this.player.wipedOut && !this.prevWiped) {
       this.juice.impact(x, y, 1);
+      this.audio.play('crash');
     } else if (this.player.tumbling && !this.prevTumbling) {
       // Rock: a hard knockdown, recoverable.
       this.juice.impact(x, y, 0.62);
+      this.audio.play('crash');
+      this.hud.showMessage('ROCK HIT · RECOVERING', UI.accentBad);
     } else if (this.player.stumbling && !this.prevStumbling) {
       // Mogul: a bump, not a crash — spray and a nudge, no flash.
       this.juice.impact(x, y, 0.18);
+      this.audio.play('land');
     }
+
+    if (this.player.airborne && !this.prevAirborne) this.audio.play('jump');
+    if (this.player.hitReacting && !this.previousHitReaction) {
+      this.audio.play('hit');
+      this.hud.showMessage('RIVAL HIT · FIGHT BACK', UI.accentBad);
+    }
+    this.previousHitReaction = this.player.hitReacting;
 
     // Landing. An extended (trick) landing is a reward, so it sparkles rather
     // than shakes.
     if (!this.player.airborne && this.prevAirborne && !this.player.wipedOut) {
+      this.audio.play('land');
       if (this.player.extendedJump) {
         this.juice.trickLanded(x, y);
       } else {

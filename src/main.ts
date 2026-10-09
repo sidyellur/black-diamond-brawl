@@ -19,14 +19,10 @@ const config: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  // Nearest-neighbour sampling, but NOT integer position snapping. The
-  // projection scales every world sprite by a continuously-varying
-  // non-integer factor, so `roundPixels` cannot make sprites land on a stable
-  // pixel grid anyway — and because Graphics objects ignore it entirely, the
-  // road would keep sub-pixel positions while the sprites standing on it
-  // snapped, making entities visibly swim against the surface at distance.
-  // Disabling it keeps sprites and road in the same coordinate space.
-  pixelArt: true,
+  // High-resolution illustration assets use linear sampling for smooth
+  // contour animation at every projected scale; the road stays sub-pixel.
+  pixelArt: false,
+  antialias: true,
   roundPixels: false,
   scene: [BootScene, TitleScene, RaceScene, ResultScene, SpriteLabScene]
 };

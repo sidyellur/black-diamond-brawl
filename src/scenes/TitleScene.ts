@@ -1,132 +1,156 @@
 import Phaser from 'phaser';
+import { getRaceAudio } from '../audio/RaceAudio';
 import { SCREEN_H, SCREEN_W } from '../config';
-import { DEPTH } from '../render/depth';
 import { SkyRenderer } from '../render/SkyRenderer';
 import { UI } from '../render/palette';
-import { resolveSeed } from '../track/seed';
-import { drawRider } from '../entities/riderArt';
-import { PixelCanvas, registerTexture } from '../render/pixel';
-import { PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES } from '../entities/riderArt';
+import { randomSeed, resolveSeed } from '../track/seed';
+import { drawRider, PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES } from '../entities/riderArt';
+import { registerTexture } from '../render/pixel';
+import { getBestScore, getCourseRecord } from '../entities/session';
+import { formatPoints, formatTime, menuButton, menuKeys, menuText, mountainName, MONO } from '../frontend/menu';
 
-const hex = (v: number): string => `#${v.toString(16).padStart(6, '0')}`;
-
-/**
- * Title screen.
- *
- * Uses the same generated sky and mountain range the race does, so the first
- * frame the player sees is the game's actual look rather than a flat colour
- * with text on it. A row of riders across the slope shows what they are about
- * to control.
- */
 export class TitleScene extends Phaser.Scene {
   private seed = 0;
   private sky!: SkyRenderer;
   private drift = 0;
+  private leaving = false;
+  private courseLabel!: Phaser.GameObjects.Text;
+  private courseRecord!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'TitleScene' });
   }
 
-  create(): void {
-    this.seed = resolveSeed();
+  create(data?: { seed?: number }): void {
+    this.seed = typeof data?.seed === 'number' ? data.seed >>> 0 : resolveSeed();
     this.drift = 0;
-
+    this.leaving = false;
     this.sky = new SkyRenderer(this);
-
-    // Slope beneath the ridges — a simple wedge rather than the full segment
-    // renderer, which would need a track, a camera and an update loop for a
-    // backdrop nobody plays on.
-    const slope = this.add.graphics();
-    slope.setDepth(DEPTH.ROAD);
-    const horizon = SCREEN_H * 0.62;
-    slope.fillStyle(0xbfd2e8, 1);
-    slope.fillRect(-40, horizon, SCREEN_W + 80, SCREEN_H - horizon);
-    slope.fillStyle(0xeef4fb, 1);
-    slope.beginPath();
-    slope.moveTo(SCREEN_W * 0.5 - 40, horizon);
-    slope.lineTo(SCREEN_W * 0.5 + 40, horizon);
-    slope.lineTo(SCREEN_W + 260, SCREEN_H);
-    slope.lineTo(-260, SCREEN_H);
-    slope.closePath();
-    slope.fillPath();
-
+    this.addBackdrop();
     this.addRiders();
     this.addTitle();
+    this.addControls();
+    this.refreshCourse();
+    this.cameras.main.fadeIn(240, 12, 20, 30);
 
-    this.input.keyboard?.once('keydown', () => {
-      this.scene.start('RaceScene', { seed: this.seed });
+    menuKeys(this, (code) => {
+      if (code === 'Enter' || code === 'Space') this.startRace();
+      if (code === 'KeyN') this.newMountain();
     });
   }
 
+  private addBackdrop(): void {
+    const art = this.add.graphics().setDepth(-1_000_000_000);
+    art.fillStyle(0xc0d6e7);
+    art.fillTriangle(450, 302, SCREEN_W, 290, SCREEN_W, 480);
+    art.fillStyle(0xeef4fb);
+    art.fillTriangle(480, 318, SCREEN_W, 354, SCREEN_W, 504);
+    art.fillTriangle(480, 318, SCREEN_W, 504, 210, 480);
+    // Carved tracks guide the eye into the rider group.
+    art.lineStyle(3, 0x9cbacf, 0.6);
+    art.beginPath();
+    art.moveTo(652, 332); art.lineTo(742, 371); art.lineTo(635, 443);
+    art.moveTo(659, 330); art.lineTo(751, 371); art.lineTo(648, 444);
+    art.strokePath();
+    // A soft left-side scrim keeps the title readable over the moving mountains.
+    const shade = this.add.graphics().setDepth(-900_000_000);
+    for (let x = 0; x < SCREEN_W; x += 8) {
+      shade.fillStyle(UI.panel, Math.min(0.97, Math.max(0, (780 - x) / 360)));
+      shade.fillRect(x, 0, 8, 448);
+    }
+    const decoration = this.add.graphics();
+    decoration.lineStyle(1, UI.inkHigh, 0.15);
+    decoration.strokeCircle(734, 251, 131);
+    decoration.strokeCircle(734, 251, 138);
+    decoration.lineBetween(580, 251, 598, 251);
+    decoration.lineBetween(870, 251, 888, 251);
+    decoration.lineBetween(734, 100, 734, 116);
+    decoration.fillStyle(UI.accentWarn);
+    decoration.fillPoints([{ x: 50, y: 29 }, { x: 58, y: 40 }, { x: 50, y: 51 }, { x: 42, y: 40 }], true);
+    menuText(this, 70, 40, 'ALPINE COMBAT CIRCUIT', 12, UI.inkMid, true).setOrigin(0, 0.5);
+    menuText(this, 917, 33, 'PERSONAL BEST', 10, UI.inkMid, true).setOrigin(1, 0.5);
+    menuText(this, 917, 54, formatPoints(getBestScore()), 23, UI.inkHigh, true).setOrigin(1, 0.5);
+  }
+
   private addRiders(): void {
-    const palettes = [RIVAL_RIDER_PALETTES[0], PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES[2]];
-    const xs = [SCREEN_W * 0.3, SCREEN_W * 0.5, SCREEN_W * 0.7];
-    const scales = [1.6, 2.4, 1.6];
+    const palettes = [RIVAL_RIDER_PALETTES[0], RIVAL_RIDER_PALETTES[2], PLAYER_RIDER_PALETTE];
+    const poses = ['lean-right', 'lean-left', 'swing'] as const;
+    const xs = [601, 844, 724];
+    const ys = [365, 360, 424];
+    const scales = [2.4, 2.3, 4.4];
+    const shadow = this.add.graphics();
     palettes.forEach((pal, i) => {
-      const key = `title-rider-${i}`;
-      if (!this.textures.exists(key)) {
-        const cv: PixelCanvas = drawRider(i === 1 ? 'center' : i === 0 ? 'lean-right' : 'lean-left', pal);
-        registerTexture(this, key, cv);
-      }
-      const spr = this.add.image(xs[i], SCREEN_H * 0.86, key);
-      spr.setOrigin(0.5, 1);
-      spr.setScale(scales[i]);
-      spr.setDepth(DEPTH.PLAYER - i);
+      const key = `menu-rider-${i}`;
+      if (!this.textures.exists(key)) registerTexture(this, key, drawRider(poses[i], pal));
+      shadow.fillStyle(0x284761, i === 2 ? 0.18 : 0.13);
+      shadow.fillEllipse(xs[i], ys[i] - 7, 39 * scales[i], 6 * scales[i]);
+      const sprite = this.add.image(xs[i], ys[i], key).setOrigin(0.5, 1).setScale(scales[i]);
+      this.tweens.add({ targets: sprite, y: ys[i] - (i === 2 ? 5 : 3), duration: 1600 + i * 270, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    });
+    menuText(this, 734, 165, 'NO BRAKES. NO FRIENDS.', 11, UI.panel, true).setOrigin(0.5);
+    const flakes = this.add.graphics();
+    flakes.fillStyle(0xffffff, 0.8);
+    [[631, 388], [644, 401], [813, 405], [825, 395], [795, 426], [625, 418]].forEach(([x, y]) => {
+      flakes.fillRect(x, y, 4, 4);
     });
   }
 
   private addTitle(): void {
-    // An 8-way synthesized outline rather than an offset drop shadow: an
-    // offset shadow implies a light direction, and whichever one it picks will
-    // fight the scene's own sun. A symmetric ring reads as a drawn outline and
-    // is direction-free.
-    const label = 'BLACK DIAMOND BRAWL';
-    const cx = SCREEN_W / 2;
-    const cy = SCREEN_H * 0.24;
-    const style = { fontSize: '44px', fontStyle: 'bold', color: hex(UI.panel) };
+    menuText(this, 45, 85, 'BLACK DIAMOND', 46, UI.inkHigh, true).setLetterSpacing(-2);
+    menuText(this, 41, 128, 'BRAWL', 102, UI.accentWarn, true).setLetterSpacing(-4);
+    menuText(this, 49, 245, 'Four rivals. One finish line.', 21, UI.inkHigh, true);
+    menuText(this, 49, 276, 'Dodge the trees. Catch big air. Fight for first.', 15, UI.inkMid);
+    menuButton(this, 48, 325, 263, 'DROP IN', 'ENTER', () => this.startRace(), true);
+    menuButton(this, 324, 325, 195, 'NEW MOUNTAIN', 'N', () => this.newMountain());
+    this.courseLabel = menuText(this, 49, 394, '', 12, UI.inkMid, true).setFontFamily(MONO);
+    this.courseRecord = menuText(this, 49, 415, '', 12, UI.inkLow);
+  }
 
-    for (let a = 0; a < 8; a++) {
-      const ang = (a / 8) * Math.PI * 2;
-      this.add
-        .text(cx + Math.cos(ang) * 3, cy + Math.sin(ang) * 3, label, style)
-        .setOrigin(0.5)
-        .setDepth(DEPTH.HUD - 1);
-    }
-    this.add
-      .text(cx, cy, label, { ...style, color: hex(UI.inkHigh) })
-      .setOrigin(0.5)
-      .setDepth(DEPTH.HUD);
+  private addControls(): void {
+    const plate = this.add.graphics();
+    plate.fillStyle(UI.panel, 0.97);
+    plate.fillRect(0, 448, SCREEN_W, SCREEN_H - 448);
+    plate.fillStyle(UI.panelEdge);
+    plate.fillRect(0, 448, SCREEN_W, 1);
+    const controls = [
+      { x: 49, key: '← →  /  A D', label: 'CARVE', hint: 'Shift one lane' },
+      { x: 278, key: 'SPACE  /  ↑ W', label: 'JUMP', hint: 'Time moguls for trick air' },
+      { x: 522, key: 'F  /  K', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
+      { x: 799, key: 'ESC  /  P', label: 'PAUSE', hint: 'Take a breather' }
+    ];
+    controls.forEach(({ x, key, label, hint }) => {
+      menuText(this, x, 464, key, 14, UI.accentWarn, true).setFontFamily(MONO);
+      menuText(this, x, 487, label, 12, UI.inkHigh, true);
+      menuText(this, x, 507, hint, 11, UI.inkLow);
+    });
+  }
 
-    this.add
-      .text(cx, cy + 38, 'downhill combat racing', {
-        fontSize: '16px',
-        color: hex(UI.accentWarn)
-      })
-      .setOrigin(0.5)
-      .setDepth(DEPTH.HUD);
+  private refreshCourse(): void {
+    this.courseLabel.setText(`${mountainName(this.seed)}  /  #${this.seed}`);
+    const record = getCourseRecord(this.seed);
+    this.courseRecord.setText(record
+      ? `Mountain best ${formatPoints(record.bestScore)}${record.bestTimeSeconds !== null ? `  ·  Fastest ${formatTime(record.bestTimeSeconds)}` : '  ·  Finish it to set a time'}`
+      : 'A fresh line. Make this mountain yours.');
+  }
 
-    this.add
-      .text(cx, SCREEN_H * 0.93, 'press any key to drop in', {
-        fontSize: '18px',
-        color: hex(UI.panel),
-        fontStyle: 'bold'
-      })
-      .setOrigin(0.5)
-      .setDepth(DEPTH.HUD);
+  private newMountain(): void {
+    if (this.leaving) return;
+    const previous = this.seed;
+    this.seed = randomSeed();
+    if (this.seed === previous) this.seed = (previous + 1) >>> 0;
+    this.refreshCourse();
+    this.tweens.add({ targets: this.courseLabel, alpha: { from: 0.25, to: 1 }, duration: 220 });
+  }
 
-    this.add
-      .text(SCREEN_W - 12, SCREEN_H - 10, `seed ${this.seed}`, {
-        fontSize: '12px',
-        color: hex(UI.inkLow)
-      })
-      .setOrigin(1, 1)
-      .setDepth(DEPTH.HUD);
+  private startRace(): void {
+    if (this.leaving) return;
+    this.leaving = true;
+    getRaceAudio().unlock();
+    this.scene.start('RaceScene', { seed: this.seed });
   }
 
   update(_time: number, delta: number): void {
-    // The range drifts slowly so the screen is alive without anything moving
-    // fast enough to distract from the title.
-    this.drift += delta * 0.9;
+    this.drift += delta * 0.45;
     this.sky.render(this.drift, 0, SCREEN_H * 0.62);
   }
 }

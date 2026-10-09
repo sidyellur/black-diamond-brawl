@@ -49,21 +49,38 @@ function serveDist(root, port) {
       res.writeHead(404).end('not found');
     }
   });
-  return new Promise((ok) => server.listen(port, () => ok(server)));
+  return new Promise((ok, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => ok(server));
+  });
 }
 
 try {
   await step('build (tsc + vite)', () => run('npm', ['run', 'build']));
   await step('palette contrast', () => run('npm', ['run', 'verify:palette']));
   await step('combat logic', () => run('npm', ['run', 'verify:combat']));
+  await step('scoring and flow', () => run('npm', ['run', 'verify:scoring']));
+  await step('responsive controls', () => run('npm', ['run', 'verify:controls']));
+  await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
 
   const PORT = 4173;
   const server = await serveDist(resolve('dist'), PORT);
   try {
-    await step('visual smoke test', () =>
-      run('node', ['scripts/smokeTest.mjs', `--url=http://localhost:${PORT}`])
-    );
+    // Independent browser suites both run so a failure still leaves useful
+    // screenshots and diagnostics. A failure in either still fails the gate.
+    const failures = [];
+    for (const [label, script] of [
+      ['visual smoke test', 'scripts/smokeTest.mjs'],
+      ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs']
+    ]) {
+      try {
+        await step(label, () => run('node', [script, `--url=http://127.0.0.1:${PORT}`]));
+      } catch (error) {
+        failures.push(`${label}: ${error.message}`);
+      }
+    }
+    if (failures.length) throw new Error(failures.join('\n'));
   } finally {
     server.close();
   }

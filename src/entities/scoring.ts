@@ -28,6 +28,8 @@ export interface ScoreBreakdown {
   /** Sum of the event categories above — the running total shown live on
    *  the race HUD before the run ends. */
   eventTotal: number;
+  chainBonusPoints: number;
+  maxChain: number;
   /** True if the run ended by crossing the finish line; false if wiped out. */
   finished: boolean;
   completionBonus: number;
@@ -60,7 +62,20 @@ const POSITION_BONUS_BY_PLACE: Record<number, number> = {
  *  - Trick-jump points are awarded once per landing, on the airborne→grounded
  *    transition, only when that jump was an extended (mogul/crest) launch.
  */
+export interface ScoreEvent {
+  label: string;
+  points: number;
+  kind: 'hit' | 'brush' | 'knockout' | 'near' | 'trick';
+}
+
+const FLOW_WINDOW_MS = 4200;
+
 export class ScoreTracker {
+  readonly feedback: ScoreEvent[] = [];
+  private chainCount = 0;
+  private chainMs = 0;
+  private bestChain = 0;
+  private chainBonus = 0;
   private combatHitCount = 0;
   private knockoutCount = 0;
   private brushCount = 0;
@@ -99,7 +114,16 @@ export class ScoreTracker {
    * collision, and pickup collection have all settled (so `wasHit`/combat
    * events reflect final per-frame state).
    */
-  update(): void {
+  get chain(): number { return this.chainCount; }
+  get chainRemaining(): number { return this.chainMs / FLOW_WINDOW_MS; }
+
+  update(deltaMs = 1000 / 60): void {
+    this.feedback.length = 0;
+    this.chainMs = Math.max(0, this.chainMs - deltaMs);
+    if (this.chainMs === 0 || !this.cleanRiding) {
+      this.chainCount = 0;
+      this.chainMs = 0;
+    }
     this.drainCombatEvents();
     this.checkNearMisses();
     this.checkTrickJumpLanding();
@@ -122,13 +146,13 @@ export class ScoreTracker {
     for (const event of this.combat.events) {
       if (event.type === 'hit') {
         this.combatHitCount++;
-        this.eventPoints += POINTS.COMBAT_HIT;
+        this.award('hit', 'CLEAN HIT', POINTS.COMBAT_HIT);
       } else if (event.type === 'brush') {
         this.brushCount++;
-        this.eventPoints += POINTS.COMBAT_BRUSH;
+        this.award('brush', 'BODY CHECK', POINTS.COMBAT_BRUSH);
       } else {
         this.knockoutCount++;
-        this.eventPoints += POINTS.KNOCKOUT;
+        this.award('knockout', 'KNOCKOUT', POINTS.KNOCKOUT);
       }
     }
     this.combat.events.length = 0;
@@ -136,7 +160,9 @@ export class ScoreTracker {
 
   private checkNearMisses(): void {
     const playerZ = this.player.worldZ;
-    const speedOk = this.player.speed >= NEAR_MISS_MIN_SPEED_FACTOR * MAX_SPEED;
+    // A collision/recoil frame cannot also be presented as clean riding.
+    // Still evaluate crossings below so recovery cannot award them later.
+    const speedOk = this.cleanRiding && this.player.speed >= NEAR_MISS_MIN_SPEED_FACTOR * MAX_SPEED;
     const playerLane = this.player.laneIndex;
 
     for (const obstacle of this.obstacles) {
@@ -169,7 +195,10 @@ export class ScoreTracker {
       // Both entities move, so crossing is a sign change in (riderZ - playerZ).
       const prevSign = Math.sign(prevRiderZ - this.previousPlayerZ);
       const currSign = Math.sign(rider.worldZ - playerZ);
-      if (prevSign === 0 || currSign === 0 || prevSign === currSign) {
+      // Reaching exact equality counts as the crossing. Skipping both a
+      // current and a previous zero loses a pass spread over three frames:
+      // ahead -> equal -> behind. The evaluated set keeps the tie one-shot.
+      if (prevSign === 0 || prevSign === currSign) {
         continue;
       }
       this.evaluatedRiders.add(rider);
@@ -185,9 +214,31 @@ export class ScoreTracker {
     }
   }
 
+  private get cleanRiding(): boolean {
+    return !this.player.wipedOut && !this.player.tumbling &&
+      !this.player.stumbling && !this.player.hitReacting;
+  }
+
+  private award(kind: ScoreEvent['kind'], label: string, points: number): void {
+    let bonus = 0;
+    if (this.cleanRiding) {
+      this.chainCount++;
+      this.bestChain = Math.max(this.bestChain, this.chainCount);
+      this.chainMs = FLOW_WINDOW_MS;
+      // Every four clean events raises the bonus, capped at +50%. Crashes and
+      // a quiet 4.2-second stretch break the chain; category math stays explicit.
+      bonus = Math.round(points * Math.min(2, Math.floor((this.chainCount - 1) / 4)) * 0.25);
+    }
+    // Combat can deliver a legitimate delayed knockout on the same frame as
+    // our own collision. Keep its base reward without reviving a broken flow.
+    this.chainBonus += bonus;
+    this.eventPoints += points + bonus;
+    this.feedback.push({ kind, label, points: points + bonus });
+  }
+
   private awardNearMiss(): void {
     this.nearMissCount++;
-    this.eventPoints += POINTS.NEAR_MISS;
+    this.award('near', 'CLOSE CALL', POINTS.NEAR_MISS);
   }
 
   /**
@@ -201,13 +252,14 @@ export class ScoreTracker {
    */
   private checkTrickJumpLanding(): void {
     const airborne = this.player.airborne;
-    if (this.previousAirborne && !airborne && this.player.extendedJump && !this.player.wipedOut) {
+    // Landing onto a rock/mogul or into recoil is a crash, not a stomp.
+    if (this.previousAirborne && !airborne && this.player.extendedJump && this.cleanRiding) {
       this.trickJumpCount++;
       const extraAirtimeMs = Math.max(0, JUMP_AIRTIME_EXTENDED_MS - JUMP_AIRTIME_MS);
       const extraQuarterSeconds = Math.floor(extraAirtimeMs / 250);
       const points = POINTS.TRICK_JUMP + extraQuarterSeconds * POINTS.TRICK_JUMP_EXTRA_PER_QUARTER_SECOND;
       this.trickJumpPoints += points;
-      this.eventPoints += points;
+      this.award('trick', 'STOMPED IT', points);
     }
     this.previousAirborne = airborne;
   }
@@ -242,6 +294,8 @@ export class ScoreTracker {
       trickJumpCount: this.trickJumpCount,
       trickJumpPoints: this.trickJumpPoints,
       eventTotal,
+      chainBonusPoints: this.chainBonus,
+      maxChain: this.bestChain,
       finished,
       completionBonus,
       finishTimeSeconds,

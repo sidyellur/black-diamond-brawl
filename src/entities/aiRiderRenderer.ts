@@ -92,6 +92,9 @@ export class AIRiderRenderer {
         SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
       );
       sprite.setScale(widthPx / PLAYER_FRAME_SIZE);
+      const angle = rider.tumbling ? Math.sin(this.scene.time.now / 90) * 28
+        : rider.hitReacting ? -10 : lean * 7;
+      sprite.setAngle(Phaser.Math.Linear(sprite.angle, angle, 0.28));
       sprite.setPosition(projected.screenX, projected.screenY);
       // Nearer (smaller world-Z) -> higher depth -> drawn on top, same
       // far-to-near convention `ObstacleRenderer` uses.
