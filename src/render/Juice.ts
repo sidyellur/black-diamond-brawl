@@ -43,6 +43,7 @@ export class Juice {
   /** Frames of hit-stop remaining. A couple of frozen frames on impact is the
    *  cheapest way to make a collision feel like it had mass. */
   private hitStopMs = 0;
+  private readonly reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   constructor(
     scene: Phaser.Scene,
@@ -129,6 +130,7 @@ export class Juice {
    *  throw noticeably more — that difference is the visual reward for
    *  committing to a carve. */
   emitCarve(x: number, y: number, speed01: number, leaning: boolean): void {
+    if (this.reducedMotion) return;
     const now = this.scene.time.now;
     const elapsed = this.lastCarveTime === 0 ? 16 : Math.min(40, now - this.lastCarveTime);
     const lateral = x - this.lastCarveX;
@@ -150,7 +152,7 @@ export class Juice {
   impact(x: number, y: number, severity: number): void {
     const s = Math.max(0, Math.min(1, severity));
     this.burst.emitParticleAt(x, y, Math.round(8 + s * 22));
-    this.worldCam.shake(90 + s * 210, 0.006 + s * 0.016);
+    if (!this.reducedMotion) this.worldCam.shake(90 + s * 210, 0.006 + s * 0.016);
     this.hitStopMs = 40 + s * 90;
     this.flashScreen(s * 0.28);
     this.addRing(x, y, 34 + s * 45, SNOW.shadow, false);
@@ -172,7 +174,7 @@ export class Juice {
       this.burst.emitParticleAt(at.x, at.y, 6);
       this.addRing(at.x, at.y, 44, UI.accentWarn, true);
     }
-    this.worldCam.shake(110, 0.008);
+    if (!this.reducedMotion) this.worldCam.shake(110, 0.008);
     this.hitStopMs = 55;
   }
 
@@ -185,7 +187,7 @@ export class Juice {
   }
 
   private flashScreen(alpha: number): void {
-    if (alpha <= 0) return;
+    if (alpha <= 0 || this.reducedMotion) return;
     this.scene.tweens.killTweensOf(this.flash);
     this.flash.setAlpha(alpha);
     this.scene.tweens.add({ targets: this.flash, alpha: 0, duration: 190, ease: 'Quad.easeOut' });
@@ -213,7 +215,7 @@ export class Juice {
     this.motionPhase = (this.motionPhase + elapsed * (0.00035 + t * 0.0011)) % 1;
     this.speedLines.clear();
 
-    if (t > 0.45) {
+    if (t > 0.45 && !this.reducedMotion) {
       const strength = (t - 0.45) / 0.55;
       const cx = SCREEN_W / 2;
       const cy = SCREEN_H * 0.52;

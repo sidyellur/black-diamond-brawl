@@ -34,6 +34,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             // Isolated simulator installation, never enabled by ordinary launch.
             UserDefaults.standard.removeObject(forKey: "CapacitorStorage.bdb-muted")
             UserDefaults.standard.removeObject(forKey: "CapacitorStorage.black-diamond-brawl:records:v1")
+            for key in ["records:v2", "career:v1", "ghosts:v1"] {
+                UserDefaults.standard.removeObject(forKey: "CapacitorStorage.black-diamond-brawl:" + key)
+            }
         }
         if arguments.contains("--seed-test-records") {
             // Hydration fixture, deliberately separate from gameplay write tests.
@@ -41,6 +44,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             UserDefaults.standard.set(
                 "{\"bestScore\":4321,\"courses\":{\"202\":{\"bestScore\":1234,\"bestTimeSeconds\":42.5,\"attempts\":3,\"lastPlayed\":1700000000000}}}",
                 forKey: "CapacitorStorage.black-diamond-brawl:records:v1")
+            UserDefaults.standard.set(
+                "{\"version\":2,\"rulesVersion\":\"fixed60-v2\",\"courseVersion\":\"mountain-v2\",\"bestScore\":4321,\"courses\":{\"fixed60-v2/mountain-v2/202\":{\"bestScore\":1234,\"bestTimeSeconds\":42.5,\"attempts\":3,\"lastPlayed\":1700000000000}},\"receipts\":[]}",
+                forKey: "CapacitorStorage.black-diamond-brawl:records:v2")
         }
         // Block HTTP(S) inside WKWebView BEFORE its first navigation. This
         // verifies bundled/offline boot without changing host network settings.

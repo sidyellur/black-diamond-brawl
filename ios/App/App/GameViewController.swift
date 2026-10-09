@@ -88,7 +88,8 @@ final class GameViewController: CAPBridgeViewController {
             let safe = self.view.safeAreaInsets
             state["safe"] = ["left": safe.left, "top": safe.top, "right": safe.right, "bottom": safe.bottom]
             state["nativeMuted"] = UserDefaults.standard.string(forKey: "CapacitorStorage.bdb-muted") ?? ""
-            state["nativeRecords"] = UserDefaults.standard.string(forKey: "CapacitorStorage.black-diamond-brawl:records:v1") ?? ""
+            state["nativeRecords"] = UserDefaults.standard.string(forKey: "CapacitorStorage.black-diamond-brawl:records:v2") ?? ""
+            state["nativeCareer"] = UserDefaults.standard.string(forKey: "CapacitorStorage.black-diamond-brawl:career:v1") ?? ""
             if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
                let json = String(data: data, encoding: .utf8) {
                 self.testStatus?.accessibilityValue = json
@@ -125,6 +126,9 @@ final class GameViewController: CAPBridgeViewController {
             canvas: box(canvas), app: box(document.getElementById('app')),
             loading: !!document.getElementById('loading'),
             frame: game?.loop.frame ?? 0,
+            raceMode: race?.options?.mode ?? null,
+            raceSeed: race?.seed ?? null,
+            practiceLesson: race?.practiceLesson ?? null,
             paused: race?.paused ?? false, countdownMs: race?.countdownMs ?? 0,
             elapsedMs: race?.elapsedRaceMs ?? 0, lane: race?.player?.laneIndex ?? -1,
             speed: race?.player?.speed ?? 0,

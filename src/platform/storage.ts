@@ -3,6 +3,9 @@ import { Preferences } from '@capacitor/preferences';
 
 export const STORAGE_KEYS = {
   records: 'black-diamond-brawl:records:v1',
+  recordsV2: 'black-diamond-brawl:records:v2',
+  career: 'black-diamond-brawl:career:v1',
+  ghosts: 'black-diamond-brawl:ghosts:v1',
   muted: 'bdb-muted'
 } as const;
 
@@ -66,10 +69,9 @@ export function createStorage(options: StorageOptions) {
       try {
         // Re-read each time so session.ts can merge another browser tab's PBs.
         const value = options.browserStorage().getItem(key);
-        // Scalar settings have no domain-level merge cache: keep a failed mute
-        // write effective for this session even if reading old storage works.
-        // Records must still return the disk snapshot so session.ts can merge
-        // another tab's progress with its own unsaved in-memory bests.
+        // Scalar settings keep a failed write effective for this session.
+        // Record/career/ghost models own merge caches and must still see the
+        // durable snapshot, including another tab's newer earned progress.
         if (key === STORAGE_KEYS.muted && pendingBrowserWrites.has(key)) {
           return memory.get(key) ?? null;
         }

@@ -275,4 +275,59 @@ final class GameUITests: XCTestCase {
         }
         assertClean(state)
     }
+    func testExpansionModesAndCupSurviveRestart() throws {
+        var state = try launch()
+        try tap(632, 338)
+        state = try waitFor("cup menu") { self.scenes($0).contains("CupScene") }
+        assertClean(state)
+        try tap(190, 480)
+        state = try waitFor("native cup save and race") {
+            self.scenes($0).contains("RaceScene") && $0["raceMode"] as? String == "cup" &&
+            ($0["nativeCareer"] as? String ?? "").contains("rounds")
+        }
+        let cupSeed = number(state, "raceSeed")
+        let savedCareer = try XCTUnwrap(state["nativeCareer"] as? String)
+        try tap(902, 77)
+        _ = try waitFor("cup pause") { $0["paused"] as? Bool == true }
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+        app.terminate()
+        state = try launch(reset: false)
+        XCTAssertEqual(state["nativeCareer"] as? String, savedCareer)
+        try tap(632, 338)
+        _ = try waitFor("resumed cup menu") { self.scenes($0).contains("CupScene") }
+        try tap(190, 480)
+        state = try waitFor("same cup round resumed") {
+            self.scenes($0).contains("RaceScene") && self.number($0, "raceSeed") == cupSeed
+        }
+        XCTAssertEqual(state["raceMode"] as? String, "cup")
+        try tap(902, 77)
+        _ = try waitFor("paused before lodge") { $0["paused"] as? Bool == true }
+        try tap(480, 375)
+        _ = try waitFor("lodge after cup") { self.scenes($0).contains("TitleScene") }
+        try tap(822, 338)
+        state = try waitFor("daily native mode") { $0["raceMode"] as? String == "daily" && self.scenes($0).contains("RaceScene") }
+        assertClean(state)
+        try tap(902, 77)
+        _ = try waitFor("daily pause") { $0["paused"] as? Bool == true }
+        try tap(480, 375)
+        _ = try waitFor("lodge after daily") { self.scenes($0).contains("TitleScene") }
+        try tap(635, 415)
+        state = try waitFor("practice native mode") {
+            $0["raceMode"] as? String == "practice" && self.scenes($0).contains("RaceScene")
+        }
+        XCTAssertEqual(number(state, "practiceLesson"), 0)
+        assertClean(state)
+        try tap(902, 77)
+        _ = try waitFor("practice pause") { $0["paused"] as? Bool == true }
+        try tap(480, 375)
+        _ = try waitFor("lodge after practice") { self.scenes($0).contains("TitleScene") }
+        try tap(822, 415)
+        state = try waitFor("native locker") { self.scenes($0).contains("LockerScene") }
+        XCTAssertTrue((state["texts"] as? [String] ?? []).contains("BOARDS"))
+        XCTAssertTrue((state["texts"] as? [String] ?? []).contains("JACKETS"))
+        try assertSafeArea(state)
+        assertClean(state)
+    }
+
 }

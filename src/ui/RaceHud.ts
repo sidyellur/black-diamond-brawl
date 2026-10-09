@@ -21,6 +21,12 @@ export interface HudState {
   recovering: boolean;
   chain: number;
   chainRemaining: number;
+  sectionName?: string;
+  modeLabel?: string;
+  ghostSplit?: string;
+  incomingAttack?: string;
+  counterReady?: boolean;
+  practice?: { title: string; instruction: string; feedback: string };
   rivals: { progress: number; color: number; out: boolean }[];
 }
 
@@ -39,6 +45,10 @@ export class RaceHud {
   private readonly message: Phaser.GameObjects.Text;
   private readonly pauseOverlay: Phaser.GameObjects.Container;
   private readonly countdown: Phaser.GameObjects.Text;
+  private readonly section: Phaser.GameObjects.Text;
+  private readonly split: Phaser.GameObjects.Text;
+  private readonly lesson: Phaser.GameObjects.Text;
+  private readonly lessonBg: Phaser.GameObjects.Rectangle;
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
@@ -77,6 +87,11 @@ export class RaceHud {
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
+    this.section = this.text(30, 109, '', 14, UI.panel, true).setStroke('#f3f8ff', 3);
+    this.split = this.text(30, 133, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
+    this.lessonBg = scene.add.rectangle(SCREEN_W / 2, 231, 700, 112, UI.panel, 0.93).setDepth(10000).setVisible(false);
+    this.objects.push(this.lessonBg);
+    this.lesson = this.text(SCREEN_W / 2, 193, '', 16, UI.inkHigh, true).setOrigin(0.5, 0).setAlign('center').setLineSpacing(6).setWordWrapWidth(666);
     this.button(902, 77, 62, 25, 'PAUSE', actions.pause, 10);
     this.muteLabel = this.button(687, 30, 74, 23, this.touch ? 'SOUND' : 'M SOUND', () => this.setMuted(actions.mute()), 10);
 
@@ -190,6 +205,11 @@ export class RaceHud {
       if (control.input) control.input.enabled = !paused;
     }
   }
+  setPracticeComplete(): void {
+    this.setPaused(true);
+    this.pauseOverlay.setVisible(false);
+    for (const child of this.pauseOverlay.list) if (child.input) child.input.enabled = false;
+  }
   cancelInput(): void {
     this.cancelButtons.forEach(cancel => cancel());
     this.releaseTouchControls.forEach(release => release());
@@ -202,10 +222,14 @@ export class RaceHud {
     this.clock.setText(formatTime(s.elapsedMs / 1000));
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);
-    this.progress.setText(`MOUNTAIN RUN   ${Math.min(100, Math.floor(s.progress * 100))}%`);
-    this.attack.setText(s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
-    this.attack.setColor(hex(s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
-    this.status.setText(s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
+    this.progress.setText(`${s.modeLabel ?? 'MOUNTAIN RUN'}   ${Math.min(100, Math.floor(s.progress * 100))}%`);
+    this.section.setText(s.sectionName ?? '');
+    this.split.setText(s.ghostSplit ?? '');
+    this.lessonBg.setVisible(!!s.practice);
+    this.lesson.setText(s.practice ? `${s.practice.title}\n${s.practice.instruction}\n${s.practice.feedback}` : '');
+    this.attack.setText(s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
+    this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
+    this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();
     const x = 234, y = 51, w = 482;

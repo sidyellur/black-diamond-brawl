@@ -1,6 +1,6 @@
 {
   "name": "black-diamond-brawl",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,7 +23,10 @@
     "ios:run": "npm run ios:sync && cap run ios",
     "verify:mobile": "node scripts/mobileAcceptance.mjs",
     "verify:native-config": "node scripts/verifyNativeConfig.mjs",
-    "verify:ios": "bash scripts/verify-ios.sh"
+    "verify:ios": "bash scripts/verify-ios.sh",
+    "verify:models": "node scripts/verify.mjs --models-only",
+    "verify:expansion": "node scripts/expansionAcceptance.mjs",
+    "verify:menus": "node scripts/verifyMenus.mjs"
   },
   "dependencies": {
     "@capacitor/app": "8.1.2",

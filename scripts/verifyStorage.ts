@@ -24,7 +24,7 @@ const hydrating = createStorage({
   preferences: {
     get: ({ key }) => {
       reads.push(key);
-      return key === RECORDS ? recordRead.promise : muteRead.promise;
+      return key === RECORDS ? recordRead.promise : key === MUTED ? muteRead.promise : Promise.resolve({ value: null });
     },
     set: async () => {}
   }
@@ -41,9 +41,9 @@ muteRead.resolve({ value: '1' });
 await ready;
 assert.equal(hydrating.get(RECORDS), savedRecords);
 assert.equal(hydrating.get(MUTED), '1');
-assert.deepEqual(reads.sort(), [RECORDS, MUTED].sort());
+assert.deepEqual(reads.sort(), Object.values(STORAGE_KEYS).sort());
 await hydrating.initialize();
-assert.equal(reads.length, 2);
+assert.equal(reads.length, Object.values(STORAGE_KEYS).length);
 
 // A changing score/mute takes effect immediately in memory. Writes cannot race:
 // there is only one in-flight bridge call, including across preference keys.
