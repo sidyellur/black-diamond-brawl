@@ -29,6 +29,7 @@ import { Juice } from '../render/Juice';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { RIVAL_SUITS, UI } from '../render/palette';
 import { RaceHud } from '../ui/RaceHud';
+import { SceneryRenderer } from '../render/SceneryRenderer';
 import { getRaceAudio, RaceAudio } from '../audio/RaceAudio';
 import { projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment, RoadRenderer } from '../render/RoadRenderer';
@@ -43,7 +44,7 @@ import { Segment } from '../track/segment';
 // the player's `dz` is constant, so its on-screen size is stable — but its
 // position now comes from the same projection the road and rivals use, which
 // is what puts all five racers into one coherent scale model.
-const PLAYER_WIDTH_FRACTION = 0.13; // of the projected road half-width at its depth
+const PLAYER_WIDTH_FRACTION = 0.17; // of the projected road half-width at its depth
 const PLAYER_JUMP_HEIGHT_WORLD = 520; // world-units at jump apex, fed through projection
 
 // World units behind the finish line the player rests at after crossing —
@@ -74,6 +75,7 @@ export class RaceScene extends Phaser.Scene {
   private finishSegment: Segment | undefined;
   private roadRenderer!: RoadRenderer;
   private skyRenderer!: SkyRenderer;
+  private sceneryRenderer!: SceneryRenderer;
   private shadows!: ShadowRenderer;
   private juice!: Juice;
   /** Previous-frame collision/airborne state, so juice can fire on
@@ -109,6 +111,7 @@ export class RaceScene extends Phaser.Scene {
   private elapsedRaceMs = 0;
   private previousCharges = 0;
   private previousHitReaction = false;
+  private worldRoll = 0;
 
   /** True once the run has ended (finish or wipeout) and `ResultScene` has
    *  been started — guards against re-triggering the transition on a later
@@ -133,6 +136,7 @@ export class RaceScene extends Phaser.Scene {
     this.countdownMs = 1800;
     this.previousCharges = 0;
     this.previousHitReaction = false;
+    this.worldRoll = 0;
     this.worldObjects = [];
     this.prevWiped = false;
     this.prevTumbling = false;
@@ -161,6 +165,7 @@ export class RaceScene extends Phaser.Scene {
     this.finishBanner.setDepth(DEPTH.BANNER);
     this.shadows = new ShadowRenderer(this, this.registerWorld);
     this.obstacleRenderer = new ObstacleRenderer(this, this.registerWorld);
+    this.sceneryRenderer = new SceneryRenderer(this, this.seed, this.track.length, this.registerWorld);
     this.collisions = new CollisionSystem();
 
     // 4 AI riders from the params drawn by the generator's placement pass
@@ -269,6 +274,7 @@ export class RaceScene extends Phaser.Scene {
       this.game.events.off(Phaser.Core.Events.BLUR, blur);
       this.game.events.off(Phaser.Core.Events.HIDDEN, blur);
       this.playerInput.destroy();
+      this.audio.ride(0);
     });
   }
 
@@ -276,6 +282,7 @@ export class RaceScene extends Phaser.Scene {
     if (this.raceOver || this.paused === paused) return;
     this.paused = paused;
     this.hud.setPaused(paused);
+    if (paused) this.audio.ride(0);
     this.playerInput.setEnabled(!paused && this.countdownMs === 0);
     if (!paused) this.audio.unlock();
   }
@@ -287,7 +294,12 @@ export class RaceScene extends Phaser.Scene {
     let delta = Math.min(50, Math.max(0, frameDelta));
     this.hud.tick(delta);
     if (this.countdownMs > 0) {
-      this.countdownMs = Math.max(0, this.countdownMs - delta);
+      // Countdown is a wall-time affordance, not physics. Phaser smoothing
+      // discards >200 ms frames as hiccups, which stretched three beats into
+      // ~17 seconds on software-rendered CI. Raw frame time keeps it honest;
+      // movement remains bounded separately and explicit pause still freezes it.
+      const countdownDelta = Math.min(1000, Math.max(0, this.game.loop.rawDelta || frameDelta));
+      this.countdownMs = Math.max(0, this.countdownMs - countdownDelta);
       this.hud.setCountdown(this.countdownMs > 1200 ? '3' : this.countdownMs > 600 ? '2' : this.countdownMs > 0 ? '1' : '');
       if (this.countdownMs === 0) {
         this.playerInput.setEnabled(true);
@@ -396,7 +408,7 @@ export class RaceScene extends Phaser.Scene {
     if (feedback.length > 0) {
       const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
       const total = feedback.reduce((sum, e) => sum + e.points, 0);
-      this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain}× FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
+      this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
       if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
     }
 
@@ -440,6 +452,9 @@ export class RaceScene extends Phaser.Scene {
     // Sky draws behind the road but needs this frame's curve offset and the
     // road's measured top edge, so it renders after.
     this.skyRenderer.render(result.farCurveOffset, camX, result.topScreenY);
+    this.worldRoll = Phaser.Math.Linear(this.worldRoll, -this.player.leanDirection * 0.008, 0.12);
+    this.cameras.main.setRotation(this.worldRoll);
+    this.sceneryRenderer.render(this.track, result.drawnSegments, { x: camX, y: camY, z: camZ });
     this.shadows.begin();
     this.finishBanner.render(this.finishSegment, this.track, result.drawnSegments, { x: camX, y: camY, z: camZ });
     // Obstacles project with the SAME frame's offset-walk / crest-clip data so
@@ -488,6 +503,7 @@ export class RaceScene extends Phaser.Scene {
     this.juice.renderSpeed(this.player.speed, time);
     this.juice.tick(delta);
     this.updateHud();
+    this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0);
 
     this.prevWorldZ = this.player.worldZ;
   }
@@ -531,6 +547,7 @@ export class RaceScene extends Phaser.Scene {
       charges: this.player.weaponCharges,
       attackCooldown: this.combat.attackCooldownFraction,
       target: this.combat.target !== null,
+      targetAdvantage: this.player.armed || this.player.speed >= (this.combat.target?.speed ?? Infinity),
       airborne: this.player.airborne,
       recovering: this.player.tumbling,
       chain: this.scoreTracker.chain,

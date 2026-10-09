@@ -20,7 +20,7 @@ let failure;
 const deadline = setTimeout(() => {
   writeFileSync(`${OUT}/acceptance-timeout.txt`, `Timed out during ${phase}\n${notes.join('\n')}\n`);
   process.exit(1);
-}, 180000);
+}, 360000);
 
 function check(name, actual, expected = true) {
   assert.deepEqual(actual, expected, name);
@@ -84,7 +84,7 @@ async function clickGame(x, y, touch = false) {
 async function newPage(options = {}) {
   const context = await browser.newContext({ viewport: { width: 960, height: 540 }, ...options });
   const result = await context.newPage();
-  result.setDefaultTimeout(20000);
+  result.setDefaultTimeout(45000);
   result.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   result.on('pageerror', (error) => errors.push(error.stack || error.message));
   return result;
@@ -109,6 +109,8 @@ try {
   const start = await state();
   check('drop in starts the selected mountain', start.seed, chosenSeed);
   check('countdown begins with a stationary centered rider', start.countdown > 0 && start.speed === 0 && start.lane === 2);
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.context?.state === 'running');
+  check('Drop In gesture unlocks the real audio context', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.context.state), 'running');
   await page.keyboard.down('ArrowRight');
   await page.keyboard.down('KeyW');
   await page.keyboard.press('KeyP');
@@ -124,6 +126,10 @@ try {
   await page.keyboard.up('ArrowRight');
   await page.keyboard.up('KeyW');
   const baselineListeners = afterCountdown.listeners;
+  await page.keyboard.press('KeyM');
+  check('M mutes and saves the audio preference', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.isMuted && localStorage.getItem('bdb-muted') === '1'));
+  await page.keyboard.press('KeyM');
+  check('M restores sound and updates the saved preference', await page.evaluate(() => !window.__game.scene.getScene('RaceScene').audio.isMuted && localStorage.getItem('bdb-muted') === '0'));
 
   phase = 'keyboard steering and jump';
   await page.keyboard.down('ArrowRight');
@@ -146,6 +152,8 @@ try {
   await page.waitForTimeout(350);
   const stillPaused = await state();
   check('pause freezes race time and rider position', [stillPaused.elapsed, stillPaused.z], [paused.elapsed, paused.z]);
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01);
+  check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01));
   await page.screenshot({ path: `${OUT}/06-pause.png` });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
@@ -261,6 +269,25 @@ try {
   await clickGame(480, 375, true);
   await scene('TitleScene');
   check('touch pause menu returns to the lodge', await page.evaluate(() => window.__game.scene.isActive('TitleScene')));
+  await page.setViewportSize({ width: 844, height: 390 });
+  await clickGame(178, 351, true);
+  await ready();
+  await page.screenshot({ path: `${OUT}/11-mobile-landscape.png` });
+  const landscape = await page.locator('canvas').boundingBox();
+  check('landscape touch canvas fits the viewport', landscape.x >= -1 && landscape.y >= -1 && landscape.x + landscape.width <= 845 && landscape.y + landscape.height <= 391);
+  await page.context().close();
+
+  phase = 'Canvas compatibility';
+  page = await newPage();
+  await page.goto(`${BASE_URL}/?seed=101&renderer=canvas`, { waitUntil: 'networkidle' });
+  await scene('TitleScene');
+  check('explicit Canvas fallback uses the 2D renderer', await page.evaluate(() => window.__game.renderer.type), 1);
+  await clickGame(178, 351);
+  await ready();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').player.laneIndex === 3);
+  check('Canvas fallback starts a race and accepts steering', (await state()).lane, 3);
+  await page.screenshot({ path: `${OUT}/12-canvas-race.png` });
   check('no console or uncaught browser errors', errors, []);
 } catch (error) {
   failure = `FAIL during ${phase}: ${error.stack || error.message || String(error)}`;

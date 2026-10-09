@@ -13,7 +13,7 @@ import { AI_RIDER_TEXTURE_KEYS, PLAYER_FRAME_SIZE, PLAYER_FRAMES } from './playe
 // PLAYER_WIDTH_FRACTION) — the player and its rivals are the same kind of
 // object, so any divergence here shows up immediately as rivals that dwarf
 // or shrink against the rider you control.
-const WIDTH_FRACTION = 0.13;
+const WIDTH_FRACTION = 0.17;
 
 
 /**

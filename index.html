@@ -15,6 +15,14 @@
         font-family: monospace;
       }
       canvas { display: block; }
+      #loading {
+        position: fixed; inset: 0; display: grid; place-content: center;
+        text-align: center; color: #eef4fb; background: #101923; z-index: 20;
+        letter-spacing: 0.1em; font-weight: bold;
+      }
+      #loading span { margin-top: 12px; font-size: 12px; color: #8497aa; font-weight: normal; letter-spacing: 0; }
+      #loading::before { content: '◆'; color: #f5a623; font-size: 40px; margin-bottom: 20px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
       #rotate-hint { display: none; }
       @media (orientation: portrait) and (max-width: 600px) {
         #rotate-hint {
@@ -26,7 +34,9 @@
     </style>
   </head>
   <body>
+    <div id="loading" role="status">CARVING THE MOUNTAIN<span>Preparing the riders and fresh powder…</span></div>
     <div id="app"></div>
+    <p class="sr-only">Black Diamond Brawl is a visual snowboard combat game. Press Enter to start. Arrows or A and D steer, Space or W jumps, F or K attacks, Escape or P pauses, and M mutes sound.</p>
     <p id="rotate-hint">Turn your phone sideways for the best ride.<br>Touch controls are on the slope.</p>
     <script type="module" src="/src/main.ts"></script>
   </body>

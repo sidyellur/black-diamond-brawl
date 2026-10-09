@@ -45,3 +45,30 @@ This report will be updated with final implementation details, evidence, remaini
 - GitHub repository metadata reports no Pages site and no configured homepage; no existing workflow or prior Actions run was found. The deliverable is verified merged source and a production build, not a claimed live deployment.
 - The user requested a stronger modern visual direction. A second art pass is replacing low-resolution pixel riders/obstacles with detailed high-resolution illustrations and smooth texture sampling. This is actively being implemented.
 - Review caught three score edge cases: false trick reward after rock landing, flow restarting on a damage frame, and a missed rival near-pass at exact Z equality. Regression tests and fixes are in progress.
+
+### 2026-10-09 07:58 UTC / 00:58 PDT — published for real browser verification
+
+- Published feature head `2353033a1c1f2f7e717a2237883528bde17bd347` and opened [PR #20](https://github.com/sidyellur/black-diamond-brawl/pull/20).
+- [Actions run 37902048937](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37902048937) successfully installed the supported Chromium runtime and began the complete production-build gate.
+- Shell push lacked credentials; resolved through the already-connected GitHub account's atomic Git-data API. The published tree exactly matches the validated local snapshot.
+- New model gates: all 27 scoring/flow checks pass, including five regressions that first reproduced the scoring defects. All 21 control checks and 38 combat checks remain green.
+- Added rendering assertions for 350 curved/hilly frames, stable projection pools, parallax in both directions, frame-rate-independent powder, and an open/curve-aligned finish arch.
+- High-resolution illustration pass remains in progress before final merge. Browser result and visual acceptance remain pending.
+
+### 2026-10-09 08:05 UTC / 01:05 PDT — first real browser results
+
+- All 28 browser acceptance checks passed on the first CI run: pointer menus, countdown input safety, held steering, W jump, pause/time freeze, focus interruption, repeated retries/listener cleanup, result/new-seed/title navigation, persistent records, successful finish, portrait touch, and pointer cancellation.
+- The separate smoke gate timed out while the visible countdown was at `1`; it was not a missing keyboard input or a crash. Chromium software rendering was progressing unusually slowly. This gate is still failed until rerun.
+- Found a real countdown timing issue: it consumed the capped/smoothed physics delta. On very slow renderers, Phaser treats >200 ms frames as hiccups, stretching the start countdown. Countdown now uses bounded raw frame time while movement retains the collision-safe cap and pause still freezes it.
+- Added renderer/FPS/runtime diagnostics and longer startup observation for the next CI run. Existing failure assertions are retained.
+- Actual CI screenshots confirm the HUD, pause menu, mobile controls and open finish arch render. Modern192px assets are the next commit and still require in-game screenshot review.
+
+### 2026-10-09 08:11 UTC / 01:11 PDT — modern asset and scene pass
+
+- Replaced 48px pixel riders and hazards with original 192px antialiased illustrations. Seven distinct rider poses now have detailed rear-view helmets, jacket panels, bindings and boards; three fir silhouettes, snow-dusted rocks, shaped moguls and metal ski poles share the same lighting/style.
+- Independent raw contact-sheet review approved rider readability, trailing-camera orientation, hazard silhouettes and palette. No downloaded/licensed art or fonts were introduced.
+- Enlarged player and rival sprites coherently, added subtle carve camera lean and deterministic off-piste forest scenery, and replaced the highway-like curb treatment with shaped snow banks and sparse piste markers. Broader irregular mountains reduce repeated triangle-wall shapes.
+- Added a loading state, actual target advantage warning, quieter motion-linked wind/powder audio, and Canvas fallback for devices without WebGL.
+- Local final-pass checks at this stage: production build; 262 actual-art checks over 41 buffers; palette; rendering geometry/finish arch; 38 combat; 27 scoring; 21 controls; records; 1,000 solvability seeds. All passed.
+- Actual sprite generation measured about 1.4–1.5 seconds in this environment; packed RGBA atlases 5.77 MiB. This excludes browser/GPU startup. Browser navigation/postrender timings are being recorded separately.
+- Modern full-scene visual acceptance, audio/Canvas fallback browser checks and final publication are pending the next CI run.

@@ -1,144 +1,142 @@
-import { MOGUL, ROCK, SNOW, TREE, mix, shade } from '../render/palette';
-import { PixelCanvas, applyRim } from '../render/pixel';
+import { MOGUL, ROCK, SNOW, TREE, mix, rim, shade } from '../render/palette';
+import { PixelCanvas } from '../render/pixel';
+import { Point, VectorPainter, preserveAlphaRim, linearGradient } from '../render/vectorArt';
 
-/**
- * Obstacle art.
- *
- * All three sit on snow, which is the brightest surface in the game, so each
- * is built to separate from it by *value* before anything else. Every sprite
- * is drawn to stand on the bottom edge of its frame, so a sprite anchored at
- * origin (0.5, 1) plants its base on the road surface — the existing
- * convention, kept.
- */
-
-export const OBSTACLE_ART_SIZE = 48;
-
+/** Original high-resolution, antialiased alpine illustrations. Their shading
+ * and silhouettes are authored at this resolution, never scaled-up pixel art.
+ * Every subject still plants its base at the bottom of a square frame. */
+export const OBSTACLE_ART_SIZE = 192;
 export type ObstacleArtKind = 'tree' | 'rock' | 'mogul';
 
-export function drawObstacle(kind: ObstacleArtKind): PixelCanvas {
-  const cv = new PixelCanvas(OBSTACLE_ART_SIZE, OBSTACLE_ART_SIZE);
-  switch (kind) {
-    case 'tree':
-      drawTree(cv);
-      break;
-    case 'rock':
-      drawRock(cv);
-      break;
-    case 'mogul':
-      drawMogul(cv);
-      break;
-  }
-  applyRim(cv, SNOW.packed);
-  return cv;
+export function drawObstacle(kind: ObstacleArtKind, variant = 0): PixelCanvas {
+  const canvas = new PixelCanvas(OBSTACLE_ART_SIZE, OBSTACLE_ART_SIZE);
+  // Paint with breathing room before positioning the grounded frame; curved
+  // strokes can extend beyond their final control point by a couple pixels.
+  const drawing = new PixelCanvas(OBSTACLE_ART_SIZE, OBSTACLE_ART_SIZE + 4);
+  const painter = new VectorPainter(drawing);
+  if (kind === 'tree') drawTree(painter, ((variant % 3) + 3) % 3);
+  else if (kind === 'rock') drawRock(painter);
+  else drawMogul(painter);
+  canvas.blit(drawing, 0, -4);
+  preserveAlphaRim(canvas, SNOW.packed);
+  return canvas;
 }
 
-/**
- * A snow-laden conifer. Built from overlapping tiers rather than one triangle:
- * each tier casts a shadow onto the one below, which is what gives the tree
- * depth instead of reading as a flat green wedge.
- */
-function drawTree(cv: PixelCanvas): void {
-  const cx = 24;
-  const base = 46;
+function drawTree(p: VectorPainter, variant: number): void {
+  const outline = rim(TREE.foliage);
+  // Tapered bark, lit on the left. The trunk remains visible beneath the
+  // branches, which makes this read as an actual tree rather than a cone.
+  p.shape([[88, 180], [92, 124], [99, 116], [106, 141], [110, 181]],
+    linearGradient(88, 157, 110, 161, [shade(TREE.trunk, 'lit'), TREE.trunk, shade(TREE.trunk, 'core')]),
+    rim(TREE.trunk), 2.5);
+  p.stroke([[97, 142], [95, 166], [97, 184]], 1.7, shade(TREE.trunk, 'hilite'), false, 0.7);
 
-  // Trunk.
-  cv.rect(cx - 2, base - 9, 4, 9, TREE.trunk);
-  cv.rect(cx - 2, base - 9, 1, 9, shade(TREE.trunk, 'lit'));
-  cv.rect(cx + 1, base - 9, 1, 9, shade(TREE.trunk, 'shadow'));
-
-  // Four tiers, widest at the bottom, each one shorter than the last.
-  const tiers = [
-    { y: base - 7, halfW: 15, h: 11 },
-    { y: base - 15, halfW: 12, h: 10 },
-    { y: base - 23, halfW: 9, h: 9 },
-    { y: base - 30, halfW: 6, h: 8 }
+  // Asymmetric drooping branch whorls. Curved lobes, broken shelves of snow,
+  // and a shaded underside replace the old stack of identical triangles.
+  const variants = [
+    [[94, 165, 75, 55], [98, 139, 64, 51], [94, 116, 52, 47],
+      [99, 91, 40, 41], [98, 67, 28, 35], [101, 43, 15, 31]],
+    [[97, 166, 67, 60], [92, 140, 57, 53], [98, 114, 43, 49],
+      [95, 89, 35, 44], [100, 65, 23, 38], [101, 40, 12, 29]],
+    [[93, 165, 77, 45], [99, 145, 66, 45], [92, 125, 58, 44],
+      [99, 103, 42, 39], [97, 82, 31, 38], [99, 60, 18, 35]]
   ];
+  const tiers = variants[variant];
+  tiers.forEach(([x, y, w, h], index) => {
+    const left = w * ((index + variant) % 4 === 2 ? 0.72 : (index + variant) % 2 ? 1 : 0.9);
+    const right = w * ((index + variant) % 2 ? 0.79 : 1);
+    const leftDroop = index % 3 === 0 ? 3 : -2;
+    const rightDroop = index % 3 === 1 ? 6 : 0;
+    const canopy: Point[] = [
+      [x + 2, y - h], [x - left * 0.23, y - h * 0.61],
+      [x - left * 0.60, y - h * 0.23], [x - left, y + 1 + leftDroop],
+      [x - left * 0.76, y + 8], [x - left * 0.46, y + 3],
+      [x - left * 0.25, y + 11], [x - left * 0.02, y + 3],
+      [x + right * 0.26, y + 10], [x + right * 0.49, y + 3],
+      [x + right * 0.92, y + 5 + rightDroop], [x + right * 0.71, y - h * 0.27],
+      [x + right * 0.30, y - h * 0.63]
+    ];
+    p.shape(canopy,
+      linearGradient(x - left * 0.45, y - h, x + right * 0.6, y + 9,
+        [shade(TREE.foliage, 'lit'), TREE.foliage, TREE.foliageDeep]), outline, 2.4);
+    p.stroke([[x - left * 0.75, y + 1], [x - left * 0.35, y - 3], [x + 1, y - 20]],
+      1.5, shade(TREE.foliage, 'lit'), false, 0.65);
+    p.stroke([[x + right * 0.69, y + 2], [x + right * 0.32, y - 8], [x + 1, y - 24]],
+      1.6, TREE.foliageDeep, false, 0.8);
 
-  for (const t of tiers) {
-    // Shadowed underside first, then the lit body inset above it — the pair is
-    // what reads as an overhanging branch.
-    cv.triangle(cx, t.y - t.h, cx - t.halfW, t.y, cx + t.halfW, t.y, TREE.foliageDeep);
-    cv.triangle(cx, t.y - t.h + 1, cx - t.halfW + 2, t.y - 2, cx + t.halfW - 2, t.y - 2, TREE.foliage);
-    // Sunward edge catches light.
-    cv.triangle(cx, t.y - t.h + 1, cx - t.halfW + 2, t.y - 2, cx - 1, t.y - 3, shade(TREE.foliage, 'lit'));
-    // Snow settles on the upper surface of each tier.
-    cv.line(cx - t.halfW + 3, t.y - 2, cx - 1, t.y - t.h + 3, TREE.snowLoad, 1);
-    cv.set(cx + 1, t.y - t.h + 3, mix(TREE.snowLoad, TREE.foliage, 0.3));
-  }
-
-  // Capped tip.
-  cv.set(cx, base - 39, TREE.snowLoad);
-  cv.set(cx, base - 38, TREE.snowLoad);
+    const snowDepth = Math.min(22, h * 0.44);
+    const shelf: Point[] = [
+      [x - left * 0.85, y - 3 + leftDroop], [x - left * 0.67, y - 13 + leftDroop],
+      [x - left * 0.35, y - snowDepth - 3], [x - 3, y - snowDepth - 9],
+      [x - left * 0.09, y - snowDepth + 2], [x - left * 0.30, y - 8 + leftDroop],
+      [x - left * 0.46, y - 4 + leftDroop], [x - left * 0.65, y + 1 + leftDroop]
+    ];
+    p.shape(shelf, linearGradient(x, y - snowDepth, x + 12, y + 6,
+      [TREE.snowLoad, SNOW.packed, mix(SNOW.shadow, TREE.snowLoad, 0.48)]),
+      rim(SNOW.shadow), 2.6);
+    // Separate lee-side patches leave a dark gap through the centre. Broken
+    // shelves and unequal droop are what make these natural branches instead
+    // of a symmetric decorated Christmas-tree icon.
+    if ((index + variant) % 4 !== 2) {
+      p.shape([[x + right * 0.16, y - snowDepth + 2],
+        [x + right * 0.39, y - snowDepth * 0.5], [x + right * 0.79, y + rightDroop],
+        [x + right * 0.68, y + 5 + rightDroop], [x + right * 0.49, y + 3 + rightDroop],
+        [x + right * 0.29, y - 1 + rightDroop]],
+      linearGradient(x, y - snowDepth, x + right, y + 9,
+        [SNOW.packed, SNOW.offPiste]), rim(SNOW.shadow), 2.6);
+    }
+    // A few long needles on the exposed underside, not high-frequency noise.
+    if (index < 3) {
+      p.line([x - left * 0.60, y + 3], [x - left * 0.63, y + 10], 1.4, TREE.foliageDeep);
+      p.line([x + right * 0.47, y + 3], [x + right * 0.51, y + 9], 1.4, TREE.foliageDeep);
+    }
+  });
+  const tipY = variant === 2 ? 21 : 7;
+  p.shape([[98, tipY + 13], [102, tipY], [106, tipY + 16], [102, tipY + 20]],
+    TREE.snowLoad, outline, 2.6);
+  p.shape([[84, 186], [93, 181], [104, 183], [114, 188], [105, 190], [87, 190]],
+    linearGradient(90, 181, 108, 190, [SNOW.packed, SNOW.shadow]), rim(SNOW.shadow), 2.6);
 }
 
-/**
- * A boulder. Faceted rather than smooth — angular planes catching light at
- * different angles is what distinguishes rock from a grey blob, and each facet
- * is a flat tone so the shape stays readable when scaled down.
- */
-function drawRock(cv: PixelCanvas): void {
-  const cx = 24;
-  const base = 46;
-
-  const body = ROCK.body;
-  const lit = shade(body, 'lit');
-  const hilite = shade(body, 'hilite');
-  const dark = shade(body, 'shadow');
-  const core = shade(body, 'core');
-
-  // Bulk.
-  cv.ellipse(cx, base - 7, 15, 8, dark);
-  cv.triangle(cx - 15, base - 6, cx + 15, base - 6, cx - 3, base - 22, body);
-  cv.triangle(cx + 15, base - 6, cx - 3, base - 22, cx + 11, base - 17, body);
-
-  // Sunward facets.
-  cv.triangle(cx - 3, base - 22, cx - 12, base - 8, cx - 1, base - 11, lit);
-  cv.triangle(cx - 3, base - 22, cx - 1, base - 11, cx + 5, base - 16, hilite);
-
-  // Shaded right flank.
-  cv.triangle(cx + 11, base - 17, cx + 15, base - 6, cx + 4, base - 8, core);
-
-  // Cracks, as single dark pixels following a facet edge.
-  cv.line(cx - 2, base - 20, cx + 1, base - 12, core, 1);
-  cv.line(cx + 1, base - 12, cx - 3, base - 8, core, 1);
-
-  // Snow caught on the upper ledges.
-  cv.line(cx - 10, base - 9, cx - 5, base - 12, SNOW.packed, 1);
-  cv.set(cx + 7, base - 15, SNOW.packed);
+function drawRock(p: VectorPainter): void {
+  const edge = rim(ROCK.body);
+  p.shape([[18, 176], [29, 139], [49, 110], [86, 92], [134, 102], [165, 129],
+    [179, 169], [161, 184], [114, 190], [58, 187], [27, 185]],
+  linearGradient(56, 95, 141, 185, [shade(ROCK.body, 'lit'), ROCK.body, shade(ROCK.body, 'core')]), edge, 3.2);
+  p.polygon([[29, 140], [49, 111], [86, 94], [77, 143], [35, 173]],
+    linearGradient(48, 107, 72, 167, [shade(ROCK.body, 'hilite'), shade(ROCK.body, 'lit'), ROCK.body]));
+  p.polygon([[77, 143], [86, 94], [134, 103], [139, 150], [104, 179]],
+    linearGradient(82, 105, 127, 175, [shade(ROCK.body, 'lit'), ROCK.body, shade(ROCK.body, 'shadow')]));
+  p.polygon([[139, 150], [134, 104], [163, 129], [176, 168], [156, 182], [104, 179]],
+    linearGradient(139, 131, 169, 186, [ROCK.wet, shade(ROCK.body, 'shadow'), shade(ROCK.body, 'core')]));
+  p.polygon([[35, 173], [77, 143], [104, 179], [155, 182], [113, 188], [58, 184]],
+    shade(ROCK.body, 'shadow'));
+  p.stroke([[87, 104], [80, 137], [91, 154], [82, 162]], 1.8, shade(ROCK.body, 'core'));
+  p.stroke([[139, 150], [150, 158], [157, 176]], 1.6, shade(ROCK.body, 'core'));
+  // Snow gathers in ledges, leaving the dangerous rock silhouette readable.
+  p.shape([[47, 113], [68, 97], [86, 93], [108, 97], [135, 104], [139, 111],
+    [120, 115], [110, 110], [96, 119], [86, 112], [68, 119], [56, 115]],
+  linearGradient(72, 98, 100, 122, [SNOW.packed, SNOW.offPiste]), mix(ROCK.body, SNOW.shadow, 0.5), 1.3);
+  p.shape([[29, 161], [46, 152], [62, 151], [54, 159], [36, 167]],
+    linearGradient(32, 151, 53, 166, [SNOW.packed, SNOW.offPiste]), ROCK.wet, 1);
+  p.line([53, 130], [66, 124], 1.5, shade(ROCK.body, 'hilite'), 0.75);
+  p.ellipse(118, 142, 3, 1.4, shade(ROCK.body, 'hilite'), -0.4, 0.6);
 }
 
-/**
- * A mogul — a packed snow bump.
- *
- * This one is the reason the palette gate exists. Previously it was a
- * near-white ellipse on near-white snow at ΔL* 2.5: an unavoidable hazard,
- * costing 25% speed, that the player could not see coming.
- *
- * The fix is not "make it brighter" — a bump on snow is not brighter than the
- * snow around it. It reads by the shadow it casts and by the shaded lee slope
- * facing away from the sun. So it is built from the shadow up: a cast shadow
- * on the ground, a dark lee face, and only a thin lit crown.
- */
-function drawMogul(cv: PixelCanvas): void {
-  const cx = 24;
-  const base = 46;
-
-  // Cast shadow on the snow, offset away from the sun. This is doing most of
-  // the legibility work.
-  cv.ellipse(cx + 3, base - 3, 19, 5, mix(SNOW.shadow, SNOW.packed, 0.25), 235);
-
-  // The lee (shaded) face — the mass of the bump.
-  cv.ellipse(cx, base - 7, 17, 8, MOGUL.lee);
-  cv.ellipse(cx + 4, base - 6, 13, 6, shade(MOGUL.lee, 'shadow'));
-
-  // Lit crown, kept deliberately small: a big bright cap would wash back into
-  // the snow and undo the separation.
-  cv.ellipse(cx - 3, base - 10, 10, 4, mix(MOGUL.lee, MOGUL.crest, 0.75));
-  cv.ellipse(cx - 4, base - 11, 6, 2, MOGUL.crest);
-
-  // Scoured ridges on the windward side, as value pairs rather than colour
-  // noise — a couple of light/dark line pairs read as packed snow texture.
-  cv.line(cx - 12, base - 6, cx - 6, base - 9, shade(MOGUL.lee, 'core'), 1);
-  cv.line(cx - 11, base - 5, cx - 5, base - 8, MOGUL.crest, 1);
-  cv.line(cx + 6, base - 9, cx + 12, base - 6, shade(MOGUL.lee, 'core'), 1);
+function drawMogul(p: VectorPainter): void {
+  // A sweeping lee face does the legibility work. Only the narrow windward
+  // lip is near-white, so this never washes into the piste beneath it.
+  p.shape([[8, 183], [23, 169], [44, 151], [65, 133], [85, 125], [105, 132],
+    [126, 153], [154, 171], [181, 180], [174, 188], [103, 191], [41, 188]],
+  linearGradient(65, 124, 126, 190, [mix(MOGUL.crest, MOGUL.lee, 0.34), MOGUL.lee, shade(MOGUL.lee, 'shadow')]),
+  rim(MOGUL.lee), 2.5);
+  p.shape([[86, 135], [105, 135], [126, 155], [151, 171], [177, 181],
+    [142, 184], [118, 178], [106, 160]],
+  linearGradient(92, 137, 151, 188, [MOGUL.lee, shade(MOGUL.lee, 'shadow')]), MOGUL.lee, 0);
+  p.shape([[27, 168], [50, 148], [69, 132], [85, 128], [101, 136],
+    [86, 135], [70, 140], [49, 157], [34, 170]],
+  linearGradient(63, 129, 66, 165, [MOGUL.crest, SNOW.packed, MOGUL.lee]), MOGUL.lee, 0);
+  p.stroke([[111, 149], [120, 166], [143, 178]], 1.9, shade(MOGUL.lee, 'shadow'), false, 0.65);
+  p.stroke([[33, 176], [55, 163], [65, 151]], 1.3, MOGUL.crest, false, 0.75);
+  p.stroke([[43, 182], [66, 171], [79, 153]], 1.2, mix(MOGUL.lee, MOGUL.crest, 0.5), false, 0.6);
 }

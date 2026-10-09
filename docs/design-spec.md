@@ -1,5 +1,30 @@
 # Black Diamond Brawl — Design Specification
 
+## Current arcade revision (October 2026)
+
+The Road Rash-on-snowboards fantasy, deterministic five-lane course geometry, collision
+rules, and dedicated attack commitment remain. The following current behavior supersedes
+older v1-only restrictions elsewhere in this historical design document:
+
+- High-resolution original illustrated assets and linear texture sampling replace pixel-art sprites.
+- Keyboard input is polled during simulation; tap or hold to carve. W also jumps. Touch
+  controls and clickable menus are supported. Attacks remain edge-triggered.
+- A 1.8-second countdown, explicit pause, automatic focus-loss pause, and retry/menu
+  flows are available. Race time excludes countdown and pauses; hit-stop remains part
+  of elapsed race time. A simulation frame is bounded to 50 ms to prevent tunneling.
+- Clean events build Flow for 4.2 seconds. Events 5–8 earn +25%; event 9 onward earns
+  +50%. Damage or expiry breaks Flow. The bonus is a separate scorecard category.
+- Personal best and up to 64 recent mountain records persist locally, with safe memory
+  fallback if storage is blocked. No account, analytics, cloud save, or leaderboard upload.
+- Procedural effects and motion-sensitive wind/powder audio are synthesized locally;
+  M toggles sound. The core game remains playable if audio cannot start.
+- CI now covers inputs, scoring, storage, rendering geometry, course solvability, actual
+  browser controls/touch/pause/replay, screenshots, and production build artifacts.
+
+See [README](../README.md) for current controls and [the overnight report](OVERNIGHT_REPORT.md)
+for verified status and remaining limitations. The detailed v1 design below is retained
+as implementation history.
+
 ## 1. Overview & Goal
 
 Black Diamond Brawl is a Road Rash-style downhill snowboarding combat racer built for the

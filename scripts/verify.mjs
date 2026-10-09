@@ -58,6 +58,8 @@ function serveDist(root, port) {
 try {
   await step('build (tsc + vite)', () => run('npm', ['run', 'build']));
   await step('palette contrast', () => run('npm', ['run', 'verify:palette']));
+  await step('illustrated asset integrity', () => run('npm', ['run', 'verify:art']));
+  await step('rendering geometry', () => run('npm', ['run', 'verify:rendering']));
   await step('combat logic', () => run('npm', ['run', 'verify:combat']));
   await step('scoring and flow', () => run('npm', ['run', 'verify:scoring']));
   await step('responsive controls', () => run('npm', ['run', 'verify:controls']));

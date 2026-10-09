@@ -7,12 +7,10 @@ import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { TitleScene } from './scenes/TitleScene';
 
 const config: Phaser.Types.Core.GameConfig = {
-  // WEBGL, not AUTO. postFX/preFX and every FX controller (Bloom, Vignette,
-  // ColorMatrix) are WebGL-only — under a Canvas fallback they silently no-op
-  // rather than erroring, so the whole visual polish layer would vanish with
-  // no indication anything was wrong. Failing to start is better than
-  // shipping a silently degraded renderer.
-  type: Phaser.WEBGL,
+  // Prefer accelerated WebGL, while keeping the same sprite/Graphics game
+  // playable when a device cannot create a WebGL context. No game mechanic
+  // relies on a WebGL-only post-process. Explicit canvas mode is also tested.
+  type: new URLSearchParams(window.location.search).get('renderer') === 'canvas' ? Phaser.CANVAS : Phaser.AUTO,
   width: SCREEN_W,
   height: SCREEN_H,
   scale: {

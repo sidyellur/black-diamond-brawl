@@ -19,6 +19,9 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.game.events.once(Phaser.Core.Events.POST_RENDER, () => {
+      document.getElementById('loading')?.remove();
+    });
     generatePlayerSpriteSheet(this);
     generateAIRiderSpriteSheets(this);
     generateObstacleSpriteSheet(this);

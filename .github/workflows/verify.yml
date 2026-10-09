@@ -30,6 +30,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build and verify models, rendering, and player flows
         shell: bash
+        env:
+          DEBUG: pw:browser
         run: |
           mkdir -p .verify
           npm run verify 2>&1 | tee .verify/verify.log

@@ -15,6 +15,7 @@ export interface HudState {
   charges: number;
   attackCooldown: number;
   target: boolean;
+  targetAdvantage: boolean;
   airborne: boolean;
   recovering: boolean;
   chain: number;
@@ -57,7 +58,7 @@ export class RaceHud {
     bg.fillStyle(UI.accentWarn).fillRect(30, 27, 3, 43);
     this.objects.push(bg);
     this.place = this.text(44, 26, '', 28, UI.inkHigh, true);
-    this.clock = this.text(44, 61, '', 13, UI.inkMid);
+    this.clock = this.text(44, 61, '', 13, UI.inkMid).setFontFamily('monospace');
     this.score = this.text(766, 24, '', 25, UI.inkHigh, true);
     this.text(766, 57, 'POINTS', 10, UI.inkLow, true);
     this.progress = this.text(234, 24, `MOUNTAIN ${seed}`, 11, UI.inkMid, true);
@@ -76,7 +77,7 @@ export class RaceHud {
     this.muteLabel = this.button(687, 30, 74, 23, 'M SOUND', () => this.setMuted(actions.mute()), 10);
 
     if (this.touch) {
-      scene.input.addPointer(3);
+      if (scene.input.manager.pointersTotal < 4) scene.input.addPointer(4 - scene.input.manager.pointersTotal);
       const held = (x: number, label: string, action: InputAction) => {
         const g = scene.add.rectangle(x, SCREEN_H - 43, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
         const t = this.text(x, SCREEN_H - 43, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
@@ -96,9 +97,9 @@ export class RaceHud {
     this.pauseOverlay = scene.add.container(0, 0).setDepth(11000).setVisible(false);
     const shade = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, SCREEN_W, SCREEN_H, UI.panel, 0.78).setInteractive();
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
-    const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'monospace', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
-    const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'monospace', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
-    const controls = scene.add.text(SCREEN_W / 2, 217, 'A D / ← →  carve   SPACE / W  jump   F / K  fight', { fontFamily: 'monospace', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
+    const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
+    const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
+    const controls = scene.add.text(SCREEN_W / 2, 217, 'A D / ← →  carve   SPACE / W  jump   F / K  fight', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
     this.pauseOverlay.add([shade, panel, heading, sub, controls]);
     for (const [label, y, callback] of [
       ['RESUME   ESC / P', 267, actions.resume],
@@ -106,7 +107,7 @@ export class RaceHud {
       ['BACK TO LODGE', 375, actions.menu]
     ] as const) {
       const b = scene.add.rectangle(SCREEN_W / 2, y, 340, 40, UI.panelEdge).setInteractive({ useHandCursor: true });
-      const t = scene.add.text(SCREEN_W / 2, y, label, { fontFamily: 'monospace', fontSize: '15px', color: hex(UI.inkHigh), fontStyle: 'bold' }).setOrigin(0.5);
+      const t = scene.add.text(SCREEN_W / 2, y, label, { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px', color: hex(UI.inkHigh), fontStyle: 'bold' }).setOrigin(0.5);
       b.on('pointerover', () => b.setFillStyle(0x38536a)).on('pointerout', () => b.setFillStyle(UI.panelEdge)).on('pointerdown', callback);
       this.pauseOverlay.add([b, t]);
     }
@@ -114,7 +115,7 @@ export class RaceHud {
   }
 
   private text(x: number, y: number, value: string, size: number, color: number, bold = false): Phaser.GameObjects.Text {
-    const t = this.scene.add.text(x, y, value, { fontFamily: 'monospace', fontSize: `${size}px`, color: hex(color), fontStyle: bold ? 'bold' : 'normal' }).setDepth(10002);
+    const t = this.scene.add.text(x, y, value, { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: `${size}px`, color: hex(color), fontStyle: bold ? 'bold' : 'normal' }).setDepth(10002);
     this.objects.push(t);
     return t;
   }
@@ -147,8 +148,8 @@ export class RaceHud {
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);
     this.progress.setText(`MOUNTAIN RUN   ${Math.min(100, Math.floor(s.progress * 100))}%`);
-    this.attack.setText(s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? 'F / K  HIT THE MARKED RIVAL!' : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : 'CLOSE THE GAP · FOLLOW THE AMBER MARKER');
-    this.attack.setColor(hex(s.target ? UI.accentWarn : UI.inkMid));
+    this.attack.setText(s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? 'F / K  HIT · YOU HAVE THE ADVANTAGE' : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : 'CLOSE THE GAP · FOLLOW THE AMBER MARKER');
+    this.attack.setColor(hex(s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
     this.status.setText(s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();

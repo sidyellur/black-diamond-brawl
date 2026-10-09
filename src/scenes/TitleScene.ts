@@ -4,8 +4,8 @@ import { SCREEN_H, SCREEN_W } from '../config';
 import { SkyRenderer } from '../render/SkyRenderer';
 import { UI } from '../render/palette';
 import { randomSeed, resolveSeed } from '../track/seed';
-import { drawRider, PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES } from '../entities/riderArt';
-import { registerTexture } from '../render/pixel';
+import { RIDER_FRAME_SIZE } from '../entities/riderArt';
+import { AI_RIDER_TEXTURE_KEYS, PLAYER_TEXTURE_KEY } from '../entities/playerSprite';
 import { getBestScore, getCourseRecord } from '../entities/session';
 import { formatPoints, formatTime, menuButton, menuKeys, menuText, mountainName, MONO } from '../frontend/menu';
 
@@ -73,18 +73,16 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private addRiders(): void {
-    const palettes = [RIVAL_RIDER_PALETTES[0], RIVAL_RIDER_PALETTES[2], PLAYER_RIDER_PALETTE];
+    const textures = [AI_RIDER_TEXTURE_KEYS[0], AI_RIDER_TEXTURE_KEYS[2], PLAYER_TEXTURE_KEY];
     const poses = ['lean-right', 'lean-left', 'swing'] as const;
     const xs = [601, 844, 724];
     const ys = [365, 360, 424];
     const scales = [2.4, 2.3, 4.4];
     const shadow = this.add.graphics();
-    palettes.forEach((pal, i) => {
-      const key = `menu-rider-${i}`;
-      if (!this.textures.exists(key)) registerTexture(this, key, drawRider(poses[i], pal));
+    textures.forEach((key, i) => {
       shadow.fillStyle(0x284761, i === 2 ? 0.18 : 0.13);
       shadow.fillEllipse(xs[i], ys[i] - 7, 39 * scales[i], 6 * scales[i]);
-      const sprite = this.add.image(xs[i], ys[i], key).setOrigin(0.5, 1).setScale(scales[i]);
+      const sprite = this.add.image(xs[i], ys[i], key, poses[i]).setOrigin(0.5, 1).setScale(scales[i] * 48 / RIDER_FRAME_SIZE);
       this.tweens.add({ targets: sprite, y: ys[i] - (i === 2 ? 5 : 3), duration: 1600 + i * 270, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     });
     menuText(this, 734, 165, 'NO BRAKES. NO FRIENDS.', 11, UI.panel, true).setOrigin(0.5);
@@ -112,8 +110,14 @@ export class TitleScene extends Phaser.Scene {
     plate.fillRect(0, 448, SCREEN_W, SCREEN_H - 448);
     plate.fillStyle(UI.panelEdge);
     plate.fillRect(0, 448, SCREEN_W, 1);
-    const controls = [
-      { x: 49, key: '← →  /  A D', label: 'CARVE', hint: 'Shift one lane' },
+    const touch = this.sys.game.device.input.touch || new URLSearchParams(window.location.search).has('touch');
+    const controls = touch ? [
+      { x: 49, key: 'TAP / HOLD  ← →', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
+      { x: 278, key: 'TAP  JUMP', label: 'JUMP', hint: 'Time moguls for trick air' },
+      { x: 522, key: 'TAP  HIT', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
+      { x: 799, key: 'TAP  PAUSE', label: 'PAUSE', hint: 'Take a breather' }
+    ] : [
+      { x: 49, key: '← →  /  A D', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
       { x: 278, key: 'SPACE  /  ↑ W', label: 'JUMP', hint: 'Time moguls for trick air' },
       { x: 522, key: 'F  /  K', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
       { x: 799, key: 'ESC  /  P', label: 'PAUSE', hint: 'Take a breather' }

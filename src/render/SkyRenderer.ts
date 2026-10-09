@@ -153,17 +153,18 @@ export class SkyRenderer {
    */
   private drawHazeBand(topScreenY: number): void {
     const horizonY = SCREEN_H * HORIZON_FRACTION;
-    const bandTop = horizonY - 10;
+    const bandTop = Math.min(horizonY - 10, topScreenY - 30);
     const bandBottom = Math.max(topScreenY + 2, bandTop + 2);
 
-    // A few stacked strips fading out downward, so the join to the snow is a
-    // gradient rather than a line.
+    // Haze builds toward the measured snow edge, including flat ground where
+    // that edge is ABOVE the nominal backdrop horizon. A faint upper strip
+    // avoids replacing the snow seam with another hard line through the peaks.
     const strips = 7;
     for (let i = 0; i < strips; i++) {
       const t0 = i / strips;
       const y0 = bandTop + (bandBottom - bandTop) * t0;
       const y1 = bandTop + (bandBottom - bandTop) * ((i + 1) / strips);
-      this.graphics.fillStyle(this.hazeColors[i], 1 - t0 * 0.15);
+      this.graphics.fillStyle(this.hazeColors[i], 0.035 + t0 * t0 * 0.96);
       this.graphics.fillRect(-64, y0, SCREEN_W + 128, y1 - y0 + 1);
     }
   }

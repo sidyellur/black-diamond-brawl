@@ -14,7 +14,9 @@
     "measure:rocklock": "node --import tsx scripts/measureRockLock.ts",
     "lab": "node scripts/spriteLab.mjs",
     "verify:controls": "node --import tsx scripts/verifyControls.ts",
-    "verify:scoring": "node --import tsx scripts/verifyScoring.ts"
+    "verify:scoring": "node --import tsx scripts/verifyScoring.ts",
+    "verify:rendering": "node --import tsx scripts/verifyRendering.ts",
+    "verify:art": "node --import tsx scripts/verifyArt.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0"

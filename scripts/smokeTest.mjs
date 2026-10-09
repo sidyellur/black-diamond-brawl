@@ -49,6 +49,32 @@ const deltaL = (a, b) => Math.abs(lStar(a) - lStar(b));
 
 let browser;
 let page;
+const consoleMessages = [];
+const runtimeSnapshots = [];
+
+async function recordRuntime(label) {
+  if (!page || page.isClosed()) return;
+  const runtime = await page.evaluate(() => {
+    const game = window.__game;
+    const sc = game?.scene.getScene('RaceScene');
+    const gl = game?.renderer.gl;
+    const extension = gl?.getExtension('WEBGL_debug_renderer_info');
+    return {
+      activeScenes: game?.scene.getScenes(true).map((s) => s.scene.key),
+      countdownMs: sc?.countdownMs, elapsedRaceMs: sc?.elapsedRaceMs,
+      speed: sc?.player?.speed, paused: sc?.paused,
+      actualFps: game?.loop.actualFps, rawDelta: game?.loop.rawDelta,
+      documentHidden: document.hidden, documentFocused: document.hasFocus(),
+      renderer: extension ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER),
+      vendor: extension ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : gl?.getParameter(gl.VENDOR),
+      sceneObjects: sc?.children?.length,
+      navigationToTitleRenderedMs: window.__qaTitleRenderedMs,
+      navigationObservedMs: performance.now()
+    };
+  });
+  runtimeSnapshots.push({ label, at: new Date().toISOString(), ...runtime });
+  console.log(`RUNTIME ${label}: ${JSON.stringify(runtime)}`);
+}
 
 async function run() {
   browser = await chromium.launch({
@@ -57,15 +83,32 @@ async function run() {
   });
   page = await browser.newPage({ viewport: { width: 960, height: 540 } });
   page.setDefaultTimeout(15000);
+  await page.addInitScript(() => {
+    const attach = () => {
+      const game = window.__game;
+      if (!game?.events) { requestAnimationFrame(attach); return; }
+      const rendered = () => {
+        if (!game.scene.isActive('TitleScene')) return;
+        window.__qaTitleRenderedMs = performance.now();
+        game.events.off('postrender', rendered);
+      };
+      game.events.on('postrender', rendered);
+    };
+    requestAnimationFrame(attach);
+  });
 
   const consoleErrors = [];
   page.on('console', (m) => {
+    consoleMessages.push({ type: m.type(), text: m.text() });
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
   page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR: ${e.message}`));
 
-  await page.goto(URL, { waitUntil: 'networkidle' });
+  const smokeUrl = new globalThis.URL(URL);
+  if (!smokeUrl.searchParams.has('seed')) smokeUrl.searchParams.set('seed', '101');
+  await page.goto(smokeUrl.href, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__game?.scene.isActive('TitleScene'));
+  await recordRuntime('title');
 
   // The game canvas must exist and have non-zero size.
   const canvasBox = await page.evaluate(() => {
@@ -86,16 +129,23 @@ async function run() {
 
   // Enter the race.
   await page.keyboard.press('Space');
+  await recordRuntime('drop-in');
   await page.waitForFunction(() => {
     const game = window.__game;
     const scene = game?.scene.getScene('RaceScene');
     return game?.scene.isActive('RaceScene') && scene?.player?.speed > 0;
-  });
-  await page.waitForTimeout(1000);
+  }, undefined, { timeout: 60000 });
+  await recordRuntime('countdown-complete');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= 1000, undefined, { timeout: 60000 });
   await page.screenshot({ path: `${OUT}/02-race-early.png` });
 
-  await page.waitForTimeout(4000);
+  // Assert/capture actual simulated progress, independent of software GPU FPS.
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= 5500, undefined, { timeout: 90000 });
   await page.screenshot({ path: `${OUT}/03-race-mid.png` });
+  await recordRuntime('racing');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: `${OUT}/03b-desktop-wide.png` });
+  await page.setViewportSize({ width: 960, height: 540 });
 
   /**
    * Samples a screenshot PNG by decoding it inside the browser (drawImage into a
@@ -249,6 +299,10 @@ try {
 } catch (error) {
   check('browser smoke completed', false, error.stack || error.message || String(error));
 } finally {
+  await recordRuntime(failures.length ? 'failure' : 'complete').catch((error) => {
+    runtimeSnapshots.push({ label: 'diagnostic-error', message: error.message });
+  });
+  writeFileSync(`${OUT}/smoke-runtime.json`, JSON.stringify({ runtimeSnapshots, consoleMessages }, null, 2));
   if (failures.length && page && !page.isClosed()) {
     await page.screenshot({ path: `${OUT}/smoke-failure.png` }).catch(() => {});
   }

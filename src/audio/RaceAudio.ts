@@ -4,6 +4,9 @@ export class RaceAudio {
   private master: GainNode | null = null;
   private muted = false;
   private noiseBuffer: AudioBuffer | null = null;
+  private wind: AudioBufferSourceNode | null = null;
+  private windFilter: BiquadFilterNode | null = null;
+  private windGain: GainNode | null = null;
 
   constructor() {
     try { this.muted = localStorage.getItem('bdb-muted') === '1'; } catch { /* optional storage */ }
@@ -21,6 +24,16 @@ export class RaceAudio {
         this.noiseBuffer = this.context.createBuffer(1, this.context.sampleRate / 2, this.context.sampleRate);
         const channel = this.noiseBuffer.getChannelData(0);
         for (let i = 0; i < channel.length; i++) channel[i] = Math.random() * 2 - 1;
+        this.wind = this.context.createBufferSource();
+        this.wind.buffer = this.noiseBuffer;
+        this.wind.loop = true;
+        this.windFilter = this.context.createBiquadFilter();
+        this.windFilter.type = 'lowpass';
+        this.windFilter.frequency.value = 400;
+        this.windGain = this.context.createGain();
+        this.windGain.gain.value = 0;
+        this.wind.connect(this.windFilter); this.windFilter.connect(this.windGain);
+        this.windGain.connect(this.master); this.wind.start();
       }
       if (this.context.state === 'suspended') void this.context.resume().catch(() => {});
     } catch { /* Audio is enhancement; unsupported browsers remain playable. */ }
@@ -32,6 +45,15 @@ export class RaceAudio {
     try { localStorage.setItem('bdb-muted', this.muted ? '1' : '0'); } catch { /* optional storage */ }
     this.unlock();
     return this.muted;
+  }
+
+  /** Quiet powder/wind texture tracks motion instead of a fixed-volume loop. */
+  ride(speed01: number, airborne = false, carving = false): void {
+    if (!this.context || !this.windGain || !this.windFilter) return;
+    const speed = Math.max(0, Math.min(1, speed01));
+    const now = this.context.currentTime;
+    this.windGain.gain.setTargetAtTime(speed * (airborne ? 0.10 : carving ? 0.25 : 0.14), now, 0.1);
+    this.windFilter.frequency.setTargetAtTime(250 + speed * (carving ? 1700 : 700), now, 0.12);
   }
 
   play(kind: 'jump' | 'land' | 'hit' | 'crash' | 'pickup' | 'score' | 'go'): void {
@@ -67,8 +89,10 @@ export class RaceAudio {
   }
 
   destroy(): void {
+    if (this.wind) this.wind.stop();
     if (this.context) void this.context.close().catch(() => {});
     this.context = null; this.master = null; this.noiseBuffer = null;
+    this.wind = null; this.windGain = null; this.windFilter = null;
   }
 }
 

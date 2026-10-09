@@ -26,11 +26,11 @@ export function generateMountainTextures(scene: Phaser.Scene): void {
     const texture = scene.textures.createCanvas(layer.key, RIDGE_WIDTH, layer.height);
     if (!texture) return;
     const ctx = texture.getContext();
-    const haze = 0.36 - index * 0.1;
+    const haze = 0.56 - index * 0.18;
     const body = mix(bodies[index], SKY.horizon, haze);
     const lit = mix(body, caps[index], 0.28);
     const shadow = mix(shade(body, 'shadow'), body, 0.72);
-    const cap = mix(caps[index], SKY.cloud, 0.34 - index * 0.06);
+    const cap = mix(mix(caps[index], SKY.cloud, 0.18), SKY.horizon, haze * 0.6);
     const capShadow = mix(cap, body, 0.45);
     let seed = 0x91e3 + index * 0x235;
     const random = (): number => {
@@ -39,9 +39,13 @@ export function generateMountainTextures(scene: Phaser.Scene): void {
     };
     // Valleys and summits share endpoints; repeating the first valley at the
     // far edge keeps both geometry and height continuous across the seam.
-    const count = 16;
-    const step = RIDGE_WIDTH / count;
-    const valleys = Array.from({ length: count }, () => 95 + random() * 45);
+    const count = 8;
+    // Broad irregular massifs leave quiet sky between memorable summits. Equal
+    // 128px triangles read like wallpaper even with otherwise rich shading.
+    const widths = Array.from({ length: count }, () => 150 + random() * 230);
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+    const valleys = Array.from({ length: count }, () => 112 + random() * 52);
+    let cursor = 0;
     const polygon = (color: number, points: number[]): void => {
       ctx.fillStyle = css(color);
       ctx.beginPath();
@@ -51,18 +55,23 @@ export function generateMountainTextures(scene: Phaser.Scene): void {
       ctx.fill();
     };
     for (let i = 0; i < count; i++) {
-      const left = i * step;
+      const step = widths[i] / totalWidth * RIDGE_WIDTH;
+      const left = cursor;
       const right = left + step;
-      const peakX = left + step * (0.3 + random() * 0.38);
-      const peakY = 8 + random() * 54;
+      cursor = right;
+      const peakX = left + step * (0.24 + random() * 0.5);
+      const peakY = i % 3 === 1 ? 8 + random() * 22 : 37 + random() * 49;
       const leftY = valleys[i];
       const rightY = valleys[(i + 1) % count];
       const fold = peakX + step * (0.16 + random() * 0.12);
-      polygon(body, [left, leftY, peakX, peakY, right, rightY, right, 256, left, 256]);
+      const shoulderX = peakX + (right - peakX) * 0.48;
+      const shoulderY = peakY + (rightY - peakY) * (0.22 + random() * 0.16);
+      polygon(body, [left, leftY, peakX, peakY, shoulderX, shoulderY,
+        right, rightY, right, 256, left, 256]);
       // Upper-left is sunward, matching all the generated rider/obstacle art.
       polygon(lit, [left, leftY, peakX, peakY, peakX - step * 0.16, 205, left, 256]);
-      polygon(shadow, [peakX, peakY, right, rightY, right, 256, fold, 230]);
-      const snowY = peakY + 30 + random() * 25;
+      polygon(shadow, [peakX, peakY, shoulderX, shoulderY, right, rightY, right, 256, fold, 230]);
+      const snowY = peakY + Math.min(28 + random() * 29, (Math.min(leftY, rightY) - peakY) * 0.62);
       const leftSnowX = peakX + (left - peakX) * (snowY - peakY) / (leftY - peakY);
       const rightSnowX = peakX + (right - peakX) * (snowY - peakY) / (rightY - peakY);
       polygon(cap, [peakX, peakY, leftSnowX, snowY,
@@ -95,15 +104,21 @@ function generateSkyDetails(scene: Phaser.Scene): void {
   ctx.beginPath();
   ctx.arc(x, y, 17, 0, Math.PI * 2);
   ctx.fill();
-  // Thin, stepped high cloud, quiet enough to leave the HUD and peaks clear.
+  // Thin high cloud has a soft, wind-stretched silhouette. Its deliberately
+  // quiet contrast leaves the HUD and mountain silhouettes uncluttered.
   ctx.fillStyle = css(SKY.cloud);
   ctx.globalAlpha = 0.16;
   const clouds = [[54, 155, 108], [372, 83, 122], [695, 119, 160], [828, 64, 98]];
   for (const [cx, cy, width] of clouds) {
-    ctx.fillRect(cx, cy, width, 4);
-    ctx.fillRect(cx + width * 0.15, cy - 4, width * 0.66, 4);
-    ctx.fillRect(cx + width * 0.28, cy - 7, width * 0.32, 3);
-    ctx.fillRect(cx + width * 0.35, cy + 4, width * 0.92, 2);
+    ctx.beginPath();
+    ctx.moveTo(cx - width * 0.25, cy + 4);
+    ctx.bezierCurveTo(cx + width * 0.12, cy + 2, cx + width * 0.2, cy - 11,
+      cx + width * 0.46, cy - 7);
+    ctx.bezierCurveTo(cx + width * 0.72, cy - 12, cx + width * 0.76, cy + 2,
+      cx + width * 1.35, cy + 4);
+    ctx.bezierCurveTo(cx + width * 0.78, cy + 8, cx + width * 0.1, cy + 10,
+      cx - width * 0.25, cy + 4);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
   texture.refresh();
