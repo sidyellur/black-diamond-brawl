@@ -103,15 +103,34 @@ final class GameUITests: XCTestCase {
     /// Application-scoped screenshots can be cropped in the wrong coordinate
     /// space after a landscape transition. Capture the actual screen, then let
     /// UIKit apply its imageOrientation before pixel sampling/portable export.
-    private func screenImage() -> UIImage {
+    private func screenImage(_ capturedState: [String: Any]? = nil) -> UIImage {
         let source = XCUIScreen.main.screenshot().image
-        print("SCREENSHOT size=\(source.size) scale=\(source.scale) orientation=\(source.imageOrientation.rawValue)")
+        let state = capturedState ?? snapshot()
         let format = UIGraphicsImageRendererFormat()
         format.scale = source.scale
         format.opaque = true
-        return UIGraphicsImageRenderer(size: source.size, format: format).image { _ in
+        let normalized = UIGraphicsImageRenderer(size: source.size, format: format).image { _ in
             source.draw(in: CGRect(origin: .zero, size: source.size))
         }
+        // Some simulator versions expose the physical portrait framebuffer
+        // without EXIF rotation. Use the independently observed scene's actual
+        // interface orientation, never a content threshold, for this fallback.
+        let landscape = number(state, "nativeWidth") > number(state, "nativeHeight")
+        let orientation = state["orientation"] as? String
+        if normalized.size.width < normalized.size.height && landscape,
+           orientation == "left" || orientation == "right" {
+            let size = CGSize(width: normalized.size.height, height: normalized.size.width)
+            let angle: CGFloat = orientation == "right" ? -.pi / 2 : .pi / 2
+            print("SCREENSHOT physical-framebuffer fallback native=\(orientation!) angle=\(angle)")
+            return UIGraphicsImageRenderer(size: size, format: format).image { renderer in
+                renderer.cgContext.translateBy(x: size.width / 2, y: size.height / 2)
+                renderer.cgContext.rotate(by: angle)
+                normalized.draw(in: CGRect(x: -normalized.size.width / 2, y: -normalized.size.height / 2,
+                    width: normalized.size.width, height: normalized.size.height))
+            }
+        }
+        print("SCREENSHOT metadata-normalized size=\(normalized.size) sourceOrientation=\(source.imageOrientation.rawValue)")
+        return normalized
     }
 
     private func screenshotPNG() throws -> Data {
@@ -120,7 +139,7 @@ final class GameUITests: XCTestCase {
 
     private func assertRenderedCanvas(_ state: [String: Any]) throws {
         let canvas = try XCTUnwrap(state["canvas"] as? [String: Any])
-        let cgImage = try XCTUnwrap(screenImage().cgImage)
+        let cgImage = try XCTUnwrap(screenImage(state).cgImage)
         let width = cgImage.width, height = cgImage.height
         XCTAssertGreaterThan(width, height, "Screenshot must show the full landscape display")
         XCTAssertEqual(Double(width) / Double(height),

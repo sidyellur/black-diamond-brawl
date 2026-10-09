@@ -169,7 +169,7 @@ release_ready=0
 release_deadline=$((SECONDS + 120))
 while [[ "$SECONDS" -lt "$release_deadline" ]]; do
   xcrun simctl io "$SIMULATOR_ID" screenshot "$OUT/release-launched.png" >/dev/null 2>&1
-  if "$OUT/check-ios-screenshot" "$OUT/release-launched.png" > "$OUT/release-rendering.txt" 2>&1; then
+  if "$OUT/check-ios-screenshot" "$OUT/release-launched.png" "$OUT/release-landscape.png" > "$OUT/release-rendering.txt" 2>&1; then
     release_ready=1
     break
   fi
