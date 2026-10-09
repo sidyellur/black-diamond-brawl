@@ -8,7 +8,9 @@ Preserve the Road Rash-on-snowboards identity while improving graphics, controls
 
 - Feature PR: [#20](https://github.com/sidyellur/black-diamond-brawl/pull/20).
 - Latest publication/merge status and artifact links: [release issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21). This is updated after merge and main verification, rather than predicting a future merge inside a pre-merge commit.
-- Latest published gameplay source: `4992c13d18ec6eaf29d67a01dd0debc1d52f1552`. Build/model/WebGL smoke, desktop flows, repeated phone rotation and quick-tap checks pass; remaining multitouch/Canvas acceptance is pending the test-clock correction below. The linked release issue records the final exact verified head.
+- Verified gameplay/test snapshot: `98f7790295d59fc1f0c19ba7fecd15b31ef2b5a5`. The [complete CI gate passed](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37911573878): all model/asset checks, 13 WebGL smoke checks and 49 browser acceptance checks. The final report-only revision is verified again before merge; issue #21 records the exact merged SHA and main result.
+- Independent actual-screenshot acceptance: desktop/title/race/crest/pause/results/finish, portrait and correctly fitted landscape all passed.
+- Download this verified snapshot: [production build](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37911573878/artifacts/11607027626), [screenshots and reports](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37911573878/artifacts/11606863387). Final main artifacts are linked in issue #21.
 - Hosting: no public site, Pages configuration, deployment workflow or existing homepage was found. No new hosting, account, billing or security settings were introduced.
 
 ## What changed
@@ -28,7 +30,7 @@ For the complete local test gate, install Chromium once with `npx playwright ins
 ## Remaining limits
 
 - Real browser checks use CI Chromium and real dispatched keyboard/touch events with emulated mobile viewports. Physical iPhone/Safari and hardware GPU performance have not been verified.
-- The software WebGL runner renders around 6 FPS. Long physics frames are deliberately capped to avoid collision tunneling, so very slow devices can run below real time. Canvas fallback is available; do not interpret software-runner timings as a device benchmark.
+- Software WebGL race snapshots ranged around 6–10 FPS; Canvas retry samples were about 14–22 FPS on the CI runner. Long physics frames are deliberately capped to avoid collision tunneling, so very slow devices can run below real time. Canvas fallback is available; do not interpret software-runner timings as a device benchmark.
 - Local records have no cloud sync. Sequential stale tabs merge safely; truly simultaneous cross-process localStorage writes are not transactional.
 - Rivals still suffer real race-ending crashes and are never resurrected. A depleted pack can leave a quieter late race.
 - Full-course completion measurements use a deterministic legal-input model driver. Browser finish/curve/crest views use clearly labeled position fixtures; they are not claimed as human full-course playthroughs.
@@ -158,3 +160,12 @@ The entries below preserve the actual progression, including failed runs and the
 - The quick-touch trace confirms the formerly lost tap was consumed 180.3 ms after touchstart, beyond the old 160 ms window. The viewport now fits at 693.33×390 in an 844×390 landscape viewport. Independent actual landscape review **passes**; desktop/title/race/crest/pause/results/finish/mobile visual acceptance is complete.
 - The run then **failed** a drag-release test using 500 ms + 400 ms wall-clock sleeps. Recorded events prove the left control released correctly, made exactly one legitimate lane tween from 3 to 2, and stayed there. The first sample preceded that tween's completion on the slow software renderer; this was a test-clock mismatch, not stuck input.
 - Changed that check to simulation-time settling and stability windows, plus an explicit one-lane movement assertion. Product code is unchanged for this correction. Remaining multitouch, held-touch pause/reuse, Canvas and ten-retry resource checks must still pass before merge.
+
+### 2026-10-09 09:36 UTC / 02:36 PDT — complete release acceptance passed
+
+- [Run 37911573878](https://github.com/sidyellur/black-diamond-brawl/actions/runs/37911573878) on exact head `98f7790295d59fc1f0c19ba7fecd15b31ef2b5a5` **passed the complete gate**. All dependency installation, production build, model/asset tests, browser suites and both artifact uploads succeeded.
+- **13 WebGL smoke checks and 49 browser acceptance checks passed**, with zero console or uncaught browser errors. Coverage includes keyboard/touch taps and holds, attack effects, countdown, rapid-key queue replay, immediate/focus Resume, strict frozen time/position, successful finish, same/new mountain replay, records reload, repeated rotation, real touch cancellation, simultaneous two-finger steer/jump, held-touch pause/reuse, and Canvas fallback.
+- Ten Canvas retries retained exactly **2 cameras, 44 textures, 60 display objects, 1 pointer, 2 keydown / 1 keyup / 4 blur listeners** at every sampled restart. No growth or resource leak was observed in this test.
+- Final recorded title first-render time was 1,747 ms; the final WebGL racing snapshot was 9.81 FPS. Canvas retry samples were 14.30–18.64 FPS (initial sample 21.98). These are software-rendered CI observations, not physical device benchmarks.
+- Source and visual reviews have no outstanding release blockers. This final update changes documentation only. The exact documentation head will pass the same gate before the authorized merge; main will then be verified, and [issue #21](https://github.com/sidyellur/black-diamond-brawl/issues/21) will hold the final merge SHA, main checks and build/screenshot links before closure.
+- No live hosting exists or was created. Physical iPhone/Safari testing, hardware-GPU performance and a human full-course playthrough remain **not run**; the limits above are preserved rather than presented as passed.
