@@ -15,7 +15,7 @@ page.setDefaultTimeout(60000);
 page.on('pageerror', error => errors.push(String(error)));
 const check = (name, value) => { assert.ok(value, name); checks.push(name); console.log(`PASS ${name}`); };
 const scene = key => page.waitForFunction(k => window.__game?.scene.isActive(k), key);
-const ready = () => page.waitForFunction(() => { const s = window.__game.scene.getScene('RaceScene'); return s.countdownMs === 0 && !s.paused; });
+const ready = () => page.waitForFunction(() => { const s = window.__game.scene.getScene('RaceScene'); return window.__game.scene.isActive('RaceScene') && s.countdownMs === 0 && s.elapsedRaceMs > 0 && !s.paused; });
 const shot = name => page.screenshot({ path: `.verify/expansion-${name}.png` });
 const tap = async (x,y) => { const b = await page.locator('canvas').boundingBox(); await page.mouse.click(b.x+x*b.width/960,b.y+y*b.height/540); };
 try {
@@ -80,11 +80,28 @@ try {
   check('same-mountain retry loads its ghost without another racer/collider', await page.evaluate(() => {const s=window.__game.scene.getScene('RaceScene');return !!s.ghost && s.aiRiders.length===4 && s.aiCollisions.length===4;}));
   // A real different steering choice separates the live rider from the ghost,
   // rather than relocating either sprite for the visual assertion.
-  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(350);
-  check('personal ghost is a rendered translucent rider', await page.evaluate(() => {
-    const s=window.__game.scene.getScene('RaceScene');
-    return s.ghostSprite.visible && s.ghostSprite.alpha>0 && s.ghostSprite.alpha<1 && Math.abs(s.ghostSprite.x-s.playerSprite.x)>5;
-  }));
+  await page.evaluate(() => {
+    const s=window.__game.scene.getScene('RaceScene'); window.__ghostFrame=null;
+    const observe=()=>{
+      if (s.elapsedRaceMs<=0 || s.player.laneIndex!==3 || s.player.leanDirection!==0 ||
+          !s.ghostSprite.visible || s.ghostSprite.alpha<=0 || s.ghostSprite.alpha>=1 ||
+          Math.abs(s.ghostSprite.x-s.playerSprite.x)<=5) return;
+      window.__ghostFrame={elapsedMs:s.elapsedRaceMs,lane:s.player.laneIndex,
+        ghostX:s.ghostSprite.x,playerX:s.playerSprite.x,alpha:s.ghostSprite.alpha};
+      s.events.off('postupdate',observe);
+      // Hold only after a genuine rendered frame. A slow software GPU may
+      // take longer than 350ms to produce even one gameplay tick; wall time
+      // cannot prove that the real input or lane animation has happened.
+      s.paused=true;
+    };
+    s.events.on('postupdate',observe);
+  });
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(()=>window.__ghostFrame!==null);
+  const ghostFrame=await page.evaluate(()=>window.__ghostFrame);
+  writeFileSync('.verify/expansion-ghost-frame.json',JSON.stringify(ghostFrame,null,2));
+  check('personal ghost is a rendered translucent rider after a real completed lane shift',
+    ghostFrame.elapsedMs>0 && ghostFrame.lane===3 && Math.abs(ghostFrame.ghostX-ghostFrame.playerX)>5 && ghostFrame.alpha>0 && ghostFrame.alpha<1);
   await shot('ghost-replay');
   const replay = await page.evaluate(naturalRaceDriver, { stopAtCheckpoint: 0 });
   writeFileSync('.verify/expansion-natural-replay.json', JSON.stringify(replay, null, 2));
@@ -136,7 +153,7 @@ try {
   await shot('natural-cup-podium');
   check('expanded gameplay has no uncaught browser errors',errors.length===0);
 } catch(error){
-  const state=await page.evaluate(()=>{const s=window.__game?.scene.getScene('RaceScene');return s ? {practiceLesson:s.practiceLesson,objective:s.practiceObjective,elapsed:s.elapsedRaceMs,feedback:s.practiceFeedback,counterReady:s.combat?.counterReady,counterCount:s.counterCount,trace:window.__practiceTrace,paused:s.paused,player:{lane:s.player?.laneIndex,airborne:s.player?.airborne,swing:s.player?.swingMsRemaining},riders:s.aiRiders?.map(r=>({z:r.worldZ,phase:r.attackPhase,progress:r.attackProgress}))} : null;}).catch(()=>null);
+  const state=await page.evaluate(()=>{const s=window.__game?.scene.getScene('RaceScene');return s ? {practiceLesson:s.practiceLesson,objective:s.practiceObjective,elapsed:s.elapsedRaceMs,feedback:s.practiceFeedback,counterReady:s.combat?.counterReady,counterCount:s.counterCount,countdownMs:s.countdownMs,ghostVisible:s.ghostSprite?.visible,ghostAlpha:s.ghostSprite?.alpha,ghostX:s.ghostSprite?.x,playerX:s.playerSprite?.x,trace:window.__practiceTrace,paused:s.paused,player:{lane:s.player?.laneIndex,airborne:s.player?.airborne,swing:s.player?.swingMsRemaining},riders:s.aiRiders?.map(r=>({z:r.worldZ,phase:r.attackPhase,progress:r.attackProgress}))} : null;}).catch(()=>null);
   writeFileSync('.verify/expansion-failure-state.json',JSON.stringify(state,null,2));
   await shot(`failure-${phase.replaceAll(' ','-')}`).catch(()=>{});throw error;}
 finally{writeFileSync('.verify/expansion-report.json',JSON.stringify({phase,checks,errors},null,2));await browser.close();}
