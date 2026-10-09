@@ -7,8 +7,15 @@ import { projectEntity } from '../src/render/projectEntity';
 import { SEGMENT_LENGTH } from '../src/config';
 
 let calls = 0;
-const graphics: any = new Proxy({}, { get: (_target, key) => key === 'clear' ? () => { calls = 0; } : (...args: unknown[]) => {
+let fillAlpha = 1;
+const filledRectangles: { y: number; height: number; alpha: number }[] = [];
+const graphics: any = new Proxy({}, { get: (_target, key) => key === 'clear' ? () => {
+  calls = 0;
+  filledRectangles.length = 0;
+} : (...args: unknown[]) => {
   for (const arg of args) if (typeof arg === 'number') assert.ok(Number.isFinite(arg), `${String(key)} received ${arg}`);
+  if (key === 'fillStyle') fillAlpha = args[1] === undefined ? 1 : args[1] as number;
+  if (key === 'fillRect') filledRectangles.push({ y: args[1] as number, height: args[3] as number, alpha: fillAlpha });
   calls++;
   return graphics;
 }});
@@ -39,6 +46,24 @@ for (const curve of [-200000, -1, 0, 1, 200000]) {
   assert.equal(sky.displayObjects.length, 6);
 }
 console.log('PASS sky: all six objects registered, finite continuous parallax in both curve directions');
+
+// Translucent haze must meet edge-to-edge. The previous one-pixel rectangle
+// bleed blended each boundary twice, leaving scanlines above high crests.
+for (const snowEdge of [-20, 198, 281, 360, 500]) {
+  sky.render(0, 0, snowEdge);
+  assert.equal(filledRectangles.length, 32, 'fine haze gradient subdivision');
+  assert.ok(Math.abs(filledRectangles[0].y - Math.min(540 * 0.62 - 10, snowEdge - 30)) < 1e-9);
+  const last = filledRectangles[filledRectangles.length - 1];
+  assert.ok(Math.abs(last.y + last.height - (snowEdge + 2)) < 1e-9, 'haze reaches the snow edge');
+  filledRectangles.forEach((rect, i) => {
+    assert.ok(rect.height > 0 && rect.alpha >= 0 && rect.alpha <= 1);
+    if (i === 0) return;
+    const previous = filledRectangles[i - 1];
+    assert.ok(Math.abs(previous.y + previous.height - rect.y) < 1e-9, 'no haze overlaps or gaps');
+    assert.ok(rect.alpha > previous.alpha && rect.alpha - previous.alpha < 0.06, 'smooth monotonic haze opacity');
+  });
+}
+console.log('PASS haze: 32 contiguous strips, no double-alpha seams, smooth opacity at five snow edges including high crests');
 
 function testJuice(hz: number) {
   let powder = 0;

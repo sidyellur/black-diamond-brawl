@@ -5,6 +5,7 @@ import type Phaser from 'phaser';
 import { ATTACK_SWING_MS, JUMP_AIRTIME_MS, LANE_TWEEN_MS, PLAYER_START_Z, ROCK_TUMBLE_MS } from '../src/config';
 import { ACTION_BUFFER_MS, bindPlayerInput, PlayerInputController, STEER_REPEAT_DELAY_MS, STEER_REPEAT_MS } from '../src/entities/input';
 import { Player } from '../src/entities/player';
+import { oncePerKeyEvent } from '../src/input/keyboardEvents';
 
 let checks = 0;
 function check(name: string, run: () => void): void {
@@ -349,6 +350,42 @@ check('a release during a real scene pause is observed outside Phaser', () => {
     if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow);
     else Reflect.deleteProperty(globalThis, 'window');
   }
+});
+check('revisited DOM queue cannot toggle a lifecycle action twice', () => {
+  let paused = false;
+  const pause = oncePerKeyEvent(() => { paused = !paused; });
+  const press = { code: 'KeyP', type: 'keydown' } as KeyboardEvent;
+  pause(press);
+  pause(press); // Same Pdown replayed after Pup and an unrelated ArrowLeft.
+  assert.equal(paused, true);
+  pause({ code: 'KeyP', type: 'keydown' } as KeyboardEvent);
+  assert.equal(paused, false); // A genuinely new press still resumes.
+});
+check('replayed down/up pairs cannot resurrect released steering or attack', () => {
+  const keyboard = Object.assign(new EventEmitter(), {
+    addKey: (name: string) => ({ name }), removeKey: () => undefined, removeCapture: () => undefined
+  });
+  const events = new EventEmitter();
+  const scene = { input: { keyboard }, events, game: { events: new EventEmitter() } } as unknown as Phaser.Scene;
+  const player = new Player();
+  const input = bindPlayerInput(scene, player);
+  const down = { code: 'KeyD', repeat: false };
+  const up = { code: 'KeyD' };
+  const hit = { code: 'KeyF', repeat: false };
+  const hitUp = { code: 'KeyF' };
+  keyboard.emit('keydown', down); keyboard.emit('keyup', up);
+  keyboard.emit('keydown', hit); keyboard.emit('keyup', hitUp);
+  input.update(16);
+  assert.equal(input.attackJustPressed(), true);
+  player.update(LANE_TWEEN_MS);
+  assert.equal(player.laneIndex, 3);
+  // A slow render frame allows Phaser to deliver the very same event objects again.
+  keyboard.emit('keydown', down); keyboard.emit('keyup', up);
+  keyboard.emit('keydown', hit); keyboard.emit('keyup', hitUp);
+  input.update(16); player.update(LANE_TWEEN_MS);
+  assert.equal(player.laneIndex, 3);
+  assert.equal(input.attackJustPressed(), false);
+  events.emit('shutdown');
 });
 check('touch-only scenes work with no keyboard plugin', () => {
   const events = new EventEmitter();

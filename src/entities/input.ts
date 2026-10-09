@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import { Player } from './player';
+import { oncePerKeyEvent } from '../input/keyboardEvents';
 
 export type PlayerAction = 'left' | 'right' | 'jump' | 'attack';
 /** Concise alias for UI bindings. */
@@ -186,14 +187,14 @@ export function bindPlayerInput(
   const controller = new PlayerInputController(player, onJump);
   const keyboard = scene.input.keyboard;
   const keys = keyboard ? KEY_NAMES.map((code) => keyboard.addKey(code, true, false)) : [];
-  const down = (event: KeyboardEvent): void => {
+  const down = oncePerKeyEvent((event): void => {
     const action = KEY_ACTIONS[event.code];
     if (action && !event.repeat) controller.setAction(action, true, event.code);
-  };
-  const up = (event: KeyboardEvent): void => {
+  });
+  const up = oncePerKeyEvent((event): void => {
     const action = KEY_ACTIONS[event.code];
     if (action) controller.setAction(action, false, event.code);
-  };
+  });
   const suspend = (): void => controller.setEnabled(false);
   const visibility = (): void => controller.setFocused(!document.hidden);
   const focus = (): void => controller.setFocused(true);

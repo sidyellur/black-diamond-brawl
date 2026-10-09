@@ -12,6 +12,10 @@ older v1-only restrictions elsewhere in this historical design document:
 - A 1.8-second countdown, explicit pause, automatic focus-loss pause, and retry/menu
   flows are available. Race time excludes countdown and pauses; hit-stop remains part
   of elapsed race time. A simulation frame is bounded to 50 ms to prevent tunneling.
+- Separated rivals may chase the pack after a six-segment deficit, using the existing
+  105% speed ceiling and normal acceleration. Assistance ends before combat range,
+  never revives a wiped-out rider, and respects four seconds of setback grace after
+  hits/rocks/moguls. Nearby riders retain their own speed advantages.
 - Clean events build Flow for 4.2 seconds. Events 5–8 earn +25%; event 9 onward earns
   +50%. Damage or expiry breaks Flow. The bonus is a separate scorecard category.
 - Personal best and up to 64 recent mountain records persist locally, with safe memory

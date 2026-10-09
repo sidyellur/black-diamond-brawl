@@ -298,6 +298,9 @@ async function run() {
         sc.player._laneIndex = lane;
         sc.player.tween = null;
         sc.prevWorldZ = z;
+        // The camera teleport is not traversal. Keep the scorer's crossing
+        // cursor aligned so skipped obstacles do not manufacture flow rewards.
+        sc.scoreTracker.previousPlayerZ = z;
         sc.playerInput.reset();
         return {
           label: view, seed: sc.seed, segment: segment.index, z, lane,

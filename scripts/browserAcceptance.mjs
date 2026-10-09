@@ -146,6 +146,38 @@ try {
   check('W jumps once without repeating while held', (await state()).airborne, false);
   await page.keyboard.up('KeyW');
 
+  phase = 'same-frame keyboard queue replay';
+  // Dispatch distinct DOM events synchronously, so no Phaser postUpdate can
+  // clear its queue between them. This deterministically reproduces a real
+  // rapid-input failure that native presses first exposed on the slow runner.
+  const queueTrace = await page.evaluate(() => {
+    const sc = window.__game.scene.getScene('RaceScene');
+    const trace = [];
+    for (const [type, code, key, keyCode] of [
+      ['keydown', 'KeyP', 'p', 80],
+      ['keyup', 'KeyP', 'p', 80],
+      ['keydown', 'ArrowLeft', 'ArrowLeft', 37]
+    ]) {
+      window.dispatchEvent(new KeyboardEvent(type, { code, key, keyCode, which: keyCode, bubbles: true }));
+      trace.push({ type, code, paused: sc.paused, elapsed: sc.elapsedRaceMs, z: sc.player.worldZ });
+    }
+    return trace;
+  });
+  writeFileSync(`${OUT}/keyboard-queue-trace.json`, JSON.stringify(queueTrace, null, 2));
+  check('a second key in the same DOM turn cannot replay the pause toggle', queueTrace.every((sample) => sample.paused));
+  const sameFramePause = await state();
+  await page.waitForTimeout(300);
+  const sameFrameLater = await state();
+  check('same-frame pause sequence freezes the simulation', [sameFrameLater.elapsed, sameFrameLater.z], [sameFramePause.elapsed, sameFramePause.z]);
+  await page.evaluate(() => {
+    for (const [type, code, key, keyCode] of [
+      ['keyup', 'ArrowLeft', 'ArrowLeft', 37],
+      ['keydown', 'Escape', 'Escape', 27],
+      ['keyup', 'Escape', 'Escape', 27]
+    ]) window.dispatchEvent(new KeyboardEvent(type, { code, key, keyCode, which: keyCode, bubbles: true }));
+  });
+  await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
+
   phase = 'pause and focus interruption';
   await page.keyboard.press('KeyP');
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
@@ -153,6 +185,7 @@ try {
   await page.keyboard.down('ArrowLeft');
   await page.waitForTimeout(350);
   const stillPaused = await state();
+  writeFileSync(`${OUT}/pause-state.json`, JSON.stringify({ before: paused, after: stillPaused }, null, 2));
   check('pause freezes race time and rider position', [stillPaused.elapsed, stillPaused.z], [paused.elapsed, paused.z]);
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01);
   check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01));

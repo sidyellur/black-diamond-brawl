@@ -38,6 +38,7 @@ import { FinishBanner } from '../track/finishBanner';
 import { generateTrack } from '../track/generator';
 import { resolveSeed } from '../track/seed';
 import { Segment } from '../track/segment';
+import { oncePerKeyEvent } from '../input/keyboardEvents';
 
 // The player is now PROJECTED like every other entity rather than pinned to a
 // fixed screen position. Because the camera trails by exactly CAMERA_BACK_Z,
@@ -250,9 +251,9 @@ export class RaceScene extends Phaser.Scene {
 
   private bindRaceLifecycle(): void {
     const keyboard = this.input.keyboard;
-    const pause = () => this.setPaused(!this.paused);
-    const restart = () => { if (this.paused) this.scene.restart({ seed: this.seed }); };
-    const mute = () => this.hud.setMuted(this.audio.toggle());
+    const pause = oncePerKeyEvent(event => { if (!event.repeat) this.setPaused(!this.paused); });
+    const restart = oncePerKeyEvent(event => { if (!event.repeat && this.paused) this.scene.restart({ seed: this.seed }); });
+    const mute = oncePerKeyEvent(event => { if (!event.repeat) this.hud.setMuted(this.audio.toggle()); });
     const blur = () => this.setPaused(true);
     const unlock = () => this.audio.unlock();
     const lifecycleKeys = keyboard?.addKeys('P,ESC,R,M') as Record<string, Phaser.Input.Keyboard.Key> | undefined;

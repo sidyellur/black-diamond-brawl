@@ -61,6 +61,7 @@ try {
   await step('illustrated asset integrity', () => run('npm', ['run', 'verify:art']));
   await step('rendering geometry', () => run('npm', ['run', 'verify:rendering']));
   await step('combat logic', () => run('npm', ['run', 'verify:combat']));
+  await step('rival pack pacing', () => run('npm', ['run', 'verify:pacing']));
   await step('scoring and flow', () => run('npm', ['run', 'verify:scoring']));
   await step('responsive controls', () => run('npm', ['run', 'verify:controls']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));

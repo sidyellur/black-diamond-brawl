@@ -32,6 +32,10 @@ const BETA = { r: 0.046, g: 0.109, b: 0.265 } as const;
  *  band always has gradient underneath it however the terrain moves. */
 const HORIZON_FRACTION = 0.62;
 
+/** Fine enough for a smooth 30px transition, while keeping a single Graphics
+ * object and avoiding runtime texture uploads or per-frame colour math. */
+const HAZE_STRIPS = 32;
+
 /**
  * Builds the sky gradient texture. Called once from `BootScene`; no-ops if it
  * already exists, matching the convention the sprite generators use.
@@ -100,8 +104,8 @@ export class SkyRenderer {
   private readonly details: Phaser.GameObjects.Image;
   private readonly mountains: Phaser.GameObjects.TileSprite[] = [];
   private readonly graphics: Phaser.GameObjects.Graphics;
-  private readonly hazeColors = Array.from({ length: 7 }, (_, i) =>
-    mix(HORIZON_FOG_COLOR, SKY.murk, i / 14));
+  private readonly hazeColors = Array.from({ length: HAZE_STRIPS }, (_, i) =>
+    mix(HORIZON_FOG_COLOR, SKY.murk, (i + 0.5) / (HAZE_STRIPS * 2)));
 
   constructor(scene: Phaser.Scene) {
     generateMountainTextures(scene);
@@ -157,15 +161,17 @@ export class SkyRenderer {
     const bandBottom = Math.max(topScreenY + 2, bandTop + 2);
 
     // Haze builds toward the measured snow edge, including flat ground where
-    // that edge is ABOVE the nominal backdrop horizon. A faint upper strip
-    // avoids replacing the snow seam with another hard line through the peaks.
-    const strips = 7;
-    for (let i = 0; i < strips; i++) {
-      const t0 = i / strips;
+    // that edge is ABOVE the nominal backdrop horizon. Sample each narrow
+    // strip at its midpoint. These translucent rectangles must not overlap:
+    // the old +1px bleed composited the haze twice at every boundary and drew
+    // bright horizontal scanlines, especially visible at high crests.
+    for (let i = 0; i < HAZE_STRIPS; i++) {
+      const t0 = i / HAZE_STRIPS;
+      const midpoint = (i + 0.5) / HAZE_STRIPS;
       const y0 = bandTop + (bandBottom - bandTop) * t0;
-      const y1 = bandTop + (bandBottom - bandTop) * ((i + 1) / strips);
-      this.graphics.fillStyle(this.hazeColors[i], 0.035 + t0 * t0 * 0.96);
-      this.graphics.fillRect(-64, y0, SCREEN_W + 128, y1 - y0 + 1);
+      const y1 = bandTop + (bandBottom - bandTop) * ((i + 1) / HAZE_STRIPS);
+      this.graphics.fillStyle(this.hazeColors[i], 0.035 + midpoint * midpoint * 0.96);
+      this.graphics.fillRect(-64, y0, SCREEN_W + 128, y1 - y0);
     }
   }
 }

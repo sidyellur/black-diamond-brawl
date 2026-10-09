@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { UI } from '../render/palette';
+import { oncePerKeyEvent } from '../input/keyboardEvents';
 
 export const hex = (value: number): string => `#${value.toString(16).padStart(6, '0')}`;
 export const FONT = 'Arial, Helvetica, sans-serif';
@@ -71,9 +72,9 @@ export function menuButton(
 export function menuKeys(scene: Phaser.Scene, callback: (code: string) => void): void {
   const keyboard = scene.input.keyboard;
   if (!keyboard) return;
-  const listener = (event: KeyboardEvent): void => {
+  const listener = oncePerKeyEvent((event): void => {
     if (!event.repeat) callback(event.code);
-  };
+  });
   keyboard.on('keydown', listener);
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => keyboard.off('keydown', listener));
 }

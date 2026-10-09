@@ -53,9 +53,10 @@ rival still body-checks them, for a fifth of the points.
 ## Development
 
 ```bash
-npm install
+npm ci             # Node 22 is the CI-tested runtime
 npm run dev        # play at http://localhost:5173
 npm run dev        # then open /?spritelab=1 for the sprite contact sheet
+npx playwright install chromium  # once, before browser verification
 npm run verify     # build + models + storage + browser/controls/replay/touch acceptance
 npm run lab        # render the sprite sheet headless and check outline contrast
 
@@ -78,6 +79,10 @@ reports, and the production `dist` build are uploaded as workflow artifacts.
 
 For the implementation history, resolved issues, test evidence, and remaining
 limitations, see [the overnight report](docs/OVERNIGHT_REPORT.md).
+
+If WebGL is unavailable, the game falls back to Canvas. You can also request it
+explicitly with `?renderer=canvas`. Very slow devices may run the simulation below
+real time because long frames are capped for collision safety.
 
 No public hosting deployment is configured in this repository. To play locally, use
 `npm run dev`. To serve an existing production build, use `npm run preview` or
