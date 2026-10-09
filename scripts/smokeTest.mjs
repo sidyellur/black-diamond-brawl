@@ -47,192 +47,313 @@ const lStar = (rgb) => {
 };
 const deltaL = (a, b) => Math.abs(lStar(a) - lStar(b));
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--no-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader']
-});
-const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+let browser;
+let page;
+const consoleMessages = [];
+const runtimeSnapshots = [];
 
-const consoleErrors = [];
-page.on('console', (m) => {
-  if (m.type() === 'error') consoleErrors.push(m.text());
-});
-page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR: ${e.message}`));
-
-await page.goto(URL, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1500);
-
-// The game canvas must exist and have non-zero size.
-const canvasBox = await page.evaluate(() => {
-  const c = document.querySelector('canvas');
-  return c ? { w: c.width, h: c.height } : null;
-});
-check('canvas present', !!canvasBox && canvasBox.w > 0, canvasBox ? `${canvasBox.w}x${canvasBox.h}` : 'no canvas');
-
-// Confirm we are on WebGL, not the Canvas fallback — postFX is WebGL-only.
-const rendererType = await page.evaluate(() => {
-  const c = document.querySelector('canvas');
-  if (!c) return 'none';
-  return c.getContext('webgl2') || c.getContext('webgl') ? 'webgl' : 'canvas';
-});
-check('WebGL renderer active', rendererType === 'webgl', rendererType);
-
-await page.screenshot({ path: `${OUT}/01-title.png` });
-
-// Enter the race.
-await page.keyboard.press('Space');
-await page.waitForTimeout(2500);
-await page.screenshot({ path: `${OUT}/02-race-early.png` });
-
-await page.waitForTimeout(4000);
-await page.screenshot({ path: `${OUT}/03-race-mid.png` });
-
-/**
- * Samples a screenshot PNG by decoding it inside the browser (drawImage into a
- * 2D canvas + getImageData). Reading the WebGL backbuffer directly with
- * `readPixels` does NOT work here — Phaser leaves `preserveDrawingBuffer`
- * false, so the buffer is undefined once the frame has been composited. The
- * screenshot is also the more faithful thing to assert on: it's what a player
- * actually sees, post-composite.
- */
-async function samplePng(pngBuffer) {
-  const b64 = pngBuffer.toString('base64');
-  return page.evaluate(async (dataUrl) => {
-    const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
-    const cv = new OffscreenCanvas(bmp.width, bmp.height);
-    const ctx = cv.getContext('2d');
-    ctx.drawImage(bmp, 0, 0);
-    const { data, width: w, height: h } = ctx.getImageData(0, 0, bmp.width, bmp.height);
-    const at = (x, y) => {
-      const i = (y * w + x) * 4;
-      return [data[i], data[i + 1], data[i + 2]];
-    };
-    const rowMean = (y) => {
-      let r = 0, g = 0, b = 0;
-      let n = 0;
-      for (let x = 0; x < w; x += 4) {
-        const p = at(x, y);
-        r += p[0]; g += p[1]; b += p[2]; n++;
-      }
-      return [r / n, g / n, b / n];
-    };
-    // Widest run of distinct row-mean values = evidence the frame has structure.
+async function recordRuntime(label) {
+  if (!page || page.isClosed()) return;
+  const runtime = await page.evaluate(() => {
+    const game = window.__game;
+    const sc = game?.scene.getScene('RaceScene');
+    const gl = game?.renderer.gl;
+    const extension = gl?.getExtension('WEBGL_debug_renderer_info');
     return {
-      w, h,
-      skyBand: rowMean(Math.floor(h * 0.15)),
-      horizonBand: rowMean(Math.floor(h * 0.5)),
-      nearRoad: rowMean(Math.floor(h * 0.88)),
-      center: at(Math.floor(w / 2), Math.floor(h * 0.55))
+      activeScenes: game?.scene.getScenes(true).map((s) => s.scene.key),
+      countdownMs: sc?.countdownMs, elapsedRaceMs: sc?.elapsedRaceMs,
+      speed: sc?.player?.speed, paused: sc?.paused,
+      actualFps: game?.loop.actualFps, rawDelta: game?.loop.rawDelta,
+      documentHidden: document.hidden, documentFocused: document.hasFocus(),
+      renderer: extension ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER),
+      vendor: extension ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : gl?.getParameter(gl.VENDOR),
+      sceneObjects: sc?.children?.length,
+      navigationToTitleRenderedMs: window.__qaTitleRenderedMs,
+      navigationObservedMs: performance.now()
     };
-  }, `data:image/png;base64,${b64}`);
+  });
+  runtimeSnapshots.push({ label, at: new Date().toISOString(), ...runtime });
+  console.log(`RUNTIME ${label}: ${JSON.stringify(runtime)}`);
 }
 
-const midShot = await page.screenshot();
-const probe = await samplePng(midShot);
+async function run() {
+  browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+    // Chromium's supported ANGLE + SwiftShader driver path. The old
+    // --use-gl=swiftshader switch is rejected by modern headless Chromium.
+    args: ['--use-gl=angle', '--use-angle=swiftshader']
+  });
+  page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  page.setDefaultTimeout(15000);
+  await page.addInitScript(() => {
+    const attach = () => {
+      const game = window.__game;
+      if (!game?.events) { requestAnimationFrame(attach); return; }
+      const rendered = () => {
+        if (!game.scene.isActive('TitleScene')) return;
+        window.__qaTitleRenderedMs = performance.now();
+        game.events.off('postrender', rendered);
+      };
+      game.events.on('postrender', rendered);
+    };
+    requestAnimationFrame(attach);
+  });
 
-// A blank/solid frame means nothing rendered.
-const skyVsRoad = deltaL(probe.skyBand, probe.nearRoad);
-check('frame is not blank', skyVsRoad > 1.0, `sky↔road ΔL* ${skyVsRoad.toFixed(1)}`);
+  const consoleErrors = [];
+  page.on('console', (m) => {
+    consoleMessages.push({ type: m.type(), text: m.text() });
+    if (m.type() === 'error') consoleErrors.push(m.text());
+  });
+  page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR: ${e.message}`));
 
-// Entity scale sanity. This is the regression test for the projection
-// singularity: rivals used to draw over 1600px wide on a 960px screen, and
-// combat resolved entirely inside that blow-up. Reads real runtime state
-// rather than pixels, via the harness hook in main.ts.
-const scales = await page.evaluate(() => {
-  const g = window.__game;
-  const sc = g && g.scene.getScene('RaceScene');
-  if (!sc || !sc.playerSprite) return null;
-  const riders = (sc.aiRiderRenderer?.pool || []).filter((s) => s.visible).map((s) => s.displayWidth);
-  return { player: sc.playerSprite.displayWidth, riders };
-});
+  const smokeUrl = new globalThis.URL(URL);
+  // This seed contains both a substantial mid-course curve and jumpable crests
+  // for the explicitly labeled position-fixture screenshots below.
+  if (!smokeUrl.searchParams.has('seed')) smokeUrl.searchParams.set('seed', '202');
+  await page.goto(smokeUrl.href, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => window.__game?.scene.isActive('TitleScene'));
+  await recordRuntime('title');
 
-if (scales) {
-  const maxW = Math.max(scales.player, ...(scales.riders.length ? scales.riders : [0]));
-  check('no entity exceeds 42% of screen width', maxW <= 960 * 0.42 + 1, `widest ${maxW.toFixed(0)}px`);
-  check('player is on screen at a sane size', scales.player > 20 && scales.player < 300, `${scales.player.toFixed(0)}px`);
-} else {
-  check('runtime scale probe', false, 'could not read RaceScene state');
+  // The game canvas must exist and have non-zero size.
+  const canvasBox = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    return c ? { w: c.width, h: c.height } : null;
+  });
+  check('canvas present', !!canvasBox && canvasBox.w > 0, canvasBox ? `${canvasBox.w}x${canvasBox.h}` : 'no canvas');
+
+  // Confirm we are on WebGL, not the Canvas fallback — postFX is WebGL-only.
+  const rendererType = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    if (!c) return 'none';
+    return c.getContext('webgl2') || c.getContext('webgl') ? 'webgl' : 'canvas';
+  });
+  check('WebGL renderer active', rendererType === 'webgl', rendererType);
+
+  await page.screenshot({ path: `${OUT}/01-title.png` });
+
+  // Enter the race.
+  await page.keyboard.press('Space');
+  await recordRuntime('drop-in');
+  await page.waitForFunction(() => {
+    const game = window.__game;
+    const scene = game?.scene.getScene('RaceScene');
+    return game?.scene.isActive('RaceScene') && scene?.player?.speed > 0;
+  }, undefined, { timeout: 60000 });
+  await recordRuntime('countdown-complete');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= 1000, undefined, { timeout: 60000 });
+  await page.screenshot({ path: `${OUT}/02-race-early.png` });
+
+  // Assert/capture actual simulated progress, independent of software GPU FPS.
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').elapsedRaceMs >= 5500, undefined, { timeout: 90000 });
+  await page.screenshot({ path: `${OUT}/03-race-mid.png` });
+  await recordRuntime('racing');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.screenshot({ path: `${OUT}/03b-desktop-wide.png` });
+  await page.setViewportSize({ width: 960, height: 540 });
+
+  /**
+   * Samples a screenshot PNG by decoding it inside the browser (drawImage into a
+   * 2D canvas + getImageData). Reading the WebGL backbuffer directly with
+   * `readPixels` does NOT work here — Phaser leaves `preserveDrawingBuffer`
+   * false, so the buffer is undefined once the frame has been composited. The
+   * screenshot is also the more faithful thing to assert on: it's what a player
+   * actually sees, post-composite.
+   */
+  async function samplePng(pngBuffer) {
+    const b64 = pngBuffer.toString('base64');
+    return page.evaluate(async (dataUrl) => {
+      const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+      const cv = new OffscreenCanvas(bmp.width, bmp.height);
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(bmp, 0, 0);
+      const { data, width: w, height: h } = ctx.getImageData(0, 0, bmp.width, bmp.height);
+      const at = (x, y) => {
+        const i = (y * w + x) * 4;
+        return [data[i], data[i + 1], data[i + 2]];
+      };
+      const rowMean = (y) => {
+        let r = 0, g = 0, b = 0;
+        let n = 0;
+        for (let x = 0; x < w; x += 4) {
+          const p = at(x, y);
+          r += p[0]; g += p[1]; b += p[2]; n++;
+        }
+        return [r / n, g / n, b / n];
+      };
+      // Widest run of distinct row-mean values = evidence the frame has structure.
+      return {
+        w, h,
+        skyBand: rowMean(Math.floor(h * 0.15)),
+        horizonBand: rowMean(Math.floor(h * 0.5)),
+        nearRoad: rowMean(Math.floor(h * 0.88)),
+        center: at(Math.floor(w / 2), Math.floor(h * 0.55))
+      };
+    }, `data:image/png;base64,${b64}`);
+  }
+
+  const midShot = await page.screenshot();
+  const probe = await samplePng(midShot);
+
+  // A blank/solid frame means nothing rendered.
+  const skyVsRoad = deltaL(probe.skyBand, probe.nearRoad);
+  check('frame is not blank', skyVsRoad > 1.0, `sky↔road ΔL* ${skyVsRoad.toFixed(1)}`);
+
+  // Entity scale sanity. This is the regression test for the projection
+  // singularity: rivals used to draw over 1600px wide on a 960px screen, and
+  // combat resolved entirely inside that blow-up. Reads real runtime state
+  // rather than pixels, via the harness hook in main.ts.
+  const scales = await page.evaluate(() => {
+    const g = window.__game;
+    const sc = g && g.scene.getScene('RaceScene');
+    if (!sc || !sc.playerSprite) return null;
+    const riders = (sc.aiRiderRenderer?.pool || []).filter((s) => s.visible).map((s) => s.displayWidth);
+    return { player: sc.playerSprite.displayWidth, riders };
+  });
+
+  if (scales) {
+    const maxW = Math.max(scales.player, ...(scales.riders.length ? scales.riders : [0]));
+    check('no entity exceeds 42% of screen width', maxW <= 960 * 0.42 + 1, `widest ${maxW.toFixed(0)}px`);
+    check('player is on screen at a sane size', scales.player > 20 && scales.player < 300, `${scales.player.toFixed(0)}px`);
+  } else {
+    check('runtime scale probe', false, 'could not read RaceScene state');
+  }
+
+  // The attack button, end to end: park a rival in reach, press F, and assert
+  // the game registered a deliberate attack rather than silently doing nothing.
+  const attackResult = await page.evaluate(async () => {
+    const g = window.__game;
+    const sc = g && g.scene.getScene('RaceScene');
+    if (!sc || !sc.combat) return { ok: false, why: 'no scene' };
+    const r = sc.aiRiders[0];
+    // Seat the rival in the ADJACENT lane. Attacks reach 1.2 lanes while body
+    // checks only trigger same-lane, so this is reachable by a press but never
+    // by passive contact — which keeps the test measuring the attack path
+    // instead of racing the automatic body check and its pair immunity.
+    r.params.aggression = 0; // and stop it bumping its way back into our lane
+    // Rivals cruise at up to 105% of MAX_SPEED and re-accelerate toward it, so
+    // a rival left at a nominally lower speed can be FASTER than the player by
+    // the time the press lands — which flips who wins and makes the player the
+    // one who recoils. Pin it slow so the outcome under test is unambiguous.
+    r.params.cruiseSpeedFactor = 0.5;
+    r.wipedOut = false;
+    r.finishTimeMs = null;
+    r._laneIndex = sc.player.laneIndex + 1;
+    r.tween = null;
+    r.worldZ = sc.player.worldZ;
+    // Must keep pace: parking it at speed 0 while the player runs at 3000 u/s
+    // puts it thousands of units behind within a frame, far outside reach.
+    // Slightly slower so the player still wins the exchange.
+    r.speed = 2900;
+    sc.player.speed = 3000;
+    await new Promise((res) => setTimeout(res, 200));
+    // A slower rival falls behind fast (the gap grows at the speed difference),
+    // so re-seat it alongside just before the press. Safe to do here precisely
+    // because it is in a DIFFERENT lane: no entering-edge body check can fire,
+    // so this cannot contaminate the attack under test.
+    r.worldZ = sc.player.worldZ;
+    r._laneIndex = sc.player.laneIndex + 1;
+    r.tween = null;
+    await new Promise((res) => setTimeout(res, 60));
+    r.worldZ = sc.player.worldZ;
+    return { ok: true, targeted: sc.combat.target !== null, cooldown: sc.combat.attackOnCooldown };
+  });
+
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(120);
+
+  const afterAttack = await page.evaluate(() => {
+    const sc = window.__game.scene.getScene('RaceScene');
+    return {
+      swinging: sc.player.swingMsRemaining > 0,
+      riderRecoiling: sc.aiRiders[0].hitReactionMsRemaining > 0,
+      onCooldown: sc.combat.attackOnCooldown
+    };
+  });
+  await page.screenshot({ path: `${OUT}/05-attack.png` });
+
+  check('a rival in reach becomes the attack target', attackResult.ok && attackResult.targeted, JSON.stringify(attackResult));
+  check('pressing F starts a swing', afterAttack.swinging, JSON.stringify(afterAttack));
+  check('the struck rival visibly recoils', afterAttack.riderRecoiling);
+  check('attack goes on cooldown', afterAttack.onCooldown);
+
+  // Explicit visual-QA position fixtures, not an automated full playthrough.
+  // Course, obstacles, collisions and AI stay intact. Reposition only the
+  // player onto a locally clear lane, then capture the real active renderer.
+  await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').player.swinging);
+  const positionFixtures = [];
+  for (const kind of ['mid-course-curve', 'crest-approach']) {
+    const fixture = await page.evaluate((view) => {
+      const sc = window.__game.scene.getScene('RaceScene');
+      const lanes = [2, 1, 3, 0, 4];
+      const crestZ = sc.crestApexZs.find((z) => z > 520 * 200);
+      const candidates = sc.track.filter((segment) => view === 'mid-course-curve'
+        ? segment.index >= 500 && segment.index < sc.track.length - 150 && Math.abs(segment.curve) > 0.3
+        : crestZ !== undefined && segment.z >= crestZ - 5000 && segment.z <= crestZ - 3000);
+      for (const segment of candidates) {
+        const z = segment.z + 100;
+        const lane = lanes.find((candidate) => !sc.obstacles.some((obstacle) =>
+          obstacle.lane === candidate && obstacle.z > z - 300 && obstacle.z < z + 1800));
+        if (lane === undefined) continue;
+        sc.player.worldZ = z;
+        sc.player._laneIndex = lane;
+        sc.player.tween = null;
+        sc.prevWorldZ = z;
+        // The camera teleport is not traversal. Keep the scorer's crossing
+        // cursor aligned so skipped obstacles do not manufacture flow rewards.
+        sc.scoreTracker.previousPlayerZ = z;
+        sc.playerInput.reset();
+        return {
+          label: view, seed: sc.seed, segment: segment.index, z, lane,
+          curve: segment.curve, elevation: segment.y, crestZ,
+          visibleRangeObstacles: sc.obstacles.filter((o) => o.z > z && o.z < z + 25000).length
+        };
+      }
+      return null;
+    }, kind);
+    check(`${kind} position fixture has a clear landing lane`, fixture !== null);
+    if (!fixture) continue;
+    await page.waitForFunction((z) => window.__game.scene.getScene('RaceScene').player.worldZ > z + 10, fixture.z);
+    await page.screenshot({ path: `${OUT}/${kind === 'mid-course-curve' ? '13' : '14'}-${kind}-position-fixture.png` });
+    positionFixtures.push(fixture);
+  }
+  writeFileSync(`${OUT}/position-fixtures.json`, JSON.stringify({ note: 'One-time player/camera position fixtures; not a full course playthrough.', positionFixtures }, null, 2));
+
+  // Drive into the result screen so the finish/wipeout path is exercised too —
+  // a crash there would otherwise never show up in this gate.
+  await page.waitForTimeout(1000);
+  const reachedResult = await page.evaluate(async () => {
+    const g = window.__game;
+    const sc = g && g.scene.getScene('RaceScene');
+    if (!sc || !sc.player) return 'no-scene';
+    sc.player.crashIntoTree(); // run-ending wipeout -> ResultScene
+    return 'triggered';
+  });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${OUT}/04-result.png` });
+  const onResult = await page.evaluate(() => {
+    const g = window.__game;
+    return g.scene.isActive('ResultScene');
+  });
+  check('wipeout reaches the result screen', reachedResult === 'triggered' && onResult, String(onResult));
+
+  check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | ') || 'clean');
+
 }
 
-// The attack button, end to end: park a rival in reach, press F, and assert
-// the game registered a deliberate attack rather than silently doing nothing.
-const attackResult = await page.evaluate(async () => {
-  const g = window.__game;
-  const sc = g && g.scene.getScene('RaceScene');
-  if (!sc || !sc.combat) return { ok: false, why: 'no scene' };
-  const r = sc.aiRiders[0];
-  // Seat the rival in the ADJACENT lane. Attacks reach 1.2 lanes while body
-  // checks only trigger same-lane, so this is reachable by a press but never
-  // by passive contact — which keeps the test measuring the attack path
-  // instead of racing the automatic body check and its pair immunity.
-  r.params.aggression = 0; // and stop it bumping its way back into our lane
-  // Rivals cruise at up to 105% of MAX_SPEED and re-accelerate toward it, so
-  // a rival left at a nominally lower speed can be FASTER than the player by
-  // the time the press lands — which flips who wins and makes the player the
-  // one who recoils. Pin it slow so the outcome under test is unambiguous.
-  r.params.cruiseSpeedFactor = 0.5;
-  r.wipedOut = false;
-  r.finishTimeMs = null;
-  r._laneIndex = sc.player.laneIndex + 1;
-  r.tween = null;
-  r.worldZ = sc.player.worldZ;
-  // Must keep pace: parking it at speed 0 while the player runs at 3000 u/s
-  // puts it thousands of units behind within a frame, far outside reach.
-  // Slightly slower so the player still wins the exchange.
-  r.speed = 2900;
-  sc.player.speed = 3000;
-  await new Promise((res) => setTimeout(res, 200));
-  // A slower rival falls behind fast (the gap grows at the speed difference),
-  // so re-seat it alongside just before the press. Safe to do here precisely
-  // because it is in a DIFFERENT lane: no entering-edge body check can fire,
-  // so this cannot contaminate the attack under test.
-  r.worldZ = sc.player.worldZ;
-  r._laneIndex = sc.player.laneIndex + 1;
-  r.tween = null;
-  await new Promise((res) => setTimeout(res, 60));
-  r.worldZ = sc.player.worldZ;
-  return { ok: true, targeted: sc.combat.target !== null, cooldown: sc.combat.attackOnCooldown };
-});
-
-await page.keyboard.press('KeyF');
-await page.waitForTimeout(120);
-
-const afterAttack = await page.evaluate(() => {
-  const sc = window.__game.scene.getScene('RaceScene');
-  return {
-    swinging: sc.player.swingMsRemaining > 0,
-    riderRecoiling: sc.aiRiders[0].hitReactionMsRemaining > 0,
-    onCooldown: sc.combat.attackOnCooldown
-  };
-});
-await page.screenshot({ path: `${OUT}/05-attack.png` });
-
-check('a rival in reach becomes the attack target', attackResult.ok && attackResult.targeted, JSON.stringify(attackResult));
-check('pressing F starts a swing', afterAttack.swinging, JSON.stringify(afterAttack));
-check('the struck rival visibly recoils', afterAttack.riderRecoiling);
-check('attack goes on cooldown', afterAttack.onCooldown);
-
-// Drive into the result screen so the finish/wipeout path is exercised too —
-// a crash there would otherwise never show up in this gate.
-await page.waitForTimeout(1000);
-const reachedResult = await page.evaluate(async () => {
-  const g = window.__game;
-  const sc = g && g.scene.getScene('RaceScene');
-  if (!sc || !sc.player) return 'no-scene';
-  sc.player.crashIntoTree(); // run-ending wipeout -> ResultScene
-  return 'triggered';
-});
-await page.waitForTimeout(1200);
-await page.screenshot({ path: `${OUT}/04-result.png` });
-const onResult = await page.evaluate(() => {
-  const g = window.__game;
-  return g.scene.isActive('ResultScene');
-});
-check('wipeout reaches the result screen', reachedResult === 'triggered' && onResult, String(onResult));
-
-check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | ') || 'clean');
-
-await browser.close();
+try {
+  await run();
+} catch (error) {
+  check('browser smoke completed', false, error.stack || error.message || String(error));
+} finally {
+  await recordRuntime(failures.length ? 'failure' : 'complete').catch((error) => {
+    runtimeSnapshots.push({ label: 'diagnostic-error', message: error.message });
+  });
+  writeFileSync(`${OUT}/smoke-runtime.json`, JSON.stringify({ runtimeSnapshots, consoleMessages }, null, 2));
+  if (failures.length && page && !page.isClosed()) {
+    await page.screenshot({ path: `${OUT}/smoke-failure.png` }).catch(() => {});
+  }
+  await browser?.close();
+}
 
 const report = [
   '',

@@ -1,5 +1,7 @@
 # Black Diamond Brawl — Task List
 
+Historical v1 plan. For current work, validation, and open issues, see [the overnight report](OVERNIGHT_REPORT.md) and [README](../README.md).
+
 Granular tasks derived from [implementation-plan.md](implementation-plan.md), grouped by
 the same phases. Work top-to-bottom; each phase ends with its verification tasks. All
 gameplay/tuning numbers referenced below are defined in

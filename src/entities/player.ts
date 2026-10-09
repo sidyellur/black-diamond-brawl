@@ -21,6 +21,8 @@ import { Collidable } from './collision';
 import { roadElevationAt, Segment } from '../track/segment';
 
 const CENTER_LANE_INDEX = Math.floor(LANES.length / 2);
+/** Late landing/recovery forgiveness; never queues an entire jump/tumble. */
+export const LANE_INPUT_BUFFER_MS = 160;
 
 // Smoothstep eases the lane tween in/out instead of moving linearly.
 const smoothstep = (t: number): number => t * t * (3 - 2 * t);
@@ -57,6 +59,7 @@ export class Player implements Collidable {
   private _laneIndex = CENTER_LANE_INDEX;
   private tween: LaneTween | null = null;
   private bufferedDirection: -1 | 1 | null = null;
+  private bufferedDirectionMs = 0;
 
   /**
    * Attack swing countdown. While this runs the player cannot steer or jump —
@@ -114,47 +117,56 @@ export class Player implements Collidable {
 
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - deltaMs);
     this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - deltaMs);
-    const wasSwinging = this.swingMsRemaining > 0;
     this.swingMsRemaining = Math.max(0, this.swingMsRemaining - deltaMs);
-    // A steer pressed during the lock fires the instant it lifts.
-    if (wasSwinging && this.swingMsRemaining === 0 && this.bufferedDirection !== null && !this.tween) {
-      const direction = this.bufferedDirection;
-      this.bufferedDirection = null;
-      this.startLaneTween(direction);
+    if (this.bufferedDirection !== null) {
+      this.bufferedDirectionMs -= deltaMs;
+      if (this.bufferedDirectionMs < 0) this.clearInputBuffer();
     }
     this.immunityMsRemaining = Math.max(0, this.immunityMsRemaining - deltaMs);
     this.stumbleMsRemaining = Math.max(0, this.stumbleMsRemaining - deltaMs);
 
     this.updateLaneTween(deltaMs);
     this.updateJump(deltaMs);
+    // Begin fresh movement only after existing movement/locks have advanced.
+    // In particular, never credit an entire locked frame to a new lane tween.
+    if (this.bufferedDirection !== null && this.canSteer && !this.tween) {
+      const direction = this.bufferedDirection;
+      this.clearInputBuffer();
+      this.startLaneTween(direction);
+    }
   }
 
   /** Left/Right (or A/D): shift one lane, clamped to the road edges (§4.3). */
   requestLaneShift(direction: -1 | 1): void {
-    if (this.wipedOut || this.tumbleMsRemaining > 0) {
-      return; // frozen (tree) or tumbling (rock): no steering control
-    }
-    if (this.airborne) {
-      return; // committed jump: steering is locked mid-air, input is dropped
-    }
-    if (this.swingMsRemaining > 0) {
-      // Mid-swing: steering is locked, but the press is BUFFERED rather than
-      // eaten, so committing to an attack never silently swallows input the
-      // way the old steer-shove interceptor did.
+    if (this.wipedOut) return;
+    if (!this.canSteer || this.tween) {
+      // One-deep, last-intent buffer: never stack up invisible lane changes.
+      // Preserve the full short attack commitment; air/tumble presses expire
+      // unless recovery is imminent. A held steer can refresh this naturally.
       this.bufferedDirection = direction;
+      this.bufferedDirectionMs = Math.max(LANE_INPUT_BUFFER_MS, this.swingMsRemaining + 50);
       return;
     }
-    if (this.tween) {
-      // One-deep buffer: a rapid second tap overwrites any previously
-      // buffered direction rather than queuing, so mashing never stacks up
-      // more than one pending shift (never skips a lane).
-      this.bufferedDirection = direction;
-      return;
-    }
+    this.clearInputBuffer();
     this.startLaneTween(direction);
   }
 
-  /** Space/Up: a normal fixed-impulse jump (§4.3). No double-jump. Kept for
+  /** Clear unexecuted intent on pause, blur, collision, or race teardown. */
+  clearInputBuffer(): void {
+    this.bufferedDirection = null;
+    this.bufferedDirectionMs = 0;
+  }
+
+  private get canSteer(): boolean {
+    return !this.wipedOut && !this.airborne && !this.tumbling && !this.swinging;
+  }
+
+  /** Input uses this to queue a very early jump without bypassing a lock. */
+  get canJump(): boolean {
+    return this.canSteer;
+  }
+
+  /** Space/Up/W: a normal fixed-impulse jump (§4.3). No double-jump. Kept for
    *  input wiring; `RaceScene` decides via `jump()` whether a jump press near a
    *  mogul should be an extended launch instead. */
   requestJump(): void {
@@ -167,7 +179,7 @@ export class Player implements Collidable {
    * double-jump) or frozen by a run-ending wipeout.
    */
   jump(extended: boolean): void {
-    if (this.airborne || this.wipedOut) {
+    if (this.airborne || this.wipedOut || this.tumbling) {
       return;
     }
     if (this.swingMsRemaining > 0) {
@@ -233,6 +245,7 @@ export class Player implements Collidable {
     // (§4.6) — the run is over either way, but this keeps state consistent
     // for the restart flow (a fresh Player starts unarmed too).
     this.weaponCharges = 0;
+    this.clearInputBuffer();
   }
 
   /** Rock collision (§4.4): temporary wipeout — speed drops to ~30%, ~1s
@@ -243,7 +256,7 @@ export class Player implements Collidable {
     this.immunityMsRemaining = ROCK_TUMBLE_MS + ROCK_IMMUNITY_MS; // immunity runs through the tumble and 1s past it
     this.airborne = false;
     this.tween = null; // cancel any in-flight steer; control is lost during tumble
-    this.bufferedDirection = null;
+    this.clearInputBuffer();
   }
 
   /** Mogul collision when ridden over without jumping (§4.4): a stumble —
@@ -292,7 +305,7 @@ export class Player implements Collidable {
       return;
     }
     this.speed *= 1 - speedLossFactor;
-    this.bufferedDirection = null;
+    this.clearInputBuffer();
     if (targetLaneIndex === this._laneIndex) {
       this.tween = null; // clamped: no lane change, speed loss only
       return;
@@ -366,17 +379,6 @@ export class Player implements Collidable {
 
     this._laneIndex = this.tween.toLane;
     this.tween = null;
-
-    if (this.bufferedDirection !== null) {
-      const direction = this.bufferedDirection;
-      this.bufferedDirection = null;
-      // A jump could have started while this tween was already in flight
-      // (an in-progress tween is allowed to finish, it isn't cancelled mid-
-      // air) — but a buffered shift should not fire once airborne.
-      if (!this.airborne) {
-        this.startLaneTween(direction);
-      }
-    }
   }
 
   private updateJump(deltaMs: number): void {

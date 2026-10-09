@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { HIT_FLASH_MS, HIT_REACTION_MS, MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
+import { HIT_FLASH_MS, HIT_REACTION_MS, MAX_ENTITY_SCREEN_FRACTION, SCREEN_W, RIDER_WIDTH_FRACTION } from '../config';
 import { entityDepth } from '../render/depth';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
@@ -13,7 +13,7 @@ import { AI_RIDER_TEXTURE_KEYS, PLAYER_FRAME_SIZE, PLAYER_FRAMES } from './playe
 // PLAYER_WIDTH_FRACTION) — the player and its rivals are the same kind of
 // object, so any divergence here shows up immediately as rivals that dwarf
 // or shrink against the rider you control.
-const WIDTH_FRACTION = 0.13;
+const WIDTH_FRACTION = RIDER_WIDTH_FRACTION;
 
 
 /**
@@ -92,6 +92,9 @@ export class AIRiderRenderer {
         SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
       );
       sprite.setScale(widthPx / PLAYER_FRAME_SIZE);
+      const angle = rider.tumbling ? Math.sin(this.scene.time.now / 90) * 28
+        : rider.hitReacting ? -10 : lean * 7;
+      sprite.setAngle(Phaser.Math.Linear(sprite.angle, angle, 0.28));
       sprite.setPosition(projected.screenX, projected.screenY);
       // Nearer (smaller world-Z) -> higher depth -> drawn on top, same
       // far-to-near convention `ObstacleRenderer` uses.

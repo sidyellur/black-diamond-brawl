@@ -51,7 +51,7 @@ export class SpriteLabScene extends Phaser.Scene {
     // of every sprite would run off the bottom and simply not render.
     const COLS = 2;
     const COL_W = 480;
-    const ROW_H = 74;
+    const ROW_H = 64;
     const perCol = Math.ceil(entries.length / COLS);
 
     entries.forEach(({ name, cv }, i) => {
@@ -72,7 +72,7 @@ export class SpriteLabScene extends Phaser.Scene {
       // The widths the projection actually renders at during play, so a change
       // is judged at the size it will be seen — not at a comfortable zoom.
       let x = ox + 104;
-      for (const targetW of [cv.w, 24, 40, 78]) {
+      for (const targetW of [48, 24, 40, 78]) {
         const img = this.add.image(x, midY, key);
         img.setOrigin(0, 0.5);
         img.setDisplaySize(targetW, targetW * (cv.h / cv.w));
@@ -83,7 +83,7 @@ export class SpriteLabScene extends Phaser.Scene {
       // interior shading will not save it once the sprite is scaled down.
       const sil = this.add.image(x, midY, key);
       sil.setOrigin(0, 0.5);
-      sil.setDisplaySize(cv.w, cv.h);
+      sil.setDisplaySize(48, 48 * cv.h / cv.w);
       sil.setTintFill(0x000000);
 
       const contrast = measureOutlineContrast(cv, SNOW.packed);

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { SCREEN_H, SCREEN_W } from '../config';
-import { MOUNTAIN, SKY, mix, scaleLight } from './palette';
+import { SKY, mix } from './palette';
+import { generateMountainTextures, MOUNTAIN_LAYERS, SKY_DETAILS_KEY } from './mountainArt';
 import { DEPTH } from './depth';
 
 /**
@@ -30,6 +31,10 @@ const BETA = { r: 0.046, g: 0.109, b: 0.265 } as const;
  *  point is SCREEN_H/2; the sky is generated to run well past it so the haze
  *  band always has gradient underneath it however the terrain moves. */
 const HORIZON_FRACTION = 0.62;
+
+/** Fine enough for a smooth 30px transition, while keeping a single Graphics
+ * object and avoiding runtime texture uploads or per-frame colour math. */
+const HAZE_STRIPS = 32;
 
 /**
  * Builds the sky gradient texture. Called once from `BootScene`; no-ops if it
@@ -86,187 +91,60 @@ export function skyColorAt(screenFraction: number): number {
 
 /** Fog colour for geometry at the far plane — sampled from the sky right at
  *  the horizon, so distant snow converges on the air in front of it. */
+const HORIZON_FOG_COLOR = skyColorAt(HORIZON_FRACTION - 0.012);
 export function horizonFogColor(): number {
-  return skyColorAt(HORIZON_FRACTION - 0.012);
+  return HORIZON_FOG_COLOR;
 }
 
-interface Ridge {
-  /** 0 = furthest. Drives colour, height and parallax rate together. */
-  depth: number;
-  colour: number;
-  capColour: number;
-  baseY: number;
-  amplitude: number;
-  /** Horizontal world-units-to-pixels parallax rate. */
-  parallax: number;
-  points: number[];
-}
-
-/**
- * Draws the sky, sun and parallax mountain ridges.
- *
- * Ridge silhouettes are generated once from a seeded value-noise walk so they
- * are stable frame to frame, then scrolled horizontally. Nearer ridges are
- * darker, taller and move faster; each is also blended toward the horizon
- * colour by its own depth, which is the aerial perspective that makes them sit
- * *behind* the slope instead of stickered onto it.
- */
+/** A few cached texture layers make the mountains richer without rebuilding
+ * hundreds of paths every frame. TileSprite wraps in either direction, so a
+ * right-hand bend can never scroll the entire range out of view. */
 export class SkyRenderer {
   private readonly sky: Phaser.GameObjects.Image;
+  private readonly details: Phaser.GameObjects.Image;
+  private readonly mountains: Phaser.GameObjects.TileSprite[] = [];
   private readonly graphics: Phaser.GameObjects.Graphics;
-  private readonly ridges: Ridge[] = [];
+  private readonly hazeColors = Array.from({ length: HAZE_STRIPS }, (_, i) =>
+    mix(HORIZON_FOG_COLOR, SKY.murk, (i + 0.5) / (HAZE_STRIPS * 2)));
 
   constructor(scene: Phaser.Scene) {
-    // Stretched from a 1px-wide gradient strip. Oversized horizontally so a
-    // camera shake cannot pull its edge into frame.
+    generateMountainTextures(scene);
     this.sky = scene.add.image(SCREEN_W / 2, SCREEN_H / 2, SKY_TEXTURE_KEY);
-    this.sky.setDisplaySize(SCREEN_W + 160, SCREEN_H);
-    this.sky.setDepth(DEPTH.BACKDROP);
+    this.sky.setDisplaySize(SCREEN_W + 160, SCREEN_H + 96);
     this.sky.setScrollFactor(0);
 
+    this.details = scene.add.image(0, 0, SKY_DETAILS_KEY).setOrigin(0);
+    for (const layer of MOUNTAIN_LAYERS) {
+      this.mountains.push(scene.add.tileSprite(
+        -64, layer.top, SCREEN_W + 128, layer.height, layer.key
+      ).setOrigin(0));
+    }
     this.graphics = scene.add.graphics();
-    this.graphics.setDepth(DEPTH.BACKDROP + 1);
-
-    this.buildRidges();
+    this.setDepth(DEPTH.BACKDROP);
   }
 
-  /** Deterministic ridge silhouettes. A fixed seed keeps the skyline identical
-   *  across runs and restarts — a mountain range that reshuffled every race
-   *  would read as noise rather than as a place. */
-  private buildRidges(): void {
-    const horizonY = SCREEN_H * HORIZON_FRACTION;
-    const specs = [
-      { depth: 0, colour: MOUNTAIN.far, cap: MOUNTAIN.capFar, lift: 96, amp: 34, para: 0.012, step: 46 },
-      { depth: 1, colour: MOUNTAIN.mid, cap: MOUNTAIN.capMid, lift: 66, amp: 30, para: 0.026, step: 34 },
-      { depth: 2, colour: MOUNTAIN.near, cap: MOUNTAIN.capNear, lift: 40, amp: 24, para: 0.045, step: 26 }
-    ];
-
-    specs.forEach((s, layer) => {
-      // Value noise: random heights at fixed intervals, smoothly interpolated.
-      // Two octaves is enough for a believable skyline — more just produces
-      // spiky visual noise at this scale.
-      let seed = 0x9e37 + layer * 0x2545;
-      const rnd = (): number => {
-        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-        return seed / 0x7fffffff;
-      };
-      const span = SCREEN_W * 2 + 400; // wide enough to scroll without repeating visibly
-      const count = Math.ceil(span / s.step) + 3;
-      const heights: number[] = [];
-      for (let i = 0; i < count; i++) {
-        heights.push(rnd() * s.amp + rnd() * s.amp * 0.5);
-      }
-
-      const points: number[] = [];
-      for (let i = 0; i < count; i++) {
-        points.push(-200 + i * s.step, horizonY - s.lift - heights[i]);
-      }
-
-      this.ridges.push({
-        depth: s.depth,
-        // Fade each ridge toward the horizon by its distance. Doing this here
-        // rather than picking three arbitrary greys means the range recedes
-        // correctly whatever the sky is doing.
-        colour: mix(s.colour, horizonFogColor(), 0.55 - layer * 0.16),
-        capColour: mix(s.cap, horizonFogColor(), 0.5 - layer * 0.15),
-        baseY: horizonY + 8,
-        amplitude: s.amp,
-        parallax: s.para,
-        points
-      });
-    });
-  }
-
-  /** Every display object this renderer owns, so a UI camera can ignore
-   *  them. A second camera renders the whole display list unless told
-   *  otherwise, and anything left unregistered gets repainted over the top
-   *  of the world. */
+  /** Every object must be excluded from the HUD camera. */
   get displayObjects(): Phaser.GameObjects.GameObject[] {
-    return [this.sky, this.graphics];
+    return [this.sky, this.details, ...this.mountains, this.graphics];
   }
 
   setDepth(depth: number): void {
     this.sky.setDepth(depth);
-    this.graphics.setDepth(depth + 1);
+    this.details.setDepth(depth + 1);
+    this.mountains.forEach((mountain, i) => mountain.setDepth(depth + 2 + i));
+    this.graphics.setDepth(depth + 2 + this.mountains.length);
   }
 
-  /**
-   * @param curveOffset accumulated curve offset at the far end of the road —
-   *   swings the ridges with the bend.
-   * @param camX camera lateral position, for the smaller shift from lane changes.
-   * @param topScreenY where the road actually stops this frame; the haze band
-   *   is drawn down to here so there is never a gap between snow and sky.
-   */
+  /** The same curve and lateral-camera parallax used by the road. Clouds and
+   * sun stay still, while nearer ridges move more quickly. */
   render(curveOffset: number, camX: number, topScreenY: number): void {
+    for (let i = 0; i < this.mountains.length; i++) {
+      const layer = MOUNTAIN_LAYERS[i];
+      this.mountains[i].tilePositionX =
+        curveOffset * layer.parallax + camX * layer.parallax * 0.0009;
+    }
     this.graphics.clear();
-
-    this.drawSun();
-
-    for (const ridge of this.ridges) {
-      // Both the bend and the camera's own lateral position push the range
-      // sideways, scaled by depth so far ridges barely move.
-      const shift = -(curveOffset * ridge.parallax + camX * ridge.parallax * 0.0009);
-      this.drawRidge(ridge, shift);
-    }
-
     this.drawHazeBand(topScreenY);
-  }
-
-  private drawSun(): void {
-    const x = SCREEN_W * 0.74;
-    const y = SCREEN_H * 0.17;
-
-    // Aureole: a wide, fast-falling halo. Drawn as a handful of nested discs
-    // rather than a true radial gradient because Graphics has no gradient
-    // fill; the falloff exponent matters far more than the step count.
-    for (let i = 6; i >= 1; i--) {
-      const t = i / 6;
-      this.graphics.fillStyle(SKY.sunGlow, 0.055 * Math.pow(1 - t, 1.3) + 0.012);
-      this.graphics.fillCircle(x, y, 26 + t * 128);
-    }
-    this.graphics.fillStyle(SKY.sun, 0.95);
-    this.graphics.fillCircle(x, y, 21);
-    this.graphics.fillStyle(scaleLight(SKY.sun, 1.4), 1);
-    this.graphics.fillCircle(x, y, 15);
-  }
-
-  private drawRidge(ridge: Ridge, shiftX: number): void {
-    const pts = ridge.points;
-    // Wrap the scroll so the range never runs out of geometry.
-    const span = pts[pts.length - 2] - pts[0];
-    let dx = shiftX % span;
-    if (dx > 0) dx -= span;
-
-    this.graphics.fillStyle(ridge.colour, 1);
-    this.graphics.beginPath();
-    this.graphics.moveTo(pts[0] + dx, ridge.baseY);
-    for (let i = 0; i < pts.length; i += 2) {
-      this.graphics.lineTo(pts[i] + dx, pts[i + 1]);
-    }
-    this.graphics.lineTo(pts[pts.length - 2] + dx, ridge.baseY);
-    this.graphics.closePath();
-    this.graphics.fillPath();
-
-    // Snowcaps: a short bright run just below each local peak. Only the
-    // sunward side catches light, which is what keeps the range from looking
-    // like a row of identical triangles.
-    this.graphics.fillStyle(ridge.capColour, 1);
-    for (let i = 2; i < pts.length - 2; i += 2) {
-      const prev = pts[i - 1];
-      const cur = pts[i + 1];
-      const next = pts[i + 3];
-      if (cur < prev && cur < next) {
-        const x = pts[i] + dx;
-        const capH = Math.min(13, (Math.min(prev, next) - cur) * 0.85);
-        if (capH < 3) continue;
-        this.graphics.beginPath();
-        this.graphics.moveTo(x, cur);
-        this.graphics.lineTo(x - capH * 0.78, cur + capH);
-        this.graphics.lineTo(x + capH * 0.6, cur + capH);
-        this.graphics.closePath();
-        this.graphics.fillPath();
-      }
-    }
   }
 
   /**
@@ -279,19 +157,21 @@ export class SkyRenderer {
    */
   private drawHazeBand(topScreenY: number): void {
     const horizonY = SCREEN_H * HORIZON_FRACTION;
-    const fog = horizonFogColor();
-    const bandTop = horizonY - 10;
+    const bandTop = Math.min(horizonY - 10, topScreenY - 30);
     const bandBottom = Math.max(topScreenY + 2, bandTop + 2);
 
-    // A few stacked strips fading out downward, so the join to the snow is a
-    // gradient rather than a line.
-    const strips = 7;
-    for (let i = 0; i < strips; i++) {
-      const t0 = i / strips;
+    // Haze builds toward the measured snow edge, including flat ground where
+    // that edge is ABOVE the nominal backdrop horizon. Sample each narrow
+    // strip at its midpoint. These translucent rectangles must not overlap:
+    // the old +1px bleed composited the haze twice at every boundary and drew
+    // bright horizontal scanlines, especially visible at high crests.
+    for (let i = 0; i < HAZE_STRIPS; i++) {
+      const t0 = i / HAZE_STRIPS;
+      const midpoint = (i + 0.5) / HAZE_STRIPS;
       const y0 = bandTop + (bandBottom - bandTop) * t0;
-      const y1 = bandTop + (bandBottom - bandTop) * ((i + 1) / strips);
-      this.graphics.fillStyle(mix(fog, SKY.murk, t0 * 0.5), 1 - t0 * 0.15);
-      this.graphics.fillRect(-64, y0, SCREEN_W + 128, y1 - y0 + 1);
+      const y1 = bandTop + (bandBottom - bandTop) * ((i + 1) / HAZE_STRIPS);
+      this.graphics.fillStyle(this.hazeColors[i], 0.035 + midpoint * midpoint * 0.96);
+      this.graphics.fillRect(-64, y0, SCREEN_W + 128, y1 - y0);
     }
   }
 }

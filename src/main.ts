@@ -7,26 +7,24 @@ import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { TitleScene } from './scenes/TitleScene';
 
 const config: Phaser.Types.Core.GameConfig = {
-  // WEBGL, not AUTO. postFX/preFX and every FX controller (Bloom, Vignette,
-  // ColorMatrix) are WebGL-only — under a Canvas fallback they silently no-op
-  // rather than erroring, so the whole visual polish layer would vanish with
-  // no indication anything was wrong. Failing to start is better than
-  // shipping a silently degraded renderer.
-  type: Phaser.WEBGL,
+  parent: 'app',
+  // Prefer accelerated WebGL, while keeping the same sprite/Graphics game
+  // playable when a device cannot create a WebGL context. No game mechanic
+  // relies on a WebGL-only post-process. Explicit canvas mode is also tested.
+  type: new URLSearchParams(window.location.search).get('renderer') === 'canvas' ? Phaser.CANVAS : Phaser.AUTO,
+  // Our gesture-unlocked procedural mixer owns audio; avoid a second,
+  // unused Phaser AudioContext and its autoplay warning at boot.
+  audio: { noAudio: true },
   width: SCREEN_W,
   height: SCREEN_H,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  // Nearest-neighbour sampling, but NOT integer position snapping. The
-  // projection scales every world sprite by a continuously-varying
-  // non-integer factor, so `roundPixels` cannot make sprites land on a stable
-  // pixel grid anyway — and because Graphics objects ignore it entirely, the
-  // road would keep sub-pixel positions while the sprites standing on it
-  // snapped, making entities visibly swim against the surface at distance.
-  // Disabling it keeps sprites and road in the same coordinate space.
-  pixelArt: true,
+  // High-resolution illustration assets use linear sampling for smooth
+  // contour animation at every projected scale; the road stays sub-pixel.
+  pixelArt: false,
+  antialias: true,
   roundPixels: false,
   scene: [BootScene, TitleScene, RaceScene, ResultScene, SpriteLabScene]
 };

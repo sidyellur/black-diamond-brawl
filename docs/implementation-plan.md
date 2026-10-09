@@ -1,5 +1,7 @@
 # Black Diamond Brawl — Implementation Plan
 
+Historical v1 plan. For current work, validation, and open issues, see [the overnight report](OVERNIGHT_REPORT.md) and [README](../README.md).
+
 Derived from [design-spec.md](design-spec.md). Nine phases, each small and independently
 verifiable: every phase ends with something you can run in the browser and confirm with
 your eyes (or a quick console check) before starting the next. No phase requires a big

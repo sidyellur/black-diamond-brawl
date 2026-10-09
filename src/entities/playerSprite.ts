@@ -12,8 +12,8 @@ export const PLAYER_TEXTURE_KEY = 'player-sheet';
 export const PLAYER_FRAME_SIZE = RIDER_FRAME_SIZE;
 
 /**
- * Frame layout of the rider sprite sheet: five frames in a single row, left to
- * right — lean-left, center, lean-right, jump, tumble. AI rivals reuse this
+ * Frame layout: seven high-resolution frames in a single row, left to
+ * right — lean-left, center, lean-right, jump, tumble, hit, swing. AI rivals reuse this
  * exact layout with a different palette, so any edit here must stay
  * additive/positional.
  *

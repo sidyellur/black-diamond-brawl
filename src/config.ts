@@ -11,12 +11,13 @@ export const CAMERA_DEPTH = 1 / Math.tan((100 / 2) * Math.PI / 180); // Derived 
 export const SCREEN_W = 960;
 export const SCREEN_H = 540;
 export const ROAD_WIDTH = 2000; // world-space road half-width
-export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surface
+export const CAMERA_HEIGHT = 1350; // fixed camera elevation above the road surface
 
 /**
  * How far BEHIND the player the camera sits, in world units.
  *
- * This is load-bearing, not a tuning knob. The camera used to sit exactly on
+ * A positive trailing offset is load-bearing; its value is tuned together
+ * with camera height and shared rider scale. The camera used to sit exactly on
  * the player (`camZ = player.worldZ`), which put the player at `dz = 0` — and
  * `project()` returns null for `dz <= 0`, so the player could not be projected
  * at all and had to be drawn as a fixed-size screen-space sprite that shared
@@ -31,11 +32,18 @@ export const CAMERA_HEIGHT = 1000; // fixed camera elevation above the road surf
  * Pulling the camera back means the player projects like every other entity
  * and the nearest reachable `dz` is bounded, so entity scale is bounded too.
  * The classic relation is `playerZ = cameraHeight * cameraDepth`, which here
- * is ~839 — but that places the player exactly at the bottom screen edge,
+ * is ~1133 — but that places the player exactly at the bottom screen edge,
  * where the sprite is half cut off. This is pulled back further so the rider
- * sits fully on screen at y~459 with the slope readable ahead of it.
+ * sits fully on screen at y~461 with the slope readable ahead of it. The
+ * farther/higher viewpoint also keeps all five same-depth lanes visible from
+ * the center, instead of clipping the two outer rivals offscreen.
  */
-export const CAMERA_BACK_Z = 1200;
+export const CAMERA_BACK_Z = 1600;
+
+/** Shared rider scale after widening the local pack view. Keep player and AI
+ * physically coherent; the farther camera still draws the hero about 99px tall. */
+export const RIDER_WIDTH_FRACTION = 0.22;
+export const RIDER_JUMP_HEIGHT_WORLD = 690;
 
 /**
  * World-Z the player starts at. Equal to `CAMERA_BACK_Z` so the camera begins

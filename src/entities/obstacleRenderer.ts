@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
-import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W } from '../config';
+import { MAX_ENTITY_SCREEN_FRACTION, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { entityDepth } from '../render/depth';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
 import { obstacleLaneFraction, Obstacle, ObstacleKind } from './obstacle';
-import { OBSTACLE_FRAME_SIZE, OBSTACLE_FRAMES, OBSTACLE_TEXTURE_KEY } from './obstacleSprites';
+import { OBSTACLE_FRAME_SIZE, OBSTACLE_FRAMES, OBSTACLE_TEXTURE_KEY, TREE_VARIANT_FRAMES } from './obstacleSprites';
 
 // On-screen width of each obstacle as a fraction of the projected road
 // half-width at its depth — so obstacles scale naturally with the road.
@@ -59,7 +59,10 @@ export class ObstacleRenderer {
       }
 
       const sprite = this.acquire(used++);
-      sprite.setFrame(OBSTACLE_FRAMES[obstacle.kind]);
+      // Stable world placement selects art only: projection, size and collision
+      // geometry remain identical for every conifer variant.
+      const variant = Math.abs(Math.floor(obstacle.z / SEGMENT_LENGTH) + obstacle.lane * 7) % TREE_VARIANT_FRAMES.length;
+      sprite.setFrame(obstacle.kind === 'tree' ? TREE_VARIANT_FRAMES[variant] : OBSTACLE_FRAMES[obstacle.kind]);
       // Origin bottom-centre plants the base on the projected road surface.
       const widthPx = softClampWidth(
         projected.screenW * WIDTH_FRACTION[obstacle.kind],

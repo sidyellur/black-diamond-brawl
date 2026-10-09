@@ -2,19 +2,46 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Black Diamond Brawl</title>
     <style>
+      html, body { width: 100%; height: 100%; }
       body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background-color: #000;
+        background-color: #101923;
+        touch-action: none;
+        overscroll-behavior: none;
+        font-family: monospace;
+      }
+      /* A viewport-sized mount, independent of the old canvas margins/size.
+         Phaser FIT can then grow as well as shrink after phone rotation. */
+      #app { position: fixed; inset: 0; overflow: hidden; }
+      canvas { display: block; }
+      #loading {
+        position: fixed; inset: 0; display: grid; place-content: center;
+        text-align: center; color: #eef4fb; background: #101923; z-index: 20;
+        letter-spacing: 0.1em; font-weight: bold;
+      }
+      #loading span { margin-top: 12px; font-size: 12px; color: #8497aa; font-weight: normal; letter-spacing: 0; }
+      #loading::before { content: '◆'; color: #f5a623; font-size: 40px; margin-bottom: 20px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+      #rotate-hint { display: none; }
+      @media (orientation: portrait) and (max-width: 600px) {
+        #rotate-hint {
+          display: block; position: fixed; left: 16px; right: 16px;
+          bottom: max(24px, env(safe-area-inset-bottom)); color: #c3d0de;
+          text-align: center; font-size: 14px; line-height: 1.6; pointer-events: none;
+        }
       }
     </style>
   </head>
   <body>
+    <div id="loading" role="status">CARVING THE MOUNTAIN<span>Preparing the riders and fresh powder…</span></div>
     <div id="app"></div>
+    <p class="sr-only">Black Diamond Brawl is a visual snowboard combat game. Press Enter to start. Arrows or A and D steer, Space or W jumps, F or K attacks, Escape or P pauses, and M mutes sound.</p>
+    <p id="rotate-hint">Turn your phone sideways for the best ride.<br>Touch controls are on the slope.</p>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

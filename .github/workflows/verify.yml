@@ -1,0 +1,54 @@
+name: Verify game
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Build and verify models, rendering, and player flows
+        shell: bash
+        env:
+          DEBUG: pw:browser
+        run: |
+          mkdir -p .verify
+          npm run verify 2>&1 | tee .verify/verify.log
+      - name: Keep screenshots and verification reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: game-verification-${{ github.sha }}
+          path: .verify/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Keep the production game build
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: black-diamond-brawl-build-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

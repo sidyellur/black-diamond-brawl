@@ -1,5 +1,6 @@
 import {
   AI_BUMP_CHECK_INTERVAL_MS,
+  AI_CRUISE_SPEED_MAX_FACTOR,
   HIT_REACTION_MS,
   LANE_TWEEN_MS,
   LANES,
@@ -20,6 +21,13 @@ import { runtimeRandom } from './runtimeRng';
 
 // Smoothstep eases the lane tween in/out, same curve `Player` uses.
 const smoothstep = (t: number): number => t * t * (3 - 2 * t);
+
+// A separated rival can work back toward the pack, but never faster than
+// the existing fastest-rider ceiling. Hysteresis avoids a slow rider settling
+// permanently just outside the camera, as a proportional speed boost would.
+export const PACK_CHASE_START_Z = SEGMENT_LENGTH * 6;
+export const PACK_CHASE_END_Z = SHOVE_Z_WINDOW + SEGMENT_LENGTH * 0.25;
+export const PACK_SETBACK_GRACE_MS = 4000;
 
 interface LaneTween {
   fromLane: number;
@@ -74,6 +82,8 @@ export class AIRider implements Collidable {
 
   private _laneIndex: number;
   private tween: LaneTween | null = null;
+  private chasingPack = false;
+  private packGraceMs = 0;
 
   // Same temporary-collision timers as Player (design-spec §4.4), so a rock/
   // mogul hit produces the identical slow-down/tumble/immunity behavior.
@@ -131,10 +141,10 @@ export class AIRider implements Collidable {
 
     const deltaSeconds = deltaMs / 1000;
 
-    // Behavior 1 (Race): accelerate toward this rider's own cruise speed.
-    // Speed only ever falls via a collision/combat outcome below, so
-    // clamping up to the target here is sufficient to "recover" after one.
-    const targetSpeed = MAX_SPEED * this.params.cruiseSpeedFactor;
+    // Chase changes the distant cruise target only. Recovery acceleration,
+    // physical travel, obstacles and every close-range fight remain ordinary.
+    this.packGraceMs = Math.max(0, this.packGraceMs - deltaMs);
+    const targetSpeed = this.cruiseSpeedFor(player, deltaMs);
     this.speed = Math.min(targetSpeed, this.speed + PLAYER_ACCEL * deltaSeconds);
     this.worldZ += this.speed * deltaSeconds;
 
@@ -155,6 +165,32 @@ export class AIRider implements Collidable {
         this.maybeBump(player);
       }
     }
+  }
+
+  /** Distant-pack pacing, separate from steering/attacks so its baseline and
+   * collision behavior can be compared deterministically in the pacing gate. */
+  protected cruiseSpeedFor(player: Player, deltaMs: number): number {
+    const nativeSpeed = MAX_SPEED * this.params.cruiseSpeedFactor;
+    const gap = player.worldZ - this.worldZ;
+    // Don't erase an earned hit, a tumble, a knockout opportunity, or exploit
+    // the player's own recovery. Fallen/finished riders never reach this code.
+    if (this.packGraceMs > 0 || this.collisionImmune || this.stumbling || this.hitReacting ||
+        player.wipedOut || player.speed < MAX_SPEED * 0.9) {
+      this.chasingPack = false;
+      return nativeSpeed;
+    }
+    if (gap >= PACK_CHASE_START_Z) this.chasingPack = true;
+    // Release before the *end* of this step can enter combat range, including
+    // the race's longest 50ms physics frame. A small cushion protects reach.
+    const dt = deltaMs / 1000;
+    const chaseStep = Math.min(MAX_SPEED * AI_CRUISE_SPEED_MAX_FACTOR, this.speed + PLAYER_ACCEL * dt) * dt;
+    if (gap - chaseStep <= PACK_CHASE_END_Z) this.chasingPack = false;
+    return this.chasingPack ? MAX_SPEED * AI_CRUISE_SPEED_MAX_FACTOR : nativeSpeed;
+  }
+
+  private preserveSetback(): void {
+    this.packGraceMs = PACK_SETBACK_GRACE_MS;
+    this.chasingPack = false;
   }
 
   /** Discrete lane index into `LANES` — mirrors `Player.laneIndex`, read by
@@ -215,6 +251,7 @@ export class AIRider implements Collidable {
   /** Rock collision (§4.4): temporary wipeout, identical outcome to the
    *  player's — speed drops to ~30%, a no-steer tumble, then immunity. */
   hitRock(): void {
+    this.preserveSetback();
     this.speed *= ROCK_SPEED_FACTOR;
     this.tumbleMsRemaining = ROCK_TUMBLE_MS;
     this.immunityMsRemaining = ROCK_TUMBLE_MS + ROCK_IMMUNITY_MS;
@@ -224,6 +261,7 @@ export class AIRider implements Collidable {
   /** Mogul collision when ridden over (§4.4): a stumble — ~25% speed loss
    *  and a brief cosmetic wobble, no control loss. */
   hitMogul(): void {
+    this.preserveSetback();
     this.speed *= MOGUL_SPEED_FACTOR;
     this.stumbleMsRemaining = MOGUL_STUMBLE_MS;
   }
@@ -310,6 +348,7 @@ export class AIRider implements Collidable {
    */
   /** Called by `CombatSystem` on the loser of an exchange. */
   notifyHit(): void {
+    this.preserveSetback();
     this.hitReactionMsRemaining = HIT_REACTION_MS;
   }
 
@@ -322,6 +361,7 @@ export class AIRider implements Collidable {
     if (this.wipedOut) {
       return;
     }
+    if (speedLossFactor > 0) this.preserveSetback();
     this.speed *= 1 - speedLossFactor;
     if (targetLaneIndex === this._laneIndex) {
       this.tween = null; // clamped: no lane change, speed loss only
