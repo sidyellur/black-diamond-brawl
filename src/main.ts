@@ -5,6 +5,7 @@ import { RaceScene } from './scenes/RaceScene';
 import { ResultScene } from './scenes/ResultScene';
 import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { TitleScene } from './scenes/TitleScene';
+import { initializeStorage } from './platform/storage';
 
 const config: Phaser.Types.Core.GameConfig = {
   parent: 'app',
@@ -29,10 +30,10 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BootScene, TitleScene, RaceScene, ResultScene, SpriteLabScene]
 };
 
-const game = new Phaser.Game(config);
-
-// Exposed for the headless verification harness (`scripts/smokeTest.mjs`) so
-// it can assert on real runtime state — sprite positions, entity scales —
-// rather than only on pixels. Harmless in production; nothing reads it unless
-// a test explicitly looks for it.
-(window as unknown as { __game: Phaser.Game }).__game = game;
+// Native Preferences is asynchronous. Hydrate it before menus/audio read
+// records or mute state; the loading screen stays visible during this step.
+void initializeStorage().then(() => {
+  const game = new Phaser.Game(config);
+  // Exposed for real-runtime browser verification, not used by gameplay.
+  (window as unknown as { __game: Phaser.Game }).__game = game;
+});

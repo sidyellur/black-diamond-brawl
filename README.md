@@ -18,6 +18,7 @@ obstacles, and pickups, and layered alpine scenery.
 - [Design spec](docs/design-spec.md)
 - [Implementation plan](docs/implementation-plan.md)
 - [Task list](docs/tasks.md)
+- [iPhone app: build, play, verification, and device checklist](docs/IPHONE.md)
 
 ## Controls
 
@@ -50,13 +51,23 @@ rival still body-checks them, for a fifth of the points.
   link gives everyone the same course geometry.
 - Original procedural sounds are generated locally and can be muted with `M`.
 
+## iPhone app
+
+The same game also builds as a landscape iPhone app with bundled offline assets,
+notch-safe controls, native pause/resume handling, and on-device records. On a
+Mac with Xcode 26+, run `npm ci` then `npm run ios:open` and choose an iPhone
+simulator. iOS 15+ is supported. The browser version remains available.
+
+See [the iPhone guide](docs/IPHONE.md) for build commands and the separate
+physical-device/signing steps before distribution.
+
 ## Development
 
 ```bash
 npm ci             # Node 22 is the CI-tested runtime
 npm run dev        # play at http://localhost:5173
 npm run dev        # then open /?spritelab=1 for the sprite contact sheet
-npx playwright install chromium  # once, before browser verification
+npx playwright install chromium webkit  # once, before browser verification
 npm run verify     # build + models + storage + browser/controls/replay/touch acceptance
 npm run lab        # render the sprite sheet headless and check outline contrast
 

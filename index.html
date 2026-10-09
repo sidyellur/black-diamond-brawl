@@ -15,14 +15,26 @@
         overscroll-behavior: none;
         font-family: monospace;
       }
-      /* A viewport-sized mount, independent of the old canvas margins/size.
-         Phaser FIT can then grow as well as shrink after phone rotation. */
-      #app { position: fixed; inset: 0; overflow: hidden; }
+      :root {
+        --safe-area-top: env(safe-area-inset-top, 0px);
+        --safe-area-right: env(safe-area-inset-right, 0px);
+        --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-area-left: env(safe-area-inset-left, 0px);
+      }
+      /* FIT measures this entire safe rectangle. Insets on the hint alone
+         leave the game's HUD and touch controls under the notch/home bar.
+         Its bounds change on rotation, observed by installViewportFit. */
+      #app {
+        position: fixed;
+        inset: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
+        overflow: hidden;
+      }
       canvas { display: block; }
       #loading {
         position: fixed; inset: 0; display: grid; place-content: center;
         text-align: center; color: #eef4fb; background: #101923; z-index: 20;
         letter-spacing: 0.1em; font-weight: bold;
+        padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
       }
       #loading span { margin-top: 12px; font-size: 12px; color: #8497aa; font-weight: normal; letter-spacing: 0; }
       #loading::before { content: '◆'; color: #f5a623; font-size: 40px; margin-bottom: 20px; }
@@ -30,8 +42,9 @@
       #rotate-hint { display: none; }
       @media (orientation: portrait) and (max-width: 600px) {
         #rotate-hint {
-          display: block; position: fixed; left: 16px; right: 16px;
-          bottom: max(24px, env(safe-area-inset-bottom)); color: #c3d0de;
+          display: block; position: fixed;
+          left: max(16px, var(--safe-area-left)); right: max(16px, var(--safe-area-right));
+          bottom: max(24px, var(--safe-area-bottom)); color: #c3d0de;
           text-align: center; font-size: 14px; line-height: 1.6; pointer-events: none;
         }
       }

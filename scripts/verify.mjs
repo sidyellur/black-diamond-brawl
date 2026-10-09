@@ -57,6 +57,7 @@ function serveDist(root, port) {
 
 try {
   await step('build (tsc + vite)', () => run('npm', ['run', 'build']));
+  await step('native bundle configuration', () => run('npm', ['run', 'verify:native-config']));
   await step('palette contrast', () => run('npm', ['run', 'verify:palette']));
   await step('illustrated asset integrity', () => run('npm', ['run', 'verify:art']));
   await step('rendering geometry', () => run('npm', ['run', 'verify:rendering']));
@@ -66,6 +67,9 @@ try {
   await step('responsive controls', () => run('npm', ['run', 'verify:controls']));
   await step('touchcancel browser compatibility', () => run('node', ['--import', 'tsx', 'scripts/verifyTouchCancel.ts']));
   await step('viewport rotation fit', () => run('node', ['--import', 'tsx', 'scripts/verifyViewportFit.ts']));
+  await step('native and browser lifecycle', () => run('node', ['--import', 'tsx', 'scripts/verifyMobileLifecycle.ts']));
+  await step('interrupted mobile audio recovery', () => run('node', ['--import', 'tsx', 'scripts/verifyAudioRecovery.ts']));
+  await step('native and browser storage', () => run('node', ['--import', 'tsx', 'scripts/verifyStorage.ts']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
 
@@ -77,7 +81,8 @@ try {
     const failures = [];
     for (const [label, script] of [
       ['visual smoke test', 'scripts/smokeTest.mjs'],
-      ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs']
+      ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs'],
+      ['WebKit iPhone acceptance', 'scripts/mobileAcceptance.mjs']
     ]) {
       try {
         await step(label, () => run('node', [script, `--url=http://127.0.0.1:${PORT}`]));

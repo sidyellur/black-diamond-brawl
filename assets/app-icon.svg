@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <path fill="#18334b" d="M0 0h1024v1024H0z"/>
+  <path fill="#223e54" d="m0 523 220-251 152 145 198-251 454 375v483H0z"/>
+  <path fill="#eef4fb" d="m95 731 425-569 420 569-420 200z"/>
+  <path fill="#426880" d="m520 162 44 186-78 113 183 135-50 124 321 11z"/>
+  <path fill="#101923" d="m520 162 86 254-85-40-45 63-38-23z"/>
+  <path fill="none" stroke="#f5a623" stroke-width="22" stroke-linejoin="round" d="m512 98 385 414-385 414L127 512z"/>
+  <path fill="none" stroke="#eef4fb" stroke-opacity=".55" stroke-width="11" stroke-linecap="round" d="m203 680 79-86m-38 119 50-55m452-253 57-74"/>
+  <!-- Original snowboard-combat silhouette, matching the game's amber rider. -->
+  <path fill="#101923" d="m403 439 77-53 123 51-32 89-96-14-70 93-67-34 70-100z"/>
+  <path fill="none" stroke="#101923" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" d="m493 499 63 89-51 88m32-95 83 50-19 61M448 438l-85 63-65-35m245-24 115 22 71-59"/>
+  <path fill="#f5a623" d="m415 432 66-39 98 43-30 67-75-9-52 53-34-26 33-52z"/>
+  <circle cx="506" cy="342" r="59" fill="#101923"/>
+  <path fill="#f5a623" d="M448 341a58 58 0 0 1 116-1l-18 12-95-4z"/>
+  <path fill="#5ce2ef" stroke="#101923" stroke-width="12" stroke-linejoin="round" d="m468 349 77 6-12 24-61-9z"/>
+  <path fill="none" stroke="#101923" stroke-width="35" stroke-linecap="round" d="m415 719 276-58"/>
+  <path fill="none" stroke="#f5a623" stroke-width="14" stroke-linecap="round" d="m400 728 296-62"/>
+  <path fill="none" stroke="#101923" stroke-width="16" stroke-linecap="round" d="m727 398 79 116"/>
+</svg>

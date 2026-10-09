@@ -7,6 +7,7 @@ import { generateShadowTexture } from '../render/shadowSprite';
 import { generateSkyTexture } from '../render/SkyRenderer';
 import { guardTouchCancel } from '../input/touchCancel';
 import { installViewportFit } from '../input/viewportFit';
+import { installAppLifecycle } from '../input/appLifecycle';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -21,6 +22,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    installAppLifecycle(this.game);
     guardTouchCancel(this.input.manager.touch);
     installViewportFit(this.game);
     this.game.events.once(Phaser.Core.Events.POST_RENDER, () => {

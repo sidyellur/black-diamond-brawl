@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { Player } from './player';
 import { oncePerKeyEvent } from '../input/keyboardEvents';
+import { APP_ACTIVE, APP_INACTIVE, isAppActive } from '../input/appLifecycle';
 
 export type PlayerAction = 'left' | 'right' | 'jump' | 'attack';
 /** Concise alias for UI bindings. */
@@ -217,8 +218,8 @@ export function bindPlayerInput(
     if (action) controller.setAction(action, false, event.code);
   });
   const suspend = (): void => controller.setEnabled(false);
-  const visibility = (): void => controller.setFocused(!document.hidden);
-  const focus = (): void => controller.setFocused(true);
+  const visibility = (): void => controller.setFocused(!document.hidden && isAppActive(scene.game));
+  const focus = (): void => controller.setFocused(isAppActive(scene.game));
   // Refocus cannot re-enable a paused/countdown race; the scene owns that.
   const blur = (): void => controller.setFocused(false);
 
@@ -228,6 +229,8 @@ export function bindPlayerInput(
   scene.events.on('sleep', suspend);
   scene.game.events.on('blur', blur);
   scene.game.events.on('focus', focus);
+  scene.game.events.on(APP_INACTIVE, blur);
+  scene.game.events.on(APP_ACTIVE, focus);
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibility);
   // A release must be observed even while a Phaser scene is paused, when its
   // keyboard plugin stops processing events. Otherwise one key stays stuck.
@@ -254,6 +257,8 @@ export function bindPlayerInput(
     scene.events.off('shutdown', destroy);
     scene.game.events.off('blur', blur);
     scene.game.events.off('focus', focus);
+    scene.game.events.off(APP_INACTIVE, blur);
+    scene.game.events.off(APP_ACTIVE, focus);
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility);
     if (typeof window !== 'undefined') {
       window.removeEventListener('blur', blur);
