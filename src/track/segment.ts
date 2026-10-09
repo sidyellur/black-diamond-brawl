@@ -1,4 +1,5 @@
 import { SEGMENT_LENGTH } from '../config';
+import type { MountainSafeZone, MountainSetpiece, MountainTheme } from './mountain';
 
 // A single slice of road (design-spec §3.1).
 export interface Segment {
@@ -19,6 +20,13 @@ export interface Segment {
    *  Absent/false on every other segment (including the hand-built sampler
    *  track, which has no finish line). */
   isFinish?: boolean;
+  /** Shared generation/placement/rendering contract; absent on legacy samplers. */
+  theme?: MountainTheme;
+  sectionIndex?: number;
+  setpiece?: MountainSetpiece;
+  safeZone?: MountainSafeZone;
+  /** Intended alternating forest gate lane, verified by the placement DP. */
+  slalomLane?: number;
 }
 
 /**

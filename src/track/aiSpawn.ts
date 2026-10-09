@@ -13,6 +13,7 @@ import {
 } from '../config';
 import { AIRiderParams } from '../entities/aiRider';
 import { Prng } from './prng';
+import { deriveRiderSeed, PERSONALITY_ORDER } from '../entities/personality';
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -51,7 +52,12 @@ export function spawnAIRiders(prng: Prng): AIRiderParams[] {
       // rivals just behind, two just ahead) rather than putting the whole
       // pack four segments behind the player.
       startZOffset: PLAYER_START_Z + AI_START_Z_OFFSETS_SEGMENTS[i] * SEGMENT_LENGTH,
-      paletteIndex: i
+      paletteIndex: i,
+      personality: PERSONALITY_ORDER[i % PERSONALITY_ORDER.length],
+      // Existing three course draws stay unchanged, preserving track/pickup
+      // geometry. Hash their course-dependent bits into an independent stream.
+      behaviorSeed: deriveRiderSeed(Math.floor(cruiseSpeedFactor * 0x100000000) ^
+        Math.floor(aggression * 0x100000000) ^ Math.floor(reactionDistanceSegments * 0x100000), i)
     });
   }
   return params;

@@ -17,6 +17,7 @@ import {
 import { AIRider } from './aiRider';
 import { Obstacle } from './obstacle';
 import { Player } from './player';
+import { COUNTER_LANE_REACH, COUNTER_WINDOW_MS, COUNTER_Z_REACH_FACTOR, EVADE_TIMING_MS } from './skillCombat';
 
 const LANE_COUNT = LANES.length;
 
@@ -35,6 +36,13 @@ const LANE_COUNT = LANES.length;
  * whichever of the two caused it.
  */
 export type CombatEvent = { type: 'hit' | 'brush' | 'knockout'; rider: AIRider };
+/** Separate feedback stream: legacy scoring still receives one ordinary hit,
+ * never duplicate counter points. The scene drains this after HUD/audio. */
+export type SkillCombatEvent = {
+  type: 'windup' | 'evade' | 'counter' | 'rival-hit' | 'whiff';
+  rider: AIRider;
+  evade?: 'steer' | 'jump';
+};
 
 /**
  * Combat system (design-spec §4.6): resolves bump-to-shove exchanges between
@@ -62,6 +70,10 @@ export type CombatEvent = { type: 'hit' | 'brush' | 'knockout'; rider: AIRider }
  */
 export class CombatSystem {
   readonly events: CombatEvent[] = [];
+  readonly skillEvents: SkillCombatEvent[] = [];
+  private readonly observedAttacks = new Map<AIRider, number>();
+  private counterRider: AIRider | null = null;
+  private counterRemainingMs = 0;
 
   // Per-rival-pair cooldown (§4.6 "shove immunity", scoped per attacker —
   // since every exchange is player-vs-that-specific-rival, a pairwise cooldown
@@ -116,10 +128,26 @@ export class CombatSystem {
       }
     }
 
+    this.counterRemainingMs = Math.max(0, this.counterRemainingMs - deltaMs);
+    if (this.counterRemainingMs <= 0 || this.player.wipedOut || this.player.collisionImmune ||
+        this.counterRider?.wipedOut || (this.counterRider !== null && this.counterRider.finishTimeMs !== null)) {
+      this.counterRider = null;
+      this.counterRemainingMs = 0;
+    }
+    this.updateRivalAttacks(nowMs);
     this.checkSameLaneContacts(nowMs);
     this.checkKnockoutTransitions(nowMs);
     this.updateTarget(deltaMs);
   }
+
+  /** Visible wind-up nearest to the player, for the textual/audio tell. */
+  get incomingAttack(): AIRider | null {
+    return this.riders.filter((rider) => !rider.wipedOut && rider.finishTimeMs === null && rider.attackPhase === 'windup')
+      .sort((a, b) => Math.abs(a.worldZ - this.player.worldZ) - Math.abs(b.worldZ - this.player.worldZ))[0] ?? null;
+  }
+  get counterTarget(): AIRider | null { return this.counterRemainingMs > 0 ? this.counterRider : null; }
+  get counterReady(): boolean { return this.counterTarget !== null && this.isAttackable(this.counterTarget); }
+  get counterFraction(): number { return this.counterTarget ? this.counterRemainingMs / COUNTER_WINDOW_MS : 0; }
 
   /** True while the attack key would be refused — drives the HUD cooldown pip. */
   get attackOnCooldown(): boolean {
@@ -143,6 +171,7 @@ export class CombatSystem {
    * hit the game had advertised.
    */
   get target(): AIRider | null {
+    if (this.counterTarget && this.isAttackable(this.counterTarget)) return this.counterTarget;
     return this.currentTarget && this.isAttackable(this.currentTarget) ? this.currentTarget : null;
   }
 
@@ -152,10 +181,13 @@ export class CombatSystem {
   private targetScore(rider: AIRider): number | null {
     const dFrac = Math.abs(rider.laneOffsetFraction - this.player.laneOffsetFraction);
     const dz = Math.abs(rider.worldZ - this.player.worldZ);
-    if (dFrac > ATTACK_LANE_REACH || dz > SHOVE_Z_WINDOW) {
+    const isCounter = rider === this.counterTarget;
+    const lateralReach = isCounter ? COUNTER_LANE_REACH : ATTACK_LANE_REACH;
+    const zReach = SHOVE_Z_WINDOW * (isCounter ? COUNTER_Z_REACH_FACTOR : 1);
+    if (dFrac > lateralReach || dz > zReach) {
       return null;
     }
-    return dFrac / ATTACK_LANE_REACH + dz / SHOVE_Z_WINDOW;
+    return dFrac / lateralReach + dz / zReach;
   }
 
   /**
@@ -169,7 +201,9 @@ export class CombatSystem {
    * would break the one promise it makes.
    */
   private isEligible(rider: AIRider): boolean {
-    if (this.player.wipedOut || this.player.airborne || this.player.collisionImmune) return false;
+    const isCounter = rider === this.counterTarget;
+    if (this.player.wipedOut || (this.player.airborne && !isCounter) || this.player.collisionImmune) return false;
+    if (rider.airborne && !isCounter) return false;
     if (rider.wipedOut || rider.finishTimeMs !== null || rider.collisionImmune) return false;
     if ((this.pairImmunityMs.get(rider) ?? 0) > 0) return false;
     if (this.attackCooldownMs > 0) return false;
@@ -234,13 +268,19 @@ export class CombatSystem {
    * game declined to honour.
    */
   attemptAttack(nowMs: number): boolean {
-    const rider = this.currentTarget;
+    const rider = this.target;
     if (!rider || !this.isAttackable(rider)) {
       return false;
     }
     this.attackCooldownMs = ATTACK_COOLDOWN_MS;
     this.player.startSwing();
-    this.resolveExchange(rider, nowMs, true);
+    const isCounter = rider === this.counterTarget;
+    this.resolveExchange(rider, nowMs, true, isCounter ? 'player' : undefined, isCounter);
+    if (isCounter) {
+      this.skillEvents.push({ type: 'counter', rider });
+      this.counterRider = null;
+      this.counterRemainingMs = 0;
+    }
     return true;
   }
 
@@ -254,33 +294,74 @@ export class CombatSystem {
    * player take multiple stacked knockbacks for what reads as one contact.
    */
   private checkSameLaneContacts(nowMs: number): void {
-    if (this.player.wipedOut || this.player.airborne) {
-      return;
-    }
+    if (this.player.wipedOut) return;
     const playerFraction = this.player.laneOffsetFraction;
     for (const rider of this.riders) {
-      const touching =
-        !rider.wipedOut &&
-        rider.finishTimeMs === null &&
+      const aerialContact = this.player.airborne && rider.airborne && rider.personality === 'daredevil' &&
+        Math.abs(this.player.jumpArcHeight - rider.jumpArcHeight) < 0.35;
+      const sameAltitude = (!this.player.airborne && !rider.airborne) || aerialContact;
+      const touching = !rider.wipedOut && rider.finishTimeMs === null && sameAltitude &&
         Math.abs(rider.worldZ - this.player.worldZ) <= SHOVE_Z_WINDOW &&
         Math.abs(rider.laneOffsetFraction - playerFraction) <= COLLISION_LANE_FRACTION;
-
-      if (!touching) {
-        this.inContact.delete(rider);
-        continue;
-      }
-      // Already touching last frame: this is the same contact continuing, not
-      // a new one. Staying in someone's lane must not machine-gun them.
-      if (this.inContact.has(rider)) {
-        continue;
-      }
+      if (!touching) { this.inContact.delete(rider); continue; }
+      // Never sneak a passive impact in during an advertised wind-up, its
+      // strike, or recovery. Counter opportunity is protected from brushes.
+      if (rider.attackPhase !== 'idle' || rider === this.counterTarget) continue;
+      if (this.inContact.has(rider)) continue;
       this.inContact.add(rider);
-
-      if ((this.pairImmunityMs.get(rider) ?? 0) > 0) {
+      if ((this.pairImmunityMs.get(rider) ?? 0) > 0) continue;
+      // A production rival's incoming body check is also telegraphed. Older
+      // untyped fixtures retain the legacy passive speed-exchange contract.
+      if ((rider.params.personality && this.player.speed < rider.speed) || aerialContact) {
+        if (rider.requestTelegraphedAttack(this.player)) this.announceWindup(rider);
         continue;
       }
-      if (this.resolveExchange(rider, nowMs, false)) {
-        return;
+      if (this.resolveExchange(rider, nowMs, false)) return;
+    }
+  }
+
+  private announceWindup(rider: AIRider): void {
+    if (this.observedAttacks.get(rider) === rider.attackId) return;
+    this.observedAttacks.set(rider, rider.attackId);
+    this.skillEvents.push({ type: 'windup', rider });
+  }
+
+  private updateRivalAttacks(nowMs: number): void {
+    let struckPlayer = false;
+    for (const rider of this.riders) {
+      if (rider.attackPhase === 'windup') this.announceWindup(rider);
+      const strike = rider.consumeStrike();
+      if (!strike) continue;
+      if (rider.wipedOut || rider.finishTimeMs !== null || rider.collisionImmune || rider.hitReacting ||
+          this.player.wipedOut || this.player.collisionImmune || (this.pairImmunityMs.get(rider) ?? 0) > 0) continue;
+      const inZReach = Math.abs(rider.worldZ - this.player.worldZ) <= SHOVE_Z_WINDOW;
+      const onTargetLine = Math.abs(this.player.laneOffsetFraction - strike.targetFraction) <= COLLISION_LANE_FRACTION;
+      const sameAltitude = strike.airborne
+        ? rider.airborne && this.player.airborne && Math.abs(rider.jumpArcHeight - this.player.jumpArcHeight) < 0.35
+        : !this.player.airborne && !rider.airborne;
+      const missed = !inZReach || !onTargetLine || !sameAltitude;
+      if (missed) {
+        const actionAgeAtStrike = this.player.maneuverAgeMs - strike.ageMs;
+        const deliberateEvade = this.player.maneuverSerial > rider.attackManeuverSerial &&
+          actionAgeAtStrike >= 0 && actionAgeAtStrike <= EVADE_TIMING_MS &&
+          Math.abs(this.player.maneuverFromFraction - strike.targetFraction) <= COLLISION_LANE_FRACTION;
+        const steerEvade = this.player.maneuverKind === 'steer' && !onTargetLine;
+        const jumpEvade = this.player.maneuverKind === 'jump' && this.player.airborne && !strike.airborne;
+        if (inZReach && deliberateEvade && (steerEvade || jumpEvade)) {
+          this.counterRider = rider;
+          this.counterRemainingMs = COUNTER_WINDOW_MS;
+          // A deliberate successful evade earns an actual usable counter,
+          // even if a previous attack's global cooldown has not quite ended.
+          this.attackCooldownMs = 0;
+          this.skillEvents.push({ type: 'evade', rider, evade: steerEvade ? 'steer' : 'jump' });
+        } else this.skillEvents.push({ type: 'whiff', rider });
+        continue;
+      }
+      if (!struckPlayer && this.resolveExchange(rider, nowMs, false, 'rival', strike.airborne)) {
+        this.skillEvents.push({ type: 'rival-hit', rider });
+        this.counterRemainingMs = 0;
+        this.counterRider = null;
+        struckPlayer = true;
       }
     }
   }
@@ -313,8 +394,9 @@ export class CombatSystem {
    * spends a charge — before the split, an armed player who was merely
    * rear-ended into a rival burned a pole charge for it.
    */
-  private resolveExchange(rider: AIRider, nowMs: number, deliberate: boolean): boolean {
-    if (this.player.wipedOut || rider.wipedOut || this.player.airborne || rider.finishTimeMs !== null) {
+  private resolveExchange(rider: AIRider, nowMs: number, deliberate: boolean,
+    winner?: 'player' | 'rival', allowAirborne = false): boolean {
+    if (this.player.wipedOut || rider.wipedOut || (!allowAirborne && (this.player.airborne || rider.airborne)) || rider.finishTimeMs !== null) {
       return false;
     }
     if (this.player.collisionImmune || rider.collisionImmune) {
@@ -326,10 +408,11 @@ export class CombatSystem {
 
     // The ski pole is a weapon you SWING. It applies to deliberate attacks
     // only, so a passive brush neither auto-wins nor spends a charge.
-    const armed = deliberate && this.player.armed;
-    const playerWins = armed || this.player.speed >= rider.speed;
+    const counter = winner === 'player';
+    const armed = deliberate && this.player.armed && !counter;
+    const playerWins = winner ? winner === 'player' : armed || this.player.speed >= rider.speed;
     const maxShift = armed && playerWins ? 2 : 1;
-    const speedLossFactor = armed && playerWins ? ARMED_SHOVE_SPEED_LOSS_FACTOR : SHOVE_SPEED_LOSS_FACTOR;
+    const speedLossFactor = (armed || counter) && playerWins ? ARMED_SHOVE_SPEED_LOSS_FACTOR : SHOVE_SPEED_LOSS_FACTOR;
 
     const loserLane = playerWins ? rider.laneIndex : this.player.laneIndex;
     const loserZ = playerWins ? rider.worldZ : this.player.worldZ;
@@ -347,7 +430,7 @@ export class CombatSystem {
       this.events.push({ type: deliberate ? 'hit' : 'brush', rider });
       rider.markShovedByPlayer(nowMs);
     } else {
-      this.player.applyKnockback(targetLane, speedLossFactor);
+      this.player.applyKnockback(targetLane, speedLossFactor, allowAirborne);
       // The player losing an exchange used to produce no signal at all — no
       // event, no state, nothing for the scene to react to. Now it recoils
       // and flashes exactly like a rival does.
