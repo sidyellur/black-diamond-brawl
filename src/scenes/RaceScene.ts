@@ -41,6 +41,7 @@ import { generateTrack } from '../track/generator';
 import { resolveSeed } from '../track/seed';
 import { Segment } from '../track/segment';
 import { oncePerKeyEvent } from '../input/keyboardEvents';
+import { APP_ACTIVE, APP_INACTIVE, CANCEL_INPUT, isAppActive } from '../input/appLifecycle';
 
 // The player is now PROJECTED like every other entity rather than pinned to a
 // fixed screen position. Because the camera trails by exactly CAMERA_BACK_Z,
@@ -116,6 +117,7 @@ export class RaceScene extends Phaser.Scene {
   private previousHitReaction = false;
   private worldRoll = 0;
   private previousUpdateAt = 0;
+  private resumePending = false;
 
   /** True once the run has ended (finish or wipeout) and `ResultScene` has
    *  been started — guards against re-triggering the transition on a later
@@ -142,6 +144,7 @@ export class RaceScene extends Phaser.Scene {
     this.previousHitReaction = false;
     this.worldRoll = 0;
     this.previousUpdateAt = performance.now();
+    this.resumePending = false;
     this.worldObjects = [];
     this.prevWiped = false;
     this.prevTumbling = false;
@@ -216,6 +219,7 @@ export class RaceScene extends Phaser.Scene {
     this.buildHud();
     this.bindRaceLifecycle();
     this.playerInput.setEnabled(false);
+    if (!isAppActive(this.game)) this.setPaused(true);
 
     // Built after the HUD so the UI camera already exists — every juice
     // object registers as world-space and must be ignored by it.
@@ -255,10 +259,12 @@ export class RaceScene extends Phaser.Scene {
 
   private bindRaceLifecycle(): void {
     const keyboard = this.input.keyboard;
-    const pause = oncePerKeyEvent(event => { if (!event.repeat) this.setPaused(!this.paused); });
-    const restart = oncePerKeyEvent(event => { if (!event.repeat && this.paused) this.scene.restart({ seed: this.seed }); });
+    const pause = oncePerKeyEvent(event => { if (!event.repeat && isAppActive(this.game)) this.setPaused(!this.paused); });
+    const restart = oncePerKeyEvent(event => { if (!event.repeat && this.paused && isAppActive(this.game)) this.scene.restart({ seed: this.seed }); });
     const mute = oncePerKeyEvent(event => { if (!event.repeat) this.hud.setMuted(this.audio.toggle()); });
     const blur = () => this.setPaused(true);
+    const cancel = () => { this.playerInput.reset(); this.hud.cancelInput(); };
+    const foreground = () => { this.previousUpdateAt = performance.now(); };
     const unlock = () => this.audio.unlock();
     const lifecycleKeys = keyboard?.addKeys('P,ESC,R,M') as Record<string, Phaser.Input.Keyboard.Key> | undefined;
     keyboard?.on('keydown-P', pause);
@@ -269,6 +275,9 @@ export class RaceScene extends Phaser.Scene {
     this.input.on('pointerdown', unlock);
     this.game.events.on(Phaser.Core.Events.BLUR, blur);
     this.game.events.on(Phaser.Core.Events.HIDDEN, blur);
+    this.game.events.on(APP_INACTIVE, blur);
+    this.game.events.on(CANCEL_INPUT, cancel);
+    this.game.events.on(APP_ACTIVE, foreground);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       keyboard?.off('keydown-P', pause);
       keyboard?.off('keydown-ESC', pause);
@@ -280,18 +289,29 @@ export class RaceScene extends Phaser.Scene {
       this.input.off('pointerdown', unlock);
       this.game.events.off(Phaser.Core.Events.BLUR, blur);
       this.game.events.off(Phaser.Core.Events.HIDDEN, blur);
+      this.game.events.off(APP_INACTIVE, blur);
+      this.game.events.off(CANCEL_INPUT, cancel);
+      this.game.events.off(APP_ACTIVE, foreground);
       this.playerInput.destroy();
       this.audio.ride(0);
     });
   }
 
   private setPaused(paused: boolean): void {
-    if (this.raceOver || this.paused === paused) return;
+    if (this.raceOver || (!paused && !isAppActive(this.game))) return;
+    if (this.paused === paused) {
+      if (paused) { this.playerInput.reset(); this.hud.cancelInput(); }
+      return;
+    }
     this.paused = paused;
     this.hud.setPaused(paused);
     if (paused) this.audio.ride(0);
     this.playerInput.setEnabled(!paused && this.countdownMs === 0);
-    if (!paused) this.audio.unlock();
+    if (!paused) {
+      this.previousUpdateAt = performance.now();
+      this.resumePending = true;
+      this.audio.unlock();
+    }
   }
 
   update(_wallTime: number, frameDelta: number): void {
@@ -302,16 +322,20 @@ export class RaceScene extends Phaser.Scene {
     const inputFrameElapsedMs = Math.max(0, updateAt - this.previousUpdateAt);
     this.previousUpdateAt = updateAt;
     if (this.paused) return;
+    const resumed = this.resumePending;
+    this.resumePending = false;
     // Bound a frame's travel below the collision window. A slow/background
     // frame must never teleport through a tree or consume a whole jump.
-    let delta = Math.min(50, Math.max(0, frameDelta));
+    let delta = resumed ? 0 : Math.min(50, Math.max(0, frameDelta));
     this.hud.tick(delta);
     if (this.countdownMs > 0) {
       // Countdown is a wall-time affordance, not physics. Phaser smoothing
       // discards >200 ms frames as hiccups, which stretched three beats into
       // ~17 seconds on software-rendered CI. Raw frame time keeps it honest;
       // movement remains bounded separately and explicit pause still freezes it.
-      const countdownDelta = Math.min(1000, Math.max(0, this.game.loop.rawDelta || frameDelta));
+      // A Resume gesture can arrive before the first restored RAF. Never
+      // count that frame's background gap against the starting countdown.
+      const countdownDelta = resumed ? 0 : Math.min(1000, Math.max(0, this.game.loop.rawDelta || frameDelta));
       this.countdownMs = Math.max(0, this.countdownMs - countdownDelta);
       this.hud.setCountdown(this.countdownMs > 1200 ? '3' : this.countdownMs > 600 ? '2' : this.countdownMs > 0 ? '1' : '');
       if (this.countdownMs === 0) {

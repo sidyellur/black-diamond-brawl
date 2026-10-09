@@ -3,6 +3,7 @@ import { SCREEN_H, SCREEN_W } from '../config';
 import { UI } from '../render/palette';
 import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
+import { isAppActive } from '../input/appLifecycle';
 
 const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 
@@ -85,7 +86,10 @@ export class RaceHud {
         const g = scene.add.rectangle(x, SCREEN_H - 43, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
         const t = this.text(x, SCREEN_H - 43, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
         const pointers = new Set<number>();
-        const press = (p: Phaser.Input.Pointer) => { pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); g.setFillStyle(UI.panelEdge, 0.95); };
+        const press = (p: Phaser.Input.Pointer) => {
+          if (!isAppActive(scene.game)) return;
+          pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); g.setFillStyle(UI.panelEdge, 0.95);
+        };
         const release = (p: Phaser.Input.Pointer) => {
           pointers.delete(p.id); actions.control(action, false, `touch:${p.id}`);
           if (pointers.size === 0) g.setFillStyle(UI.panel, 0.8);
@@ -157,10 +161,10 @@ export class RaceHud {
       if (pressedPointer === pointer.id) pressedPointer = null;
       if (pressedPointer === null) button.setFillStyle(UI.panelEdge);
     });
-    button.on('pointerdown', (pointer: Phaser.Input.Pointer) => { if (pressedPointer === null) { pressedPointer = pointer.id; button.setFillStyle(0x38536a); } });
+    button.on('pointerdown', (pointer: Phaser.Input.Pointer) => { if (pressedPointer === null && isAppActive(this.scene.game)) { pressedPointer = pointer.id; button.setFillStyle(0x38536a); } });
     button.on('pointerup', (pointer: Phaser.Input.Pointer) => {
       if (pressedPointer !== pointer.id) return;
-      const activate = pointer.event?.type !== 'touchcancel';
+      const activate = !pointer.wasCanceled && pointer.event?.type !== 'touchcancel' && pointer.event?.type !== 'pointercancel' && isAppActive(this.scene.game);
       pressedPointer = null;
       button.setFillStyle(UI.panelEdge);
       if (activate) action();
@@ -180,12 +184,15 @@ export class RaceHud {
   setPaused(paused: boolean): void {
     // Hidden/disabled objects cannot receive the release that follows a
     // keyboard interruption. Forget owned presses before changing visibility.
-    this.cancelButtons.forEach(cancel => cancel());
+    this.cancelInput();
     this.pauseOverlay.setVisible(paused);
-    if (paused) this.releaseTouchControls.forEach(release => release());
     for (const control of this.raceControls) {
       if (control.input) control.input.enabled = !paused;
     }
+  }
+  cancelInput(): void {
+    this.cancelButtons.forEach(cancel => cancel());
+    this.releaseTouchControls.forEach(release => release());
   }
   setCountdown(label: string): void { this.countdown.setText(label); }
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }

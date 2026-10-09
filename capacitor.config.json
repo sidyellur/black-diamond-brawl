@@ -1,0 +1,12 @@
+{
+  "appId": "com.sidyellur.blackdiamondbrawl",
+  "appName": "Black Diamond Brawl",
+  "webDir": "dist",
+  "backgroundColor": "#101923",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "preferredContentMode": "mobile",
+    "backgroundColor": "#101923"
+  }
+}

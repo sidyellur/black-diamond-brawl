@@ -7,8 +7,20 @@ const source = await readFile(new URL('../src/entities/session.ts', import.meta.
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2020 }
 }).outputText;
+const storageSource = await readFile(new URL('../src/platform/storage.ts', import.meta.url), 'utf8');
+const storageCompiled = ts.transpileModule(storageSource, {
+  compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2020 }
+}).outputText
+  .replace("'@capacitor/core'", JSON.stringify(import.meta.resolve('@capacitor/core')))
+  .replace("'@capacitor/preferences'", JSON.stringify(import.meta.resolve('@capacitor/preferences')));
 let instance = 0;
-const freshModule = () => import(`data:text/javascript;base64,${Buffer.from(`${compiled}\n// instance-${instance++}`).toString('base64')}`);
+const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const freshModule = () => {
+  const id = instance++;
+  const storageUrl = moduleUrl(`${storageCompiled}\n// instance-${id}`);
+  const session = compiled.replace("'../platform/storage'", JSON.stringify(storageUrl));
+  return import(moduleUrl(`${session}\n// instance-${id}`));
+};
 const data = new Map();
 globalThis.localStorage = {
   getItem: (key) => data.get(key) ?? null,

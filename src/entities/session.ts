@@ -1,5 +1,7 @@
-/** Personal records are local to this browser, with an in-memory fallback. */
-const STORAGE_KEY = 'black-diamond-brawl:records:v1';
+import { getStoredValue, setStoredValue, STORAGE_KEYS } from '../platform/storage';
+
+/** Personal records stay on this device, with an in-memory fallback. */
+const STORAGE_KEY = STORAGE_KEYS.records;
 const MAX_COURSES = 64;
 
 export interface CourseRecord {
@@ -25,7 +27,7 @@ function nonNegative(value: unknown): value is number {
 function readStoredRecords(): Records {
   const stored: Records = { bestScore: 0, courses: {} };
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    const raw: unknown = JSON.parse(getStoredValue(STORAGE_KEY) ?? 'null');
     if (!raw || typeof raw !== 'object') return stored;
     const saved = raw as Partial<Records>;
     if (nonNegative(saved.bestScore)) stored.bestScore = saved.bestScore;
@@ -88,7 +90,7 @@ function readRecords(): Records {
 
 function saveRecords(saved: Records): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+    setStoredValue(STORAGE_KEY, JSON.stringify(saved));
   } catch {
     // A full quota or denied storage must never interrupt a race or replay.
   }

@@ -1,0 +1,73 @@
+name: Verify iPhone simulator
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Select installed Xcode 26 or newer
+        shell: bash
+        run: |
+          # The default Xcode on macos-15 can be too old for Capacitor 8.
+          # Select explicitly from the image's installed stable releases.
+          python3 - <<'PY'
+          import glob, os, re, subprocess
+          candidates = []
+          for path in glob.glob('/Applications/Xcode*.app/Contents/Developer'):
+              if any(word in path.lower() for word in ['beta', 'release_candidate']):
+                  continue
+              output = subprocess.check_output(
+                  [path + '/usr/bin/xcodebuild', '-version'], text=True,
+                  env={**os.environ, 'DEVELOPER_DIR': path})
+              version = re.search(r'Xcode (\d+(?:\.\d+)*)', output)
+              if version:
+                  parts = tuple(map(int, version.group(1).split('.')))
+                  if parts[0] >= 26:
+                      candidates.append((parts, path))
+          if not candidates:
+              raise SystemExit('This runner image has no stable Xcode 26+. Install/select a supported runner image.')
+          _, path = sorted(candidates)[-1]
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('DEVELOPER_DIR=' + path + '\n')
+          print('Selected:', path)
+          PY
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build, install, launch and exercise real iPhone WKWebView
+        run: bash scripts/verify-ios.sh
+      - name: Keep simulator test evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: iphone-simulator-${{ github.sha }}
+          path: |
+            .verify/ios/*.log
+            .verify/ios/*.txt
+            .verify/ios/*.json
+            .verify/ios/*.png
+            .verify/ios/attachments/
+            .verify/ios/*.xcresult
+            .verify/ios/*.zip
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
