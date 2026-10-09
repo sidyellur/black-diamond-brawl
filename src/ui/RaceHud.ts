@@ -8,6 +8,7 @@ import { isAppActive } from '../input/appLifecycle';
 const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 
 export interface HudState {
+  riderCount?: number;
   score: number;
   speed: number;
   position: number;
@@ -218,7 +219,7 @@ export class RaceHud {
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 
   update(s: HudState): void {
-    this.place.setText(`${s.position}${['', 'ST', 'ND', 'RD', 'TH', 'TH'][s.position]} / 5`);
+    this.place.setText(`${s.position}${['', 'ST', 'ND', 'RD', 'TH', 'TH'][s.position]} / ${s.riderCount ?? 5}`);
     this.clock.setText(formatTime(s.elapsedMs / 1000));
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);

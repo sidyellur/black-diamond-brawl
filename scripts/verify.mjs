@@ -71,7 +71,7 @@ try {
   await step('interrupted mobile audio recovery', () => run('node', ['--import', 'tsx', 'scripts/verifyAudioRecovery.ts']));
   await step('native and browser storage', () => run('node', ['--import', 'tsx', 'scripts/verifyStorage.ts']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
-  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains', 'verifyProgression', 'verifyGhosts', 'verifyPractice']) {
+  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains', 'verifyProgression', 'verifyGhosts', 'verifyPractice', 'verifyNaturalRaceDriver']) {
     await step(script, () => run('node', ['--import', 'tsx', `scripts/${script}.ts`]));
   }
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));

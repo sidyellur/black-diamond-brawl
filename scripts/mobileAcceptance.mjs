@@ -34,7 +34,7 @@ const insets = async (left, right, bottom) => {
   await page.waitForFunction(({ left, right, bottom }) => {
     const b = document.querySelector('canvas').getBoundingClientRect();
     const fit = Math.min((innerWidth - left - right) / 960, (innerHeight - bottom) / 540);
-    return b.left >= left - 1 && b.right <= innerWidth - right + 1 && b.bottom <= innerHeight - bottom + 1 && Math.abs(b.width - 960 * fit) < 2;
+    return b.left >= left - 1 && b.right <= innerWidth - right + 1 && b.bottom <= innerHeight - bottom + 1 && Math.abs(b.width - 960 * fit) < 2 && Math.abs(window.__game.scale.canvasBounds.x - b.left) < 1 && Math.abs(window.__game.scale.canvasBounds.y - b.top) < 1;
   }, { left, right, bottom });
 };
 try {

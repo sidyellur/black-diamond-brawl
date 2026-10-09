@@ -60,8 +60,9 @@ The aggregate `npm run verify` includes deterministic models, 1,000 themed gener
 native lifecycle/audio and the following production-browser suites:
 
 - Existing smoke, keyboard/touch/replay and mobile WebKit acceptance
-- `expansionAcceptance.mjs`: real keyboard practice lessons, ghost capture/finish integration,
-  split comparison, reload and actual themed screenshots
+- `expansionAcceptance.mjs`: real keyboard practice lessons, complete natural-course simulation with all
+  hazards and four rivals retained, ghost capture/finish integration, rendered ghost/split, reload
+  and actual themed screenshots (only the themed captures reposition the camera/player)
 - `verifyMenus.mjs`: cup end-to-end menus using labelled finish fixtures, standings/idempotence,
   unlock/equip/persistence, daily links/share fallback, keyboard focus and phone routes
 

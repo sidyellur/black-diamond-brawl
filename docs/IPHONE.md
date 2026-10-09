@@ -59,13 +59,16 @@ support is not part of this prototype.
   cancel held controls and pause a race. Returning does **not** auto-resume it.
 - Tap **Resume** to continue. Sound unlock/recovery happens on an intentional
   gesture, including recovery from Safari's interrupted audio state.
-- Personal bests, records for the last 64 mountains, and mute preference use
-  native Preferences/UserDefaults. Browser play retains localStorage.
+- Personal bests, records for the last 64 mountains, the latest 8 personal ghosts,
+  cup standings/medals, cosmetic unlocks/equipment and mute preference use native
+  Preferences/UserDefaults. Browser play retains localStorage. Old v1 records
+  remain stored separately from current fixed60-v2/mountain-v2 competition.
 - Native storage is hydrated before menus appear, and writes are ordered to
   prevent older saves replacing newer ones. Unavailable storage leaves the
   game playable in memory. Deleting the app deletes its local progress.
 - A race in progress is not saved across process termination. Completed
-  results and mute preference are saved; relaunch returns to the lodge.
+  results, cup progress and preferences are saved; relaunch returns to the lodge.
+  Resume Cup restarts the unplayed round, preserving completed standings.
 
 ## Automated verification
 
@@ -77,7 +80,8 @@ npm run verify
 This preserves the full build, art, game-model, seeded-solvability, Chromium
 smoke and input/replay checks. It adds native configuration/storage/lifecycle
 guards and WebKit mobile coverage for safe-area fit, touch, interruption,
-explicit resume, offline replay, and mute persistence.
+explicit resume, offline replay, and mute persistence. Expansion coverage adds
+practice, cup/locker, daily sharing, ghost/splits and new native mode routes.
 
 On a Mac, `npm run verify:ios` runs the same simulator gate used in CI.
 Set `IOS_SIMULATOR_ID` to choose an installed iPhone explicitly.

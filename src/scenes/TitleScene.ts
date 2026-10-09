@@ -125,6 +125,8 @@ export class TitleScene extends Phaser.Scene {
     const hasCup = cup?.status === 'active';
     menuButton(this, 550, 312, 176, hasCup ? 'RESUME CUP' : 'CUP SERIES', 'C', () => this.openMenu('CupScene'));
     menuButton(this, 738, 312, 174, 'DAILY RUN', 'D', () => this.startRace(dailyRace()));
+    // Both labels sit over snow: a shared dark plate keeps small text legible.
+    this.add.rectangle(731, 375, 362, 24, UI.panel, 0.94);
     menuText(this, 555, 370, hasCup ? `${cup.rounds.length}/3 rounds complete` : '3 mountains. One medal.', 11, UI.inkMid);
     this.dailyDateText = menuText(this, 743, 370, `${utcDate()} · UTC`, 10, UI.inkMid).setFontFamily(MONO);
     menuButton(this, 550, 390, 176, 'PRACTICE', 'P', () => this.startRace({ ...createQuickRace(this.seed), mode: 'practice' }));
