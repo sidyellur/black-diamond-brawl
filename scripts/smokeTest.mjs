@@ -254,20 +254,22 @@ async function run() {
     sc.combat.attackCooldownMs = 0;
     sc.combat.currentTarget = null;
     sc.combat.update(0, sc.elapsedRaceMs);
+    // Observe the real post-update swing once, rather than sampling a short
+    // animation after a nondeterministic browser/CI round trip. No state is forced.
+    window.__attackObservation = null;
+    const observeAttack = () => {
+      if (!sc.player.swinging) return;
+      window.__attackObservation = { swinging: sc.player.swingMsRemaining > 0,
+        riderRecoiling: r.hitReactionMsRemaining > 0, onCooldown: sc.combat.attackOnCooldown };
+      sc.events.off('postupdate', observeAttack);
+    };
+    sc.events.on('postupdate', observeAttack);
     return { ok: true, targeted: sc.combat.target === r, cooldown: sc.combat.attackOnCooldown };
   });
 
   await page.keyboard.press('KeyF');
-  await page.waitForTimeout(120);
-
-  const afterAttack = await page.evaluate(() => {
-    const sc = window.__game.scene.getScene('RaceScene');
-    return {
-      swinging: sc.player.swingMsRemaining > 0,
-      riderRecoiling: sc.aiRiders[0].hitReactionMsRemaining > 0,
-      onCooldown: sc.combat.attackOnCooldown
-    };
-  });
+  await page.waitForFunction(() => window.__attackObservation !== null);
+  const afterAttack = await page.evaluate(() => window.__attackObservation);
   await page.screenshot({ path: `${OUT}/05-attack.png` });
 
   check('a rival in reach becomes the attack target', attackResult.ok && attackResult.targeted, JSON.stringify(attackResult));

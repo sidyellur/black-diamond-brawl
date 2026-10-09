@@ -12,7 +12,7 @@ import { CombatSystem } from '../src/entities/combat';
 import { Player } from '../src/entities/player';
 import { collectPickups } from '../src/entities/pickup';
 import { ScoreTracker } from '../src/entities/scoring';
-import { cupRivalParams } from '../src/progression/cup';
+import { CUP_SEEDS, cupRivalParams } from '../src/progression/cup';
 import { CheckpointTracker, GhostRecorder, checkpointWorldZs, type GhostRecording } from '../src/progression/ghost';
 import { generateTrack } from '../src/track/generator';
 // Plain JavaScript intentionally keeps the exact function browser-serializable.
@@ -73,10 +73,13 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
     }
   };
 }
-const seeds = (process.argv.find(arg => arg.startsWith('--seeds='))?.slice(8) ?? '1,2,3,7,11,21,42,77,101,202,333,777').split(',').map(Number);
+// Round-trip the function exactly as a browser evaluation serializer does.
+const serializedDriver = (0, eval)(`(${naturalRaceDriver.toString()})`) as typeof naturalRaceDriver;
+const defaultSeeds = [...new Set([1, 2, 3, 7, 11, 21, 42, 77, 101, 202, 333, 777, ...CUP_SEEDS])];
+const seeds = (process.argv.find(arg => arg.startsWith('--seeds='))?.slice(8) ?? defaultSeeds.join(',')).split(',').map(Number);
 const reports = seeds.map(seed => {
   const first = makeModel(seed);
-  const run = naturalRaceDriver({ scene: first, render: false });
+  const run = serializedDriver({ scene: first, render: false });
   if (!run.finished) return { ...run, replay: null };
   assert.ok(first.recording, `seed ${seed}: genuine complete ghost`);
   const replay = makeModel(seed, first.recording);
@@ -94,11 +97,42 @@ const reports = seeds.map(seed => {
   return { ...run, replay: { finished: result.finished, elapsedMs: result.elapsedMs,
     ghostLoaded: result.ghostLoaded, checkpoints: result.checkpoints, ghostSamples: result.ghostSamples } };
 });
+const proven = reports.find(report => report.seed === 202 && report.finished) ?? reports.find(report => report.finished)!;
+for (const neutralOpeningSteps of [1, 30, 120]) {
+  const warm = makeModel(proven.seed);
+  for (let step = 0; step < neutralOpeningSteps; step++) warm.simulate(1000 / 60, 1000 / 60);
+  const warmResult = serializedDriver({ scene: warm, render: false });
+  assert.equal(warmResult.finished, true, 'Ordinary early RAF frames must not prevent completion');
+  assert.equal(warmResult.elapsedMs, proven.elapsedMs);
+  assert.deepEqual(warmResult.rivals, proven.rivals);
+}
+// Browser retry deliberately presses ArrowRight, then allows 350 ms of real
+// movement to separate the translucent ghost for a screenshot. Validate that
+// exact public action before handing control back to the natural driver.
+const shiftedBase = makeModel(202);
+serializedDriver({ scene: shiftedBase, render: false });
+assert.ok(shiftedBase.recording);
+const shifted = makeModel(202, shiftedBase.recording);
+shifted.player.requestLaneShift(1);
+for (let step = 0; step < 21; step++) shifted.simulate(1000 / 60, 1000 / 60);
+const shiftedCheckpoint = serializedDriver({ scene: shifted, render: false, stopAtCheckpoint: 0 });
+assert.equal(shiftedCheckpoint.wipedOut, false);
+assert.equal(shiftedCheckpoint.over, false);
+assert.equal(shiftedCheckpoint.ghostLoaded, true);
+assert.equal(shiftedCheckpoint.checkpoints.length, 1);
+assert.ok(Number.isFinite(shiftedCheckpoint.checkpoints[0].deltaMs));
+const shiftedFinish = serializedDriver({ scene: shifted, render: false });
+assert.equal(shiftedFinish.finished, true);
+assert.equal(shiftedFinish.checkpoints.length, 3);
+assert.ok(shiftedFinish.checkpoints.every((split: { deltaMs: number }) => Number.isFinite(split.deltaMs)));
+console.log('ArrowRight + 350ms replay:', JSON.stringify({ finished: shiftedFinish.finished,
+  elapsedMs: shiftedFinish.elapsedMs, checkpointMs: shiftedCheckpoint.elapsedMs,
+  checkpoints: shiftedFinish.checkpoints, ghostSamples: shiftedFinish.ghostSamples }));
 mkdirSync('.verify', { recursive: true });
 writeFileSync('.verify/natural-driver-model.json', JSON.stringify(reports, null, 2));
 console.log(JSON.stringify(reports.map(r => ({ seed: r.seed, finished: r.finished, elapsedMs: r.elapsedMs,
   obstacles: r.obstacles, crests: r.crestCrossings, shifts: r.shifts, jumps: r.jumps,
   collected: r.collected, rockRecoveries: r.rockRecoveries, rivalHitReactions: r.rivalHitReactions,
   ghostSamples: r.ghostSamples, replay: !!r.replay })), null, 2));
-assert.ok(reports.some(r => r.finished), 'At least one full-course seed must finish');
+assert.ok(reports.every(r => r.finished), 'Every selected natural-course regression seed must finish');
 console.log(`${reports.filter(r => r.finished).length}/${reports.length} full-course seeds finished; each successful seed replayed with three matching natural ghost splits.`);

@@ -6,15 +6,20 @@ import { CombatSystem } from '../src/entities/combat';
 import { CollisionSystem, isMogulLaunchAvailable } from '../src/entities/collision';
 import { MAX_SPEED, PLAYER_START_Z, SEGMENT_LENGTH } from '../src/config';
 import type { Obstacle } from '../src/entities/obstacle';
+import { cupRivalParams } from '../src/progression/cup';
+import { generateTrack } from '../src/track/generator';
 const dt = 1000 / 60;
 for (const lesson of [0, 1, 2]) {
   const objective = new PracticeObjectives(lesson);
   const player = new Player(); player.speed = MAX_SPEED;
   const personality = (['bully', 'line-defender', 'daredevil'] as const)[lesson];
-  const rider = new AIRider({ personality, behaviorSeed: 700 + lesson, paletteIndex: 0,
-    reactionDistanceSegments: 7, startLane: lesson === 1 ? 2 : 1,
+  const rosterIndex = [1, 0, 3][lesson];
+  const template = cupRivalParams(rosterIndex, generateTrack(42).aiRiders[rosterIndex]);
+  const rider = new AIRider({ ...template, personality, behaviorSeed: 700 + lesson, startLane: lesson === 1 ? 2 : 1,
     startZOffset: PLAYER_START_Z + (lesson === 1 ? 600 : lesson === 2 ? 700 : 90),
     aggression: lesson === 0 ? 0 : 0.9, cruiseSpeedFactor: lesson === 1 ? 0.92 : 1 });
+  assert.equal(rider.params.name, ['SLATE', 'NOVA', 'EMBER'][lesson]);
+  assert.equal(rider.params.paletteIndex, rosterIndex);
   rider.speed = MAX_SPEED * rider.params.cruiseSpeedFactor;
   const z = PLAYER_START_Z + 5400;
   const obstacles: Obstacle[] = lesson === 2 ? [

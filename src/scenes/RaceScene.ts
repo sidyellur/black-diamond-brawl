@@ -485,7 +485,9 @@ export class RaceScene extends Phaser.Scene {
     this.pickups.splice(0);
     this.crestApexZs = [];
     const personality = (['bully', 'line-defender', 'daredevil'] as const)[this.practiceLesson];
-    const rider = new AIRider({ ...this.aiRiders[0].params, personality, behaviorSeed: 700 + this.practiceLesson,
+    // Teach the same named personalities the player will meet in every race.
+    const rosterIndex = [1, 0, 3][this.practiceLesson];
+    const rider = new AIRider({ ...this.aiRiders[rosterIndex].params, personality, behaviorSeed: 700 + this.practiceLesson,
       startLane: this.practiceLesson === 1 ? 2 : 1,
       startZOffset: PLAYER_START_Z + (this.practiceLesson === 1 ? 600 : this.practiceLesson === 2 ? 700 : 90),
       aggression: this.practiceLesson === 0 ? 0 : 0.9,
@@ -750,7 +752,7 @@ export class RaceScene extends Phaser.Scene {
       recovering: this.player.tumbling,
       chain: this.scoreTracker.chain,
       chainRemaining: this.scoreTracker.chainRemaining,
-      rivals: this.aiRiders.map((r, i) => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[i], out: r.wipedOut }))
+      rivals: this.aiRiders.map(r => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[r.params.paletteIndex], out: r.wipedOut }))
     });
   }
 

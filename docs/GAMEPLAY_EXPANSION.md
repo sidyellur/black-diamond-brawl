@@ -79,6 +79,23 @@ reconciliation, and daily retry across UTC midnight. These paths have targeted r
 
 ## Verification evidence
 
-PR #30 contains the shared combat/rival/mountain slice. The following integrated PR contains
-all five playable experiences and the README. Exact final CI runs and artifact references are
-recorded after browser/native validation; do not interpret this planning note as a test result.
+- [PR #30](https://github.com/sidyellur/black-diamond-brawl/pull/30): shared combat/rival/mountain slice and safe-area input-origin correction
+- [PR #31](https://github.com/sidyellur/black-diamond-brawl/pull/31): all five integrated playable experiences, native routes, persistence and this guide
+- [Browser checks](https://github.com/sidyellur/black-diamond-brawl/actions/workflows/verify.yml) and [iPhone simulator checks](https://github.com/sidyellur/black-diamond-brawl/actions/workflows/ios.yml): match the run's head SHA to the commit being evaluated
+
+The `game-verification-*` artifact contains model reports, keyboard/touch acceptance,
+`expansion-natural-run.json`, `expansion-natural-replay.json`, `expansion-natural-cup.json`, a complete practice report,
+rendered ghost/checkpoint captures, and forest/ridge/bowl screenshots. The natural driver
+accelerates the production fixed-step simulation and sends legal player actions; it retains
+all obstacles, pickups, crests, four opponents and colliders through a quick race and all three cup rounds. The real-keyboard practice suite
+separately proves event handling. Camera-positioned terrain screenshots and cup finish fixtures
+are labelled separately and are not substitutes for a normal-course finish.
+
+The `iphone-simulator-*` artifact contains unsigned Release launch images, the native test log,
+XCTest screenshots, and the simulator app. Native tests exercise actual WKWebView touch,
+safe areas, lifecycle and persistent progress across process restart. Simulator success is not
+physical-device or hardware-performance validation; see [#24](https://github.com/sidyellur/black-diamond-brawl/issues/24).
+
+Final reviewed heads and verification run links are recorded in the PR conversations, including
+any failed intermediate runs and the fixes that superseded them. Do not substitute an earlier
+successful run for the checks on the final merged `main` commit.
