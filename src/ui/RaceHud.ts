@@ -32,9 +32,10 @@ export interface HudState {
   rivals: { progress: number; color: number; out: boolean }[];
 }
 
-const BOOST_BAR_W = 240;
-const BOOST_BAR_X = SCREEN_W / 2 - BOOST_BAR_W / 2;
-const BOOST_BAR_Y = SCREEN_H - 62;
+// Beside the pace readout, which it modifies, and clear of the centre of the
+// road where the riders and the hint bar already compete for space.
+const BOOST_BAR_W = 150;
+const BOOST_BAR_X = 184;
 
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
@@ -95,8 +96,8 @@ export class RaceHud {
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
-    this.boostLabel = this.text(BOOST_BAR_X, BOOST_BAR_Y - 15, '', 11, UI.panel, true).setStroke('#f3f8ff', 3);
-    this.boostCue = this.text(BOOST_BAR_X + BOOST_BAR_W, BOOST_BAR_Y - 15, '', 11, UI.panel, true).setOrigin(1, 0).setStroke('#f3f8ff', 3);
+    this.boostLabel = this.text(BOOST_BAR_X, 0, '', 11, UI.panel, true).setStroke('#f3f8ff', 3);
+    this.boostCue = this.text(BOOST_BAR_X + BOOST_BAR_W, 0, '', 11, UI.panel, true).setOrigin(1, 0).setStroke('#f3f8ff', 3);
     this.section = this.text(30, 109, '', 14, UI.panel, true).setStroke('#f3f8ff', 3);
     this.split = this.text(30, 133, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
     this.lessonBg = scene.add.rectangle(SCREEN_W / 2, 231, 700, 112, UI.panel, 0.93).setDepth(10000).setVisible(false);
@@ -231,7 +232,9 @@ export class RaceHud {
    *  state never depends on colour alone. */
   private drawBoost(g: Phaser.GameObjects.Graphics, boost: HudState['boost']): void {
     const b = boost ?? { value: 0, active: false, ready: false };
-    const x = BOOST_BAR_X, y = BOOST_BAR_Y, w = BOOST_BAR_W, h = 10;
+    const x = BOOST_BAR_X, y = this.speed.y + 14, w = BOOST_BAR_W, h = 10;
+    this.boostLabel.setY(y - 17);
+    this.boostCue.setY(y - 17);
     g.fillStyle(UI.panel, 0.88).fillRoundedRect(x - 3, y - 3, w + 6, h + 6, 4);
     g.fillStyle(UI.panelEdge).fillRect(x, y, w, h);
     const fill = w * Phaser.Math.Clamp(b.value / BOOST_MAX, 0, 1);
