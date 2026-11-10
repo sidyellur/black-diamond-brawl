@@ -11,6 +11,7 @@ import { CollisionSystem } from '../src/entities/collision';
 import { CombatSystem } from '../src/entities/combat';
 import { Player } from '../src/entities/player';
 import { collectPickups } from '../src/entities/pickup';
+import { BoostMeter } from '../src/entities/boost';
 import { ScoreTracker } from '../src/entities/scoring';
 import { CUP_SEEDS, cupRivalParams } from '../src/progression/cup';
 import { CheckpointTracker, GhostRecorder, checkpointWorldZs, type GhostRecording } from '../src/progression/ghost';
@@ -33,6 +34,8 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
     jumpHeight: player.jumpArcHeight, lean: player.leanDirection });
   ghostRecorder.capture(0, pose());
   let prevWiped = false, prevTumbling = false, prevCrashes = 0;
+  // Wax adds to the meter; this driver never holds boost, so it only absorbs the gain.
+  const boost = new BoostMeter();
   return {
     seed, options: { runId: `natural-${seed}` }, countdownMs: 0, practiceObjective: null,
     player, aiRiders, aiCollisions, collisions, combat, scoreTracker,
@@ -57,7 +60,7 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
       });
       combat.update(delta, time);
       combat.skillEvents.length = 0;
-      collectPickups(player, this.pickups);
+      collectPickups(player, this.pickups, boost);
       if (combat.events.length) this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 50);
       if (player.wipedOut && !prevWiped) this.simulationHitStopMs = 133.33333333333334;
       else if (player.heavyCrashing && player.treeCrashSerial > prevCrashes) this.simulationHitStopMs = 100;

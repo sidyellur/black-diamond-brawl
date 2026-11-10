@@ -5,7 +5,7 @@ import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { MOUNTAIN_GENERATOR_VERSION, MOUNTAIN_SETPIECES, MountainSection, MountainTheme } from './mountain';
 import { placeObstacles } from './placement';
-import { placePickups } from './pickupPlacement';
+import { pickupStream, placePickups, skipLegacyPickupDraws } from './pickupPlacement';
 import { mulberry32, Prng, randInt } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
 import { Segment } from './segment';
@@ -164,13 +164,17 @@ export interface GeneratedTrack {
   pickups: Pickup[];
 }
 
-/** One seed, four strictly ordered passes, no runtime randomness. */
+/** One seed, four strictly ordered passes, no runtime randomness. Pickups
+ *  draw from a derived stream, not the shared generator (see `pickupStream`). */
 export function generateTrack(seed: number): GeneratedTrack {
   const prng = mulberry32(seed);
   const geometry = buildGeometry(prng);
   const obstacles = placeObstacles(geometry, prng);
-  const pickups = placePickups({ obstacles, placeableStart: geometry.placeableStart,
-    placeableEnd: geometry.placeableEnd }, prng);
+  // Pickups draw from their own seed-derived stream; the shared generator
+  // still advances exactly as before so rival parameters are unchanged.
+  skipLegacyPickupDraws(obstacles, geometry.placeableStart, geometry.placeableEnd, prng);
+  const pickups = placePickups({ obstacles, crestApexes: geometry.crestApexes,
+    placeableStart: geometry.placeableStart, placeableEnd: geometry.placeableEnd }, pickupStream(seed));
   const aiRiders = spawnAIRiders(prng);
   return { generatorVersion: MOUNTAIN_GENERATOR_VERSION, sections: geometry.sections,
     segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups };

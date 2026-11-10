@@ -11,16 +11,17 @@ import {
   RIDER_JUMP_HEIGHT_WORLD,
   SCREEN_H,
   SCREEN_W,
-  SEGMENT_LENGTH
+  SEGMENT_LENGTH,
+  WAX_BOOST_GAIN
 } from '../config';
 import { AIRider } from '../entities/aiRider';
 import { AIRiderRenderer } from '../entities/aiRiderRenderer';
 import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
-import { CombatSystem, type PushPlan } from '../entities/combat';
+import { CombatSystem, type PushPlan, type ThrowEvent } from '../entities/combat';
 import { bindPlayerInput, PlayerInput } from '../entities/input';
 import { Obstacle } from '../entities/obstacle';
 import { ObstacleRenderer } from '../entities/obstacleRenderer';
-import { collectPickups, Pickup } from '../entities/pickup';
+import { collectPickups, Pickup, type PickupKind } from '../entities/pickup';
 import { PickupRenderer } from '../entities/pickupRenderer';
 import { BoostMeter } from '../entities/boost';
 import { Player } from '../entities/player';
@@ -72,6 +73,13 @@ interface RaceSceneData extends Partial<RaceOptions> {
   seed?: number;
 }
 
+const PICKUP_MESSAGES: Record<PickupKind, string> = {
+  pole: 'SKI POLE · 3 POWER HITS',
+  shield: 'SHIELD · ABSORBS ONE HIT OR ROCK',
+  wax: `SPEED WAX · +${WAX_BOOST_GAIN} BOOST`,
+  snowball: 'SNOWBALL · HIT TO THROW'
+};
+
 /**
  * The full race: renderer, entities, input, combat, scoring, and a minimal
  * in-race HUD. Restartable — `create()` re-derives EVERY piece of per-race
@@ -122,7 +130,8 @@ export class RaceScene extends Phaser.Scene {
   private paused = false;
   private countdownMs = 1800;
   private elapsedRaceMs = 0;
-  private previousCharges = 0;
+  private prevShieldBreaks = 0;
+  private frameThrows: ThrowEvent[] = [];
   private previousHitReaction = false;
   private worldRoll = 0;
   private previousUpdateAt = 0;
@@ -172,7 +181,8 @@ export class RaceScene extends Phaser.Scene {
     this.elapsedRaceMs = 0;
     this.paused = false;
     this.countdownMs = 1800;
-    this.previousCharges = 0;
+    this.prevShieldBreaks = 0;
+    this.frameThrows = [];
     this.previousHitReaction = false;
     this.worldRoll = 0;
     this.previousUpdateAt = performance.now();
@@ -403,6 +413,7 @@ export class RaceScene extends Phaser.Scene {
     const time = this.elapsedRaceMs;
     if (this.raceOver) return;
     this.frameStruckRiders = [];
+    this.frameThrows = [];
     this.fixedClock.advance(delta, (step) => {
       if (this.raceOver || this.paused || this.practiceComplete) return false;
       this.simulate(step, inputFrameElapsedMs);
@@ -600,7 +611,9 @@ export class RaceScene extends Phaser.Scene {
     this.boost.update(delta, this.playerInput.boostHeld(),
       !this.player.wipedOut && !this.player.tumbling && !this.player.airborne);
     if (this.playerInput.attackJustPressed()) {
-      this.combat.attemptAttack(time);
+      // A melee target in reach always wins; the snowball is only thrown when
+      // the melee attack is refused, and is kept if it is not.
+      if (!this.combat.attemptAttack(time)) this.combat.attemptThrow(time);
     }
     if (this.playerInput.pushJustPressed()) {
       this.combat.attemptPush(time, this.playerInput.heldDirection());
@@ -658,12 +671,18 @@ export class RaceScene extends Phaser.Scene {
 
     // Ski-pole pickup (§4.6): collected by lane + Z, including while
     // airborne — unlike obstacles, never gated on `player.airborne`.
-    collectPickups(this.player, this.pickups);
-    if (this.player.weaponCharges > this.previousCharges) {
-      this.hud.showMessage('SKI POLE · 3 POWER HITS', UI.accentWarn);
+    const collected = collectPickups(this.player, this.pickups, this.boost);
+    if (collected.length > 0) {
+      this.hud.showMessage(PICKUP_MESSAGES[collected[collected.length - 1]], UI.accentWarn);
       this.audio.play('pickup');
     }
-    this.previousCharges = this.player.weaponCharges;
+    this.frameThrows.push(...this.combat.throwEvents.splice(0));
+    if (this.player.shieldBreakSerial > this.prevShieldBreaks) {
+      this.hud.showMessage('SHIELD BROKE', UI.accentInfo);
+      this.audio.play('shield');
+      this.juice.shieldBreak(this.playerSprite.x, this.playerSprite.y);
+    }
+    this.prevShieldBreaks = this.player.shieldBreakSerial;
 
     // Combat feedback is emitted AFTER the render pass (`emitCombatFeedback`)
     // so the struck rival can be projected with THIS frame's offset-walk
@@ -781,6 +800,9 @@ export class RaceScene extends Phaser.Scene {
       elapsedMs: this.elapsedRaceMs,
       progress: Phaser.Math.Clamp((this.player.worldZ - PLAYER_START_Z) / courseLength, 0, 1),
       charges: this.player.weaponCharges,
+      snowball: this.player.snowballs > 0,
+      shield: this.player.shielded,
+      throwTarget: this.combat.throwTarget !== null,
       attackCooldown: this.combat.attackCooldownFraction,
       pushCooldown: this.combat.pushCooldownFraction,
       push: this.combat.pushTarget !== null,
@@ -917,10 +939,14 @@ export class RaceScene extends Phaser.Scene {
   ): void {
     this.targetMarker.clear();
     const push = this.pushPreview();
-    const target = this.combat.target ?? (push ? this.combat.pushTarget : null);
+    const throwTarget = this.combat.throwTarget;
+    const target = this.combat.target ?? (push ? this.combat.pushTarget : null) ?? throwTarget;
     if (!target) {
       return;
     }
+    // A snowball target is the same chevron on the rival the throw would hit,
+    // in the info colour with a ball ring beneath it so it is not colour-only.
+    const throwing = target === throwTarget && this.combat.target === null;
     const projected = projectEntity(target.laneOffsetFraction, target.worldZ, this.track, drawnSegments, {
       x: camX,
       y: camY,
@@ -935,7 +961,7 @@ export class RaceScene extends Phaser.Scene {
     const y = projected.screenY + 3;
     // A chevron rather than a ring: it points at the rider, survives being
     // small, and cannot be mistaken for a contact shadow.
-    this.targetMarker.fillStyle(this.combat.counterReady ? UI.accentGood : UI.accentWarn, 0.92);
+    this.targetMarker.fillStyle(throwing ? UI.accentInfo : this.combat.counterReady ? UI.accentGood : UI.accentWarn, 0.92);
     this.targetMarker.beginPath();
     this.targetMarker.moveTo(x, y + w * 0.30);
     this.targetMarker.lineTo(x - w * 0.34, y);
@@ -945,6 +971,10 @@ export class RaceScene extends Phaser.Scene {
     this.targetMarker.lineTo(x + w * 0.34, y);
     this.targetMarker.closePath();
     this.targetMarker.fillPath();
+    if (throwing) {
+      this.targetMarker.lineStyle(3, UI.accentInfo, 0.95);
+      this.targetMarker.strokeCircle(x, y + w * 0.5, Math.max(4, w * 0.12));
+    }
     if (push && this.combat.pushTarget === target) this.drawPushArrow(x, y, w, push);
   }
 
@@ -1012,6 +1042,15 @@ export class RaceScene extends Phaser.Scene {
     drawnSegments: Map<number, DrawnSegment>
   ): void {
     if (struckRiders.length > 0) this.audio.play('hit');
+    for (const thrown of this.frameThrows) {
+      this.juice.launchSnowball({ x: this.playerSprite.x, y: this.playerSprite.y - this.playerSprite.displayHeight * 0.5 },
+        thrown.rider);
+    }
+    this.juice.renderSnowballs(this.time.now, (rider) => {
+      const target = rider as AIRider;
+      const p = projectEntity(target.laneOffsetFraction, target.worldZ, this.track, drawnSegments, { x: camX, y: camY, z: camZ });
+      return p ? { x: p.screenX, y: p.screenY - p.screenW * PLAYER_WIDTH_FRACTION * 0.5 } : null;
+    });
     const seen = new Set<AIRider>();
     for (const rider of struckRiders) {
       // A knockdown arrives as a hit plus a knockout for the same rider; play

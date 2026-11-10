@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { drawRider, RIDER_FRAME_SIZE, RiderPose, PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES } from '../entities/riderArt';
 import { drawObstacle, OBSTACLE_ART_SIZE, ObstacleArtKind } from '../entities/obstacleArt';
-import { drawPickup, PICKUP_ART_SIZE } from '../entities/pickupArt';
+import { drawPickupKind, PICKUP_ART_SIZE } from '../entities/pickupArt';
+import { PICKUP_KIND_LIST } from '../entities/pickup';
 import { MIN_OUTLINE_DELTA_L, SNOW, UI } from '../render/palette';
 import { measureOutlineContrast, PixelCanvas } from '../render/pixel';
 
@@ -28,6 +29,16 @@ export class SpriteLabScene extends Phaser.Scene {
 
     const entries: Array<{ name: string; cv: PixelCanvas }> = [];
 
+    // Pickups and hazards come first: the canvas is a fixed 540px tall, so the
+    // top of the sheet is what a contact-sheet screenshot actually shows.
+    const pickupNames = { pole: 'ski-pole', shield: 'shield', wax: 'speed-wax', snowball: 'snowball' } as const;
+    for (const kind of PICKUP_KIND_LIST) {
+      entries.push({ name: `pickup/${pickupNames[kind]}`, cv: drawPickupKind(kind) });
+    }
+    const obstacles: ObstacleArtKind[] = ['tree', 'rock', 'mogul'];
+    for (const kind of obstacles) {
+      entries.push({ name: `obstacle/${kind}`, cv: drawObstacle(kind) });
+    }
     // Must list every pose in the sheet — this is what puts each new frame
     // through the silhouette and outline-contrast gates.
     const poses: RiderPose[] = ['lean-left', 'center', 'lean-right', 'jump', 'tumble', 'hit', 'swing'];
@@ -37,11 +48,6 @@ export class SpriteLabScene extends Phaser.Scene {
     RIVAL_RIDER_PALETTES.forEach((pal, i) => {
       entries.push({ name: `rival${i}/center`, cv: drawRider('center', pal) });
     });
-    const obstacles: ObstacleArtKind[] = ['tree', 'rock', 'mogul'];
-    for (const kind of obstacles) {
-      entries.push({ name: `obstacle/${kind}`, cv: drawObstacle(kind) });
-    }
-    entries.push({ name: 'pickup/ski-pole', cv: drawPickup() });
 
     // Snow strip behind everything — sprites must be judged against the
     // surface they actually sit on, not a neutral grey.

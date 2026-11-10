@@ -328,7 +328,10 @@ All of these are tunables in `config.ts` and expected to change during play-test
   upcoming obstacles until the rider is over it. (20 ≥ 18 also satisfies the crest case of
   the jump-reach constraint above.)
 - **Weapon pickups** spawn on a random clear lane roughly every 20–30 seconds of travel
-  (~300–450 segments), through the seeded RNG.
+  (~300–450 segments), through the seeded RNG. *Superseded by #36 (`mountain-v3`):* a pickup
+  every 150–220 segments (about seven a course), of kind pole / shield / speed wax / snowball
+  (weights 35/25/20/20), drawn from a stream derived from the course seed so obstacles and
+  rivals are unaffected, on a lane reachable without crossing a tree.
 - The final segment carries the **finish line** (banner sprite across the road). A short
   obstacle-free run-out precedes it.
 
@@ -525,6 +528,12 @@ This is a deliberate v1 simplification (flagged in §7).
   through a rock tumble** (temporary wipeout) and are only cleared by a run-ending
   wipeout (tree — which ends the run anyway) or overwritten by a fresh pickup. HUD shows
   remaining charges.
+- **Shield, speed wax, snowball (#36).** The pole and the snowball share one weapon slot. A
+  shield absorbs the next lost exchange or rock hit (never a tree) and survives a heavy crash;
+  wax adds 60 boost; a snowball is thrown with Attack when no melee target is in reach, at the
+  nearest rival ahead in the same or an adjacent lane within 12 segments, resolving as an
+  ordinary lost exchange (one stagger pip, a clean hit's points). A heavy crash clears the
+  weapon slot; a wipeout clears everything.
 
 ### 4.7 Scoring
 

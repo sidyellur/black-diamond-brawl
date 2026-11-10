@@ -91,7 +91,7 @@ export class RaceAudio {
     this.windFilter.frequency.setTargetAtTime(250 + speed * (carving ? 1700 : 700) + (boosting ? 900 : 0), now, 0.12);
   }
 
-  play(kind: 'jump' | 'land' | 'hit' | 'crash' | 'pickup' | 'score' | 'go'): void {
+  play(kind: 'jump' | 'land' | 'hit' | 'crash' | 'pickup' | 'score' | 'go' | 'shield'): void {
     const c = this.context;
     if (!this.active || !c || !this.master || this.muted || c.state !== 'running') return;
     const now = c.currentTime;
@@ -110,6 +110,7 @@ export class RaceAudio {
     if (kind === 'pickup' || kind === 'go') {
       [392, 494, 587].forEach((f, i) => tone(f, f, 0.16, i * 0.075));
     } else if (kind === 'score') tone(740, 980, 0.10);
+    else if (kind === 'shield') { tone(880, 220, 0.16); tone(660, 140, 0.2, 0.05); }
     else if (kind === 'jump') tone(180, 430, 0.17);
     else if (kind === 'land') tone(130, 60, 0.13);
     else {

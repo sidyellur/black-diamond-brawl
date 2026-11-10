@@ -12,7 +12,8 @@ import {
   type RiderPose
 } from '../src/entities/riderArt';
 import { drawObstacle, OBSTACLE_ART_SIZE, type ObstacleArtKind } from '../src/entities/obstacleArt';
-import { drawPickup, PICKUP_ART_SIZE } from '../src/entities/pickupArt';
+import { drawPickupKind, PICKUP_ART_SIZE } from '../src/entities/pickupArt';
+import { PICKUP_KIND_LIST } from '../src/entities/pickup';
 import { deltaL, MIN_OUTLINE_DELTA_L, SNOW } from '../src/render/palette';
 import { measureOutlineContrast, PixelCanvas } from '../src/render/pixel';
 
@@ -48,7 +49,8 @@ for (const kind of kinds) {
     generate(`obstacle/tree-${variant}`, kind, () => drawObstacle(kind, variant));
   }
 }
-generate('pickup/ski-pole', 'pickup', drawPickup);
+const pickupNames = { pole: 'ski-pole', shield: 'shield', wax: 'speed-wax', snowball: 'snowball' } as const;
+for (const kind of PICKUP_KIND_LIST) generate(`pickup/${pickupNames[kind]}`, 'pickup', () => drawPickupKind(kind));
 const generationMs = performance.now() - generationStart;
 
 // Reproduce the actual boot's row-atlas packing and verify every visible byte.
@@ -73,7 +75,7 @@ function pack(group: Entry[]): void {
 }
 for (let palette = 0; palette < palettes.length; palette++) pack(entries.slice(palette * poses.length, (palette + 1) * poses.length));
 pack(entries.filter((entry) => kinds.includes(entry.kind as ObstacleArtKind)));
-sheets.push(entries[entries.length - 1].cv);
+pack(entries.filter((entry) => entry.kind === 'pickup'));
 const packingAndVerificationMs = performance.now() - packingStart;
 const memoryAfterBuffers = process.memoryUsage();
 
@@ -159,7 +161,8 @@ check('all seven poses and four rival palettes are generated', () => {
   assert.equal(RIVAL_RIDER_PALETTES.length, 4);
   assert.equal(entries.filter((entry) => entry.kind === 'rider').length, 35);
   assert.equal(entries.filter((entry) => entry.kind === 'tree').length, 3);
-  assert.equal(entries.length, 41);
+  assert.equal(entries.filter((entry) => entry.kind === 'pickup').length, 4);
+  assert.equal(entries.length, 44);
   assert.equal(new Set(entries.map((entry) => entry.name)).size, entries.length);
 });
 check('high-resolution gameplay frame sizes stay aligned', () => {
@@ -168,7 +171,7 @@ check('high-resolution gameplay frame sizes stay aligned', () => {
   assert.equal(PICKUP_ART_SIZE, 192);
 });
 
-console.log('\n=== generated gameplay art: 41 buffers ===');
+console.log('\n=== generated gameplay art: 44 buffers ===');
 const reports = entries.map(({ name, kind, cv, generationMs: entryMs }) => {
   const bounds: Bounds = { left: cv.w, top: cv.h, right: -1, bottom: -1 };
   let occupied = 0; let opaque = 0; let fractional = 0;
@@ -252,6 +255,16 @@ check('every rival palette changes a meaningful area of the actual rendered suit
     assert.ok(different / compared >= 0.05, `${centers[a].name}/${centers[b].name} differ on only ${different} of ${compared} opaque pixels`);
   }
 });
+check('the four pickups are distinct images and distinct silhouettes (shape, not just colour)', () => {
+  const pickups = entries.filter((entry) => entry.kind === 'pickup');
+  assert.equal(new Set(pickups.map(({ cv }) => digest(cv.data))).size, 4);
+  const masks = pickups.map(({ cv }) => Uint8Array.from({ length: cv.w * cv.h }, (_, i) => cv.data[i * 4 + 3] >= 128 ? 1 : 0));
+  for (let a = 0; a < masks.length; a++) for (let b = a + 1; b < masks.length; b++) {
+    let union = 0; let difference = 0;
+    masks[a].forEach((value, i) => { if (value || masks[b][i]) union++; if (value !== masks[b][i]) difference++; });
+    assert.ok(difference / union > 0.2, `${pickups[a].name}/${pickups[b].name} silhouettes differ by only ${(100 * difference / union).toFixed(1)}%`);
+  }
+});
 check('tree variants contain distinct silhouettes', () => {
   const trees = entries.filter((entry) => entry.kind === 'tree');
   const masks = trees.map(({ cv }) => Uint8Array.from({ length: cv.w * cv.h }, (_, i) => cv.data[i * 4 + 3] >= 128 ? 1 : 0));
@@ -261,7 +274,7 @@ check('generation is deterministic for a representative rider and each hazard/pi
   assert.equal(digest(drawRider('swing', PLAYER_RIDER_PALETTE).data), reports.find((entry) => entry.name === 'player/swing')!.rgbaHash);
   for (const kind of kinds) assert.equal(digest(drawObstacle(kind).data), reports.find((entry) => entry.name === `obstacle/${kind}`)!.rgbaHash);
   for (const variant of [1, 2]) assert.equal(digest(drawObstacle('tree', variant).data), reports.find((entry) => entry.name === `obstacle/tree-${variant}`)!.rgbaHash);
-  assert.equal(digest(drawPickup().data), reports.find((entry) => entry.kind === 'pickup')!.rgbaHash);
+  for (const kind of PICKUP_KIND_LIST) assert.equal(digest(drawPickupKind(kind).data), reports.find((entry) => entry.name === `pickup/${pickupNames[kind]}`)!.rgbaHash);
 });
 
 const workload = {

@@ -45,7 +45,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 "{\"bestScore\":4321,\"courses\":{\"202\":{\"bestScore\":1234,\"bestTimeSeconds\":42.5,\"attempts\":3,\"lastPlayed\":1700000000000}}}",
                 forKey: "CapacitorStorage.black-diamond-brawl:records:v1")
             UserDefaults.standard.set(
-                "{\"version\":2,\"rulesVersion\":\"fixed60-v3\",\"courseVersion\":\"mountain-v2\",\"bestScore\":4321,\"courses\":{\"fixed60-v3/mountain-v2/202\":{\"bestScore\":1234,\"bestTimeSeconds\":42.5,\"attempts\":3,\"lastPlayed\":1700000000000}},\"receipts\":[]}",
+                "{\"version\":2,\"rulesVersion\":\"fixed60-v3\",\"courseVersion\":\"mountain-v3\",\"bestScore\":4321,\"courses\":{\"fixed60-v3/mountain-v3/202\":{\"bestScore\":1234,\"bestTimeSeconds\":42.5,\"attempts\":3,\"lastPlayed\":1700000000000}},\"receipts\":[]}",
                 forKey: "CapacitorStorage.black-diamond-brawl:records:v2")
         }
         // Block HTTP(S) inside WKWebView BEFORE its first navigation. This

@@ -1,8 +1,107 @@
-import { PICKUP, SNOW, UI, rim, shade } from '../render/palette';
+import { PICKUP, PICKUP_KINDS_PALETTE as KP, SNOW, UI, rim, shade } from '../render/palette';
 import { PixelCanvas } from '../render/pixel';
+import type { PickupKind } from './pickup';
 import { Point, VectorPainter, preserveAlphaRim, linearGradient, smoothContour } from '../render/vectorArt';
 
 export const PICKUP_ART_SIZE = 192;
+
+/** Letter glyph printed on each pickup, so the four read without colour. */
+export const PICKUP_GLYPH: Record<PickupKind, string> = { pole: 'P', shield: 'S', wax: 'W', snowball: 'B' };
+
+const GLYPH_STROKES: Record<string, Point[][]> = {
+  P: [[[0, 1], [0, 0], [0.7, 0], [0.92, 0.18], [0.92, 0.36], [0.7, 0.55], [0, 0.55]]],
+  S: [[[0.92, 0.14], [0.68, 0], [0.28, 0], [0.06, 0.16], [0.06, 0.36], [0.3, 0.5], [0.7, 0.58],
+    [0.94, 0.72], [0.94, 0.86], [0.72, 1], [0.3, 1], [0.06, 0.86]]],
+  W: [[[0, 0], [0.25, 1], [0.5, 0.36], [0.75, 1], [1, 0]]],
+  B: [[[0, 0], [0, 1], [0.7, 1], [0.92, 0.85], [0.92, 0.65], [0.7, 0.5], [0, 0.5]],
+    [[0, 0], [0.66, 0], [0.88, 0.14], [0.88, 0.36], [0.66, 0.5]]]
+};
+
+/** Dark disc with a white letter and a trim ring: the pickup's colour-free tag. */
+function badge(p: VectorPainter, cx: number, cy: number, r: number, glyph: string, ring: number): void {
+  p.ellipse(cx, cy, r + 3.5, r + 3.5, rim(ring));
+  p.ellipse(cx, cy, r + 1, r + 1, ring);
+  p.ellipse(cx, cy, r - 2, r - 2, KP.badge);
+  const h = r * 1.0, w = r * 0.78;
+  for (const stroke of GLYPH_STROKES[glyph]) {
+    p.stroke(stroke.map(([x, y]): Point => [cx - w / 2 + x * w, cy - h / 2 + y * h]), r * 0.2, UI.inkHigh);
+  }
+}
+
+function groundPad(p: VectorPainter, color: number): void {
+  const pad = linearGradient(77, 172, 121, 190, [shade(color, 'lit'), color, shade(color, 'shadow')]);
+  p.ellipse(96, 184, 35, 7, rim(color));
+  p.ellipse(96, 183, 28.5, 3.5, pad);
+}
+
+/** Heater shield: a tall, pointed-bottom silhouette. */
+function drawShield(): PixelCanvas {
+  const canvas = new PixelCanvas(PICKUP_ART_SIZE, PICKUP_ART_SIZE);
+  const p = new VectorPainter(canvas);
+  groundPad(p, KP.shield.face);
+  const outer: Point[] = [[96, 20], [140, 30], [150, 58], [144, 108], [124, 148], [96, 178],
+    [68, 148], [48, 108], [42, 58], [52, 30]];
+  p.shape(outer, rim(KP.shield.face), rim(KP.shield.face), 4);
+  const body = linearGradient(46, 24, 148, 170, [KP.shield.lit, KP.shield.face, shade(KP.shield.deep, 'lit')]);
+  const trimOuter = smoothContour(outer);
+  p.polygon(trimOuter, linearGradient(46, 24, 148, 170, [UI.inkHigh, KP.shield.trim, shade(KP.shield.trim, 'shadow')]));
+  const inner: Point[] = [[96, 32], [132, 40], [140, 60], [135, 104], [118, 140], [96, 164],
+    [74, 140], [57, 104], [52, 60], [60, 40]];
+  p.polygon(smoothContour(inner), body);
+  p.line([96, 34], [96, 160], 3, shade(KP.shield.deep, 'core'), 0.55);
+  p.line([60, 66], [132, 66], 3, shade(KP.shield.deep, 'core'), 0.45);
+  p.stroke([[66, 50], [74, 40], [92, 36]], 4, KP.shield.lit, false, 0.9);
+  badge(p, 96, 98, 25, 'S', KP.shield.trim);
+  preserveAlphaRim(canvas, SNOW.packed);
+  return canvas;
+}
+
+/** Speed wax: an upright wax bar with a lightning bolt, tilted like a dropped tin. */
+function drawWax(): PixelCanvas {
+  const canvas = new PixelCanvas(PICKUP_ART_SIZE, PICKUP_ART_SIZE);
+  const p = new VectorPainter(canvas);
+  groundPad(p, KP.wax.body);
+  const edge = rim(KP.wax.body);
+  const slab: Point[] = [[52, 40], [136, 40], [142, 168], [48, 168]];
+  const sheen = linearGradient(48, 40, 142, 168, [KP.wax.lit, KP.wax.body, shade(KP.wax.deep, 'lit')]);
+  p.polygon(slab, edge);
+  p.polygon([[56, 44], [132, 44], [138, 164], [52, 164]], sheen);
+  // Rounded cap and base rim: reads as a block of wax, not a flat card.
+  p.ellipse(94, 40, 42, 11, edge);
+  p.ellipse(94, 39, 38, 8, linearGradient(56, 31, 132, 47, [KP.wax.lit, KP.wax.body]));
+  p.ellipse(95, 168, 46, 11, edge);
+  p.ellipse(95, 166, 42, 8, shade(KP.wax.deep, 'lit'));
+  p.line([62, 56], [66, 154], 5, KP.wax.lit, 0.7);
+  // Lightning bolt across the label band.
+  const bolt: Point[] = [[104, 70], [78, 108], [94, 108], [84, 142], [116, 98], [99, 98], [110, 70]];
+  p.polygon(bolt, rim(KP.wax.bolt));
+  p.polygon(bolt, KP.wax.bolt);
+  badge(p, 96, 126, 19, 'W', KP.wax.bolt);
+  preserveAlphaRim(canvas, SNOW.packed);
+  return canvas;
+}
+
+/** Snowball: a packed sphere with a blue contour so it holds against white snow. */
+function drawSnowball(): PixelCanvas {
+  const canvas = new PixelCanvas(PICKUP_ART_SIZE, PICKUP_ART_SIZE);
+  const p = new VectorPainter(canvas);
+  groundPad(p, KP.snowball.shade);
+  p.ellipse(96, 118, 56, 56, KP.snowball.deep);
+  p.ellipse(96, 118, 52, 52, linearGradient(60, 72, 138, 168, [KP.snowball.lit, KP.snowball.mid, KP.snowball.shade]));
+  p.ellipse(78, 92, 20, 12, KP.snowball.lit, -0.6, 0.85);
+  // Packed-snow texture: scalloped shadow arcs.
+  p.stroke([[58, 130], [70, 150], [92, 160]], 3, KP.snowball.shade, false, 0.8);
+  p.stroke([[112, 78], [128, 90], [134, 106]], 3, KP.snowball.shade, false, 0.7);
+  p.stroke([[100, 146], [120, 142], [132, 128]], 2.5, KP.snowball.shade, false, 0.7);
+  badge(p, 98, 118, 22, 'B', KP.snowball.mid);
+  preserveAlphaRim(canvas, SNOW.packed);
+  return canvas;
+}
+
+export function drawPickupKind(kind: PickupKind): PixelCanvas {
+  return kind === 'shield' ? drawShield() : kind === 'wax' ? drawWax()
+    : kind === 'snowball' ? drawSnowball() : drawPickup();
+}
 
 /** Two gleaming ski poles with molded grips and wrist loops. The crossed
  * silhouette and gold hardware make the reward distinct from cold hazards. */
@@ -17,6 +116,7 @@ export function drawPickup(): PixelCanvas {
   // Restrained four-point material glints stay attached to the metal.
   glint(p, 82, 90, 5);
   glint(p, 120, 66, 4);
+  badge(p, 96, 112, 21, 'P', PICKUP.basket);
   preserveAlphaRim(canvas, SNOW.packed);
   return canvas;
 }

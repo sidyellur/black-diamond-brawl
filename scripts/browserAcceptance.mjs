@@ -377,11 +377,11 @@ try {
   await scene('TitleScene');
   check('base camp preserves the most recently raced mountain', await page.evaluate(() => window.__game.scene.getScene('TitleScene').seed), nextSeed);
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('black-diamond-brawl:records:v2')));
-  check('completed attempts are saved exactly once', stored.courses[`fixed60-v3/mountain-v2/${chosenSeed}`].attempts, 3);
-  check('only a completed finish establishes the new mountain time record', stored.courses[`fixed60-v3/mountain-v2/${nextSeed}`].bestTimeSeconds > 94 && stored.courses[`fixed60-v3/mountain-v2/${chosenSeed}`].bestTimeSeconds === null);
+  check('completed attempts are saved exactly once', stored.courses[`fixed60-v3/mountain-v3/${chosenSeed}`].attempts, 3);
+  check('only a completed finish establishes the new mountain time record', stored.courses[`fixed60-v3/mountain-v3/${nextSeed}`].bestTimeSeconds > 94 && stored.courses[`fixed60-v3/mountain-v3/${chosenSeed}`].bestTimeSeconds === null);
   await page.reload({ waitUntil: 'networkidle' });
   await scene('TitleScene');
-  check('mountain records survive a page reload', await page.evaluate((seed) => JSON.parse(localStorage.getItem('black-diamond-brawl:records:v2')).courses[`fixed60-v3/mountain-v2/${seed}`].attempts, chosenSeed), 3);
+  check('mountain records survive a page reload', await page.evaluate((seed) => JSON.parse(localStorage.getItem('black-diamond-brawl:records:v2')).courses[`fixed60-v3/mountain-v3/${seed}`].attempts, chosenSeed), 3);
   await page.context().close();
 
   phase = 'portrait touch and pointer cancellation';

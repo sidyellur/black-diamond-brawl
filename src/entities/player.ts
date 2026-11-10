@@ -114,6 +114,14 @@ export class Player implements Collidable {
   /** Ski-pole charges (design-spec §4.6): 0 = baseline bump, >0 = armed.
    *  Cleared only by a run-ending wipeout or overwritten by a fresh pickup. */
   weaponCharges = 0;
+  /** Snowballs held (0 or 1). Shares the one weapon slot with the pole:
+   *  `armWeapon` and `giveSnowball` each empty the other. */
+  snowballs = 0;
+  /** A shield is up (one at a time). Absorbs the next lost combat exchange or
+   *  the next rock hit, then breaks. Never absorbs a tree. */
+  shielded = false;
+  /** Increments each time a shield breaks, so observers can react once. */
+  shieldBreakSerial = 0;
 
   // Temporary-collision timers (design-spec §4.4). While `tumbleMsRemaining`
   // > 0 the player can't steer (rock knockdown); `immunityMsRemaining` grants
@@ -300,21 +308,25 @@ export class Player implements Collidable {
       this.tumbleMsRemaining = TREE_CRASH_TUMBLE_MS;
       this.immunityMsRemaining = TREE_CRASH_TUMBLE_MS + TREE_CRASH_IMMUNITY_MS;
       this.swingMsRemaining = 0;
-      this.weaponCharges = 0; // a heavy crash drops the pole
+      this.clearWeapon(); // a heavy crash drops the pole or snowball; a shield survives
       this.clearInputBuffer();
       return;
     }
     this.wipedOut = true;
-    // A run-ending wipeout clears the pole regardless of remaining charges
-    // (§4.6) — the run is over either way, but this keeps state consistent
-    // for the restart flow (a fresh Player starts unarmed too).
-    this.weaponCharges = 0;
+    // A run-ending wipeout clears everything held (§4.6) — the run is over
+    // either way, but this keeps state consistent for the restart flow (a
+    // fresh Player starts empty-handed too).
+    this.clearWeapon();
+    this.shielded = false;
     this.clearInputBuffer();
   }
 
   /** Rock collision (§4.4): temporary wipeout — speed drops to ~30%, ~1s
    *  no-steer tumble, then ~1s collision immunity. */
   hitRock(): void {
+    if (this.breakShield()) {
+      return; // absorbed: no speed loss, tumble or immunity window
+    }
     this.speed *= ROCK_SPEED_FACTOR;
     this.tumbleMsRemaining = ROCK_TUMBLE_MS;
     this.immunityMsRemaining = ROCK_TUMBLE_MS + ROCK_IMMUNITY_MS; // immunity runs through the tumble and 1s past it
@@ -343,9 +355,41 @@ export class Player implements Collidable {
     return this.weaponCharges > 0;
   }
 
-  /** Driving over a pickup arms/refreshes the pole to full charges (§4.6). */
+  /** Driving over a pickup arms/refreshes the pole to full charges (§4.6),
+   *  replacing a held snowball. */
   armWeapon(): void {
     this.weaponCharges = WEAPON_CHARGES;
+    this.snowballs = 0;
+  }
+
+  /** A snowball replaces the pole; a second one while holding one adds nothing. */
+  giveSnowball(): void {
+    this.weaponCharges = 0;
+    this.snowballs = 1;
+  }
+
+  /** The single place the weapon slot is emptied (pole and snowball). */
+  clearWeapon(): void {
+    this.weaponCharges = 0;
+    this.snowballs = 0;
+  }
+
+  /** One shield at a time; collecting another does nothing extra. */
+  giveShield(): void {
+    this.shielded = true;
+  }
+
+  /** Spends the shield if one is up. Returns whether it absorbed something. */
+  breakShield(): boolean {
+    if (!this.shielded) return false;
+    this.shielded = false;
+    this.shieldBreakSerial++;
+    return true;
+  }
+
+  /** Spends the held snowball (a throw). */
+  consumeSnowball(): void {
+    this.snowballs = Math.max(0, this.snowballs - 1);
   }
 
   /** Every exchange the armed player wins consumes one charge (§4.6),
