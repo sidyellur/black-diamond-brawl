@@ -147,15 +147,17 @@ export class TitleScene extends Phaser.Scene {
     plate.fillRect(0, 448, SCREEN_W, 1);
     const touch = this.sys.game.device.input.touch || new URLSearchParams(window.location.search).has('touch');
     const controls = touch ? [
-      { x: 49, key: 'TAP / HOLD  ← →', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
-      { x: 278, key: 'TAP  JUMP', label: 'JUMP', hint: 'Time moguls for trick air' },
-      { x: 522, key: 'TAP  HIT', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
-      { x: 799, key: 'TAP  PAUSE', label: 'PAUSE', hint: 'Take a breather' }
+      { x: 36, key: 'TAP / HOLD  ← →', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
+      { x: 214, key: 'TAP  JUMP', label: 'JUMP', hint: 'Time moguls for trick air' },
+      { x: 392, key: 'TAP  HIT', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
+      { x: 590, key: 'HOLD  BOOST', label: 'BOOST', hint: 'Earn it with risky riding' },
+      { x: 790, key: 'TAP  PAUSE', label: 'PAUSE', hint: 'Take a breather' }
     ] : [
-      { x: 49, key: '← →  /  A D', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
-      { x: 278, key: 'SPACE  /  ↑ W', label: 'JUMP', hint: 'Time moguls for trick air' },
-      { x: 522, key: 'F  /  K', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
-      { x: 799, key: 'ESC  /  P', label: 'PAUSE', hint: 'Take a breather' }
+      { x: 36, key: '← →  /  A D', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
+      { x: 214, key: 'SPACE  /  ↑ W', label: 'JUMP', hint: 'Time moguls for trick air' },
+      { x: 392, key: 'F  /  K', label: 'ATTACK', hint: 'Strike the amber-marked rival' },
+      { x: 590, key: 'SHIFT  /  S  /  ↓', label: 'BOOST', hint: 'Earn it with risky riding' },
+      { x: 790, key: 'ESC  /  P', label: 'PAUSE', hint: 'Take a breather' }
     ];
     controls.forEach(({ x, key, label, hint }) => {
       menuText(this, x, 464, key, 14, UI.accentWarn, true).setFontFamily(MONO);

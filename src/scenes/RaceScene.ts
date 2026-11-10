@@ -22,6 +22,7 @@ import { Obstacle } from '../entities/obstacle';
 import { ObstacleRenderer } from '../entities/obstacleRenderer';
 import { collectPickups, Pickup } from '../entities/pickup';
 import { PickupRenderer } from '../entities/pickupRenderer';
+import { BoostMeter } from '../entities/boost';
 import { Player } from '../entities/player';
 import { PLAYER_FRAME_SIZE, PLAYER_FRAMES, PLAYER_TEXTURE_KEY, getSelectedPlayerTexture } from '../entities/playerSprite';
 import { computePlayerPosition, ScoreTracker } from '../entities/scoring';
@@ -129,6 +130,7 @@ export class RaceScene extends Phaser.Scene {
   private simulationHitStopMs = 0;
   private frameStruckRiders: AIRider[] = [];
   private reducedMotion = false;
+  private boost!: BoostMeter;
   private options!: RaceOptions;
   private mountainSections: MountainSection[] = [];
   private practiceLesson = 0;
@@ -229,6 +231,7 @@ export class RaceScene extends Phaser.Scene {
     this.pickupRenderer = new PickupRenderer(this, this.registerWorld);
 
     this.player = new Player();
+    this.boost = new BoostMeter();
     if (this.practiceObjective) this.configurePractice();
     this.combat = new CombatSystem(this.player, this.aiRiders, this.obstacles);
     // Steering no longer intercepts into combat — it always steers. Attacking
@@ -470,10 +473,10 @@ export class RaceScene extends Phaser.Scene {
         this.player.leanDirection !== 0
       );
     }
-    this.juice.renderSpeed(this.player.speed, time);
+    this.juice.renderSpeed(this.player.speed, time, this.boost.active);
     this.juice.tick(delta);
     this.updateHud();
-    this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0);
+    this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0, this.boost.active);
 
   }
 
@@ -575,12 +578,14 @@ export class RaceScene extends Phaser.Scene {
     // clock. A press with no eligible target is refused by `attemptAttack`
     // itself and costs nothing.
     this.playerInput.update(delta, inputFrameElapsedMs);
+    this.boost.update(delta, this.playerInput.boostHeld(),
+      !this.player.wipedOut && !this.player.tumbling && !this.player.airborne);
     if (this.playerInput.attackJustPressed()) {
       this.combat.attemptAttack(time);
     }
 
     const prevZ = this.player.worldZ;
-    this.player.update(delta);
+    this.player.update(delta, this.boost.active);
 
     // Crest auto-launch (§4.3): crossing a jumpable crest's apex fires an
     // extended trick jump with NO jump press — the crest acts as a ramp. No
@@ -620,7 +625,9 @@ export class RaceScene extends Phaser.Scene {
     // obstacle collision this frame, so same-lane checks and knockout
     // attribution (a rider's wipedOut transition) see final state.
     this.combat.update(delta, time);
+    let counterThisFrame = false;
     for (const event of this.combat.skillEvents.splice(0)) {
+      if (event.type === 'counter') counterThisFrame = true;
       this.practiceObjective?.combat(event.type);
       if (event.type === 'evade') { this.hud.showMessage('EVADED · COUNTER NOW!', UI.accentGood); this.audio.play('score'); }
       if (event.type === 'counter') { this.counterCount++; this.hud.showMessage('COUNTER HIT!', UI.accentGood); }
@@ -653,6 +660,8 @@ export class RaceScene extends Phaser.Scene {
     // must run after all of the above.
     this.scoreTracker.update(delta);
     const feedback = this.scoreTracker.feedback;
+    this.boost.addFeedback(feedback.map(e => e.kind), counterThisFrame);
+    this.boost.observe(this.player);
     if (feedback.length > 0) {
       const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
       const total = feedback.reduce((sum, e) => sum + e.points, 0);
@@ -748,6 +757,7 @@ export class RaceScene extends Phaser.Scene {
       attackCooldown: this.combat.attackCooldownFraction,
       target: this.combat.target !== null,
       targetAdvantage: this.player.armed || this.player.speed >= (this.combat.target?.speed ?? Infinity),
+      boost: { value: this.boost.value, active: this.boost.active, ready: this.boost.ready },
       airborne: this.player.airborne,
       recovering: this.player.tumbling,
       chain: this.scoreTracker.chain,

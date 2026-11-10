@@ -1,6 +1,6 @@
 /** Bump both identities whenever simulation or generation changes. V1 PBs remain
  * readable by their original code, but can never enter this competitive pool. */
-export const RULES_VERSION = 'fixed60-v2';
+export const RULES_VERSION = 'fixed60-v3';
 export const COURSE_VERSION = 'mountain-v2';
 export const FIXED_STEP_MS = 1000 / 60;
 

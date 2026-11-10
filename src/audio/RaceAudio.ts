@@ -83,12 +83,12 @@ export class RaceAudio {
   }
 
   /** Quiet powder/wind texture tracks motion instead of a fixed-volume loop. */
-  ride(speed01: number, airborne = false, carving = false): void {
+  ride(speed01: number, airborne = false, carving = false, boosting = false): void {
     if (!this.active || !this.context || !this.windGain || !this.windFilter) return;
     const speed = Math.max(0, Math.min(1, speed01));
     const now = this.context.currentTime;
-    this.windGain.gain.setTargetAtTime(speed * (airborne ? 0.10 : carving ? 0.25 : 0.14), now, 0.1);
-    this.windFilter.frequency.setTargetAtTime(250 + speed * (carving ? 1700 : 700), now, 0.12);
+    this.windGain.gain.setTargetAtTime(speed * (airborne ? 0.10 : carving ? 0.25 : 0.14) * (boosting ? 1.5 : 1), now, 0.1);
+    this.windFilter.frequency.setTargetAtTime(250 + speed * (carving ? 1700 : 700) + (boosting ? 900 : 0), now, 0.12);
   }
 
   play(kind: 'jump' | 'land' | 'hit' | 'crash' | 'pickup' | 'score' | 'go'): void {

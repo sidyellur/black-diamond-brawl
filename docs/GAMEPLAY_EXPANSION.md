@@ -34,7 +34,7 @@ jacket; podium and gold have separate rewards. A round ID can score only once.
 
 ### Daily and ghost identity
 
-UTC date, `fixed60-v2`, `mountain-v2` and seed determine the challenge. Historical/future shared
+UTC date, `fixed60-v3`, `mountain-v2` and seed determine the challenge. Historical/future shared
 dates and explicit practice links retain the course but cannot change competitive records,
 ghosts or rewards. Starting or retrying an old daily after midnight normalizes it to practice.
 A race already underway retains its starting identity.

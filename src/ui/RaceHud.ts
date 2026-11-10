@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SCREEN_H, SCREEN_W } from '../config';
+import { BOOST_MAX, BOOST_MIN_TO_START, SCREEN_H, SCREEN_W } from '../config';
 import { UI } from '../render/palette';
 import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
@@ -18,6 +18,7 @@ export interface HudState {
   attackCooldown: number;
   target: boolean;
   targetAdvantage: boolean;
+  boost?: { value: number; active: boolean; ready: boolean };
   airborne: boolean;
   recovering: boolean;
   chain: number;
@@ -30,6 +31,11 @@ export interface HudState {
   practice?: { title: string; instruction: string; feedback: string };
   rivals: { progress: number; color: number; out: boolean }[];
 }
+
+// Beside the pace readout, which it modifies, and clear of the centre of the
+// road where the riders and the hint bar already compete for space.
+const BOOST_BAR_W = 150;
+const BOOST_BAR_X = 184;
 
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
@@ -50,6 +56,8 @@ export class RaceHud {
   private readonly split: Phaser.GameObjects.Text;
   private readonly lesson: Phaser.GameObjects.Text;
   private readonly lessonBg: Phaser.GameObjects.Rectangle;
+  private readonly boostLabel: Phaser.GameObjects.Text;
+  private readonly boostCue: Phaser.GameObjects.Text;
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
@@ -88,6 +96,8 @@ export class RaceHud {
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
+    this.boostLabel = this.text(BOOST_BAR_X, 0, '', 11, UI.panel, true).setStroke('#f3f8ff', 3);
+    this.boostCue = this.text(BOOST_BAR_X + BOOST_BAR_W, 0, '', 11, UI.panel, true).setOrigin(1, 0).setStroke('#f3f8ff', 3);
     this.section = this.text(30, 109, '', 14, UI.panel, true).setStroke('#f3f8ff', 3);
     this.split = this.text(30, 133, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
     this.lessonBg = scene.add.rectangle(SCREEN_W / 2, 231, 700, 112, UI.panel, 0.93).setDepth(10000).setVisible(false);
@@ -118,12 +128,12 @@ export class RaceHud {
         this.objects.push(g, t);
         this.raceControls.push(g);
       };
-      held(58, '‹', 'left'); held(142, '›', 'right'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'attack');
+      held(58, '‹', 'left'); held(142, '›', 'right'); held(726, 'BOOST', 'boost'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'attack');
       this.speed.setPosition(30, SCREEN_H - 104);
       helpBg.setSize(420, 30);
     } else {
       this.text(30, SCREEN_H - 42, 'ARROWS / A D  STEER', 10, UI.panel, true);
-      this.text(SCREEN_W - 30, SCREEN_H - 42, 'SPACE / W  JUMP    F / K  HIT', 10, UI.panel, true).setOrigin(1, 0);
+      this.text(SCREEN_W - 30, SCREEN_H - 42, 'SPACE / W  JUMP    F / K  HIT    SHIFT / S  BOOST', 10, UI.panel, true).setOrigin(1, 0);
     }
 
     this.pauseOverlay = scene.add.container(0, 0).setDepth(11000).setVisible(false);
@@ -135,7 +145,7 @@ export class RaceHud {
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
-    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT' : 'A D / ← →  carve   SPACE / W  jump   F / K  fight', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
+    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT     HOLD BOOST' : 'A D / ← →  carve   SPACE / W  jump   F / K  fight   SHIFT / S  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
     this.pauseOverlay.add([shade, panel, heading, sub, controls]);
     for (const [label, y, callback] of [
       [this.touch ? 'RESUME' : 'RESUME   ESC / P', 267, actions.resume],
@@ -218,6 +228,23 @@ export class RaceHud {
   setCountdown(label: string): void { this.countdown.setText(label); }
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 
+  /** Boost bar: fill + a tick at the minimum-to-start level + text, so the
+   *  state never depends on colour alone. */
+  private drawBoost(g: Phaser.GameObjects.Graphics, boost: HudState['boost']): void {
+    const b = boost ?? { value: 0, active: false, ready: false };
+    const x = BOOST_BAR_X, y = this.speed.y + 14, w = BOOST_BAR_W, h = 10;
+    this.boostLabel.setY(y - 17);
+    this.boostCue.setY(y - 17);
+    g.fillStyle(UI.panel, 0.88).fillRoundedRect(x - 3, y - 3, w + 6, h + 6, 4);
+    g.fillStyle(UI.panelEdge).fillRect(x, y, w, h);
+    const fill = w * Phaser.Math.Clamp(b.value / BOOST_MAX, 0, 1);
+    if (fill > 0) g.fillStyle(b.active ? UI.accentWarn : b.ready ? UI.accentGood : UI.accentInfo).fillRect(x, y, fill, h);
+    const tickX = x + w * (BOOST_MIN_TO_START / BOOST_MAX);
+    g.fillStyle(UI.inkHigh).fillRect(Math.round(tickX) - 1, y - 3, 2, h + 6);
+    this.boostLabel.setText(`BOOST ${Math.floor(b.value)}`);
+    this.boostCue.setText(b.active ? 'BOOSTING' : b.ready ? (this.touch ? 'HOLD BOOST' : 'HOLD SHIFT') : '');
+  }
+
   update(s: HudState): void {
     this.place.setText(`${s.position}${['', 'ST', 'ND', 'RD', 'TH', 'TH'][s.position]} / ${s.riderCount ?? 5}`);
     this.clock.setText(formatTime(s.elapsedMs / 1000));
@@ -248,6 +275,7 @@ export class RaceHud {
       g.fillStyle(UI.panelEdge, 0.55).fillRect(805, 139, 120, 4);
       g.fillStyle(UI.accentWarn).fillRect(805, 139, 120 * s.chainRemaining, 4);
     }
+    this.drawBoost(g, s.boost);
     if (s.attackCooldown > 0) {
       g.fillStyle(UI.accentWarn).fillRect(SCREEN_W / 2 - 84, SCREEN_H - 16, 168 * (1 - s.attackCooldown), 2);
     }

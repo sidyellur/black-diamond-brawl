@@ -7,6 +7,9 @@ import {
   MAX_SPEED,
   MOGUL_SPEED_FACTOR,
   ATTACK_SWING_MS,
+  BOOST_ACCEL_FACTOR,
+  BOOST_DECAY_MS,
+  BOOST_SPEED_FACTOR,
   HIT_REACTION_MS,
   MOGUL_STUMBLE_MS,
   PLAYER_ACCEL,
@@ -109,7 +112,12 @@ export class Player implements Collidable {
   private immunityMsRemaining = 0;
   private stumbleMsRemaining = 0;
 
-  update(deltaMs: number): void {
+  /**
+   * `boosting` is the BoostMeter's active flag. It is ignored while airborne,
+   * tumbling or wiped out: jump airtime is constant, so a boosted jump would
+   * outrun the landing zones course placement guarantees (see `jump`).
+   */
+  update(deltaMs: number, boosting = false): void {
     if (this.wipedOut) {
       return; // run-ending wipeout: frozen until the result screen restarts the race
     }
@@ -119,7 +127,17 @@ export class Player implements Collidable {
 
     // Auto-acceleration toward MAX_SPEED (§4.1) — no brake/tuck control in v1.
     // Speed recovers automatically after a collision knocked it down.
-    this.speed = Math.min(MAX_SPEED, this.speed + PLAYER_ACCEL * deltaSeconds);
+    const boosted = boosting && !this.airborne && !this.tumbling;
+    if (boosted) {
+      this.speed = Math.min(MAX_SPEED * BOOST_SPEED_FACTOR,
+        this.speed + PLAYER_ACCEL * BOOST_ACCEL_FACTOR * deltaSeconds);
+    } else if (this.speed > MAX_SPEED) {
+      // Boost over: bleed the excess off linearly rather than snapping.
+      const decayPerSecond = (MAX_SPEED * (BOOST_SPEED_FACTOR - 1) * 1000) / BOOST_DECAY_MS;
+      this.speed = Math.max(MAX_SPEED, this.speed - decayPerSecond * deltaSeconds);
+    } else {
+      this.speed = Math.min(MAX_SPEED, this.speed + PLAYER_ACCEL * deltaSeconds);
+    }
     this.worldZ += this.speed * deltaSeconds;
 
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - deltaMs);
@@ -197,6 +215,9 @@ export class Player implements Collidable {
       return;
     }
     if (voluntary) this.recordManeuver('jump');
+    // Airtime is constant, so reach scales with speed and placement's landing
+    // zones assume MAX_SPEED. Take off at no more than that.
+    this.speed = Math.min(this.speed, MAX_SPEED);
     this.airborne = true;
     this.jumpElapsedMs = 0;
     this.extendedJump = extended;

@@ -208,18 +208,18 @@ export class Juice {
   /** Peripheral snow rush moves continuously toward the rider instead of
    * reseeding every 55 ms. Nothing crosses the central obstacle-reading area.
    * Local impact marks share this one Graphics object and a fixed-size pool. */
-  renderSpeed(speed: number, timeMs: number): void {
+  renderSpeed(speed: number, timeMs: number, boosting = false): void {
     const t = Math.max(0, Math.min(1, speed / MAX_SPEED));
     const elapsed = this.lastSpeedTime === 0 ? 0 : Math.min(50, timeMs - this.lastSpeedTime);
     this.lastSpeedTime = timeMs;
-    this.motionPhase = (this.motionPhase + elapsed * (0.00035 + t * 0.0011)) % 1;
+    this.motionPhase = (this.motionPhase + elapsed * (0.00035 + t * 0.0011) * (boosting ? 1.5 : 1)) % 1;
     this.speedLines.clear();
 
     if (t > 0.45 && !this.reducedMotion) {
-      const strength = (t - 0.45) / 0.55;
+      const strength = boosting ? 1.4 : (t - 0.45) / 0.55;
       const cx = SCREEN_W / 2;
       const cy = SCREEN_H * 0.52;
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < (boosting ? 22 : 14); i++) {
         const phase = (this.motionPhase + i * 0.173) % 1;
         const side = i % 2 === 0 ? -1 : 1;
         const spread = 0.76 + (i % 5) * 0.09;

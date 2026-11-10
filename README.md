@@ -33,12 +33,13 @@ See [iPhone build and device guide](docs/IPHONE.md). Physical-device signing and
 | `←` / `A`, `→` / `D` | Carve one lane per tap; hold to keep carving |
 | `Space` / `↑` / `W` | Jump; time a mogul for extended trick air |
 | `F` / `K` | Attack the marked rival, or take an earned counter |
+| `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air, and rocks or lost fights drain it |
 | `Esc` / `P` | Pause / resume |
 | `M` | Toggle sound |
 | `R` while paused | Retry the current race or lesson |
 | `Tab` / `Shift+Tab`, `Enter` | Choose and activate a menu button |
 
-Touch controls appear on touch devices or with `?touch=1`. Landscape gives the largest controls.
+Touch controls (including a BOOST button) appear on touch devices or with `?touch=1`. Landscape gives the largest controls.
 
 Rivals visibly **wind up before striking**. Jump or carve late in the tell to earn a short green
 **COUNTER** window, then use the ordinary Attack button. A counter can beat a faster opponent,
@@ -71,7 +72,7 @@ There is no live multiplayer or server verification. The native app shares repro
 also includes the current game's challenge URL. If sharing or clipboard access is unavailable,
 a selectable text dialog is provided.
 
-Current competitive identity is `fixed60-v2 / mountain-v2`. Earlier records remain stored but
+Current competitive identity is `fixed60-v3 / mountain-v2`. Earlier records remain stored but
 are kept separate because courses and combat changed. Corrupt or full storage never prevents
 playing; unsaved progress remains available for the current session. Browser multi-tab updates
 are reconciled where possible, but localStorage is not a cross-process transaction system.
