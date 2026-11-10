@@ -23,7 +23,7 @@ const STEP_SLACK = MAX_SPEED * STEP / 1000 / SEGMENT_LENGTH;
 let passed = 0;
 function test(name: string, run: () => void): void { run(); passed++; console.log(`  PASS ${name}`); }
 const near = (a: number, b: number, tol: number, msg?: string) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} ${a} vs ${b}`);
-const calm = { wipedOut: false, tumbling: false, stumbling: false, hitReacting: false, airborne: false };
+const calm = { wipedOut: false, heavyCrashing: false, tumbling: false, stumbling: false, hitReacting: false, airborne: false };
 
 function full(): BoostMeter { const m = new BoostMeter(); m.add(BOOST_MAX); return m; }
 
@@ -114,6 +114,29 @@ test('rock and lost exchanges halve the meter and end boost; mogul only ends boo
   assert.equal(m.value, BOOST_MAX * 0.5);
 });
 
+test('a heavy tree crash empties the meter and ends boost (a rock only halves it)', () => {
+  const m = full();
+  m.update(STEP, true);
+  assert.equal(m.active, true);
+  m.observe({ ...calm, heavyCrashing: true, tumbling: true });
+  assert.equal(m.value, 0, 'meter emptied, not halved');
+  assert.equal(m.active, false);
+  m.add(BOOST_MAX);
+  m.update(STEP, true);
+  assert.equal(m.active, false, 'held button must not restart the boost');
+  // Emptied once per crash, not every frame it stays true.
+  m.observe({ ...calm, heavyCrashing: true, tumbling: true });
+  assert.equal(m.value, BOOST_MAX);
+  m.observe(calm); m.update(STEP, false); m.update(STEP, true);
+  assert.equal(m.active, true, 'release then press restarts');
+  // The real Player drives the same signal end to end.
+  const p = new Player(), meter = full();
+  meter.observe(p); p.speed = MAX_SPEED; p.crashIntoTree(); meter.observe(p);
+  assert.equal(meter.value, 0);
+  for (let i = 0; i < 100; i++) { meter.update(STEP, true, !p.tumbling); p.update(STEP, meter.active); meter.observe(p); }
+  assert.ok(p.speed <= MAX_SPEED, 'no boost speed while down');
+});
+
 test('boost is cut in the air, while tumbling and when wiped out, without costing meter', () => {
   const m = full();
   m.update(STEP, true);
@@ -170,7 +193,7 @@ test('speed above MAX_SPEED decays over ~BOOST_DECAY_MS after boost, with no sna
 });
 
 test('no boost while wiped out or tumbling', () => {
-  const wiped = new Player(); wiped.speed = MAX_SPEED; wiped.crashIntoTree();
+  const wiped = new Player(); wiped.speed = MAX_SPEED; wiped.crashIntoTree(); wiped.crashIntoTree();
   const mw = full();
   for (let i = 0; i < 30; i++) ride(wiped, mw, true);
   assert.equal(wiped.speed, 0);

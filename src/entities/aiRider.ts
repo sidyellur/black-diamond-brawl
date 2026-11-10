@@ -15,7 +15,10 @@ import {
   ROCK_SPEED_FACTOR,
   ROCK_TUMBLE_MS,
   SEGMENT_LENGTH,
-  SHOVE_Z_WINDOW
+  SHOVE_Z_WINDOW,
+  TREE_CRASH_IMMUNITY_MS,
+  TREE_CRASH_TUMBLE_MS,
+  TREE_STRIKES_TO_WIPEOUT
 } from '../config';
 import { mulberry32, type Prng } from '../track/prng';
 import { Collidable } from './collision';
@@ -51,6 +54,11 @@ export class AIRider implements Collidable {
   worldZ: number;
   speed = 0;
   wipedOut = false;
+  /** Trees hit this race; the first is a heavy crash, the second eliminates. */
+  treeStrikes = 0;
+  /** Increments on every tree contact, so combat can credit a first-strike crash. */
+  treeCrashSerial = 0;
+  private heavyCrashMsRemaining = 0;
   airborne = false;
   finishTimeMs: number | null = null;
   readonly personality: RivalPersonality;
@@ -95,9 +103,14 @@ export class AIRider implements Collidable {
     const dt = Math.max(0, deltaMs);
     this.bumpCooldownMs -= dt;
     this.packGraceMs = Math.max(0, this.packGraceMs - dt);
-    this.speed = Math.min(this.cruiseSpeedFor(player, dt), this.speed + PLAYER_ACCEL * dt / 1000);
+    if (this.heavyCrashMsRemaining > 0) {
+      this.speed = 0; // down hard: no sliding or acceleration until the tumble ends
+    } else {
+      this.speed = Math.min(this.cruiseSpeedFor(player, dt), this.speed + PLAYER_ACCEL * dt / 1000);
+    }
     this.worldZ += this.speed * dt / 1000;
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - dt);
+    this.heavyCrashMsRemaining = Math.max(0, this.heavyCrashMsRemaining - dt);
     this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - dt);
     this.immunityMsRemaining = Math.max(0, this.immunityMsRemaining - dt);
     this.stumbleMsRemaining = Math.max(0, this.stumbleMsRemaining - dt);
@@ -153,6 +166,7 @@ export class AIRider implements Collidable {
   }
   get collisionImmune(): boolean { return this.tumbleMsRemaining > 0 || this.immunityMsRemaining > 0; }
   get tumbling(): boolean { return this.tumbleMsRemaining > 0; }
+  get heavyCrashing(): boolean { return this.heavyCrashMsRemaining > 0; }
   get stumbling(): boolean { return this.stumbleMsRemaining > 0; }
   get hitReacting(): boolean { return this.hitReactionMsRemaining > 0; }
   get leanDirection(): -1 | 0 | 1 {
@@ -166,10 +180,20 @@ export class AIRider implements Collidable {
 
   crashIntoTree(): void {
     if (this.wipedOut) return;
-    this.wipedOut = true;
+    this.treeStrikes++;
+    this.treeCrashSerial++;
     this.speed = 0;
     this.airborne = false;
+    this.tween = null;
     this.attack.cancel();
+    if (this.treeStrikes < TREE_STRIKES_TO_WIPEOUT) {
+      this.preserveSetback();
+      this.heavyCrashMsRemaining = TREE_CRASH_TUMBLE_MS;
+      this.tumbleMsRemaining = TREE_CRASH_TUMBLE_MS;
+      this.immunityMsRemaining = TREE_CRASH_TUMBLE_MS + TREE_CRASH_IMMUNITY_MS;
+      return;
+    }
+    this.wipedOut = true;
   }
   hitRock(): void {
     this.preserveSetback();

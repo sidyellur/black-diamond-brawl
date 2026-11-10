@@ -16,6 +16,8 @@ export interface Collidable {
   readonly airborne: boolean;
   readonly collisionImmune: boolean;
   readonly wipedOut: boolean;
+  /** Increments on every tree contact (first-strike heavy crash or wipeout). */
+  readonly treeCrashSerial: number;
   crashIntoTree(): void;
   hitRock(): void;
   hitMogul(): void;
@@ -89,8 +91,8 @@ export class CollisionSystem {
           rider.hitMogul();
           break;
       }
-      if (rider.wipedOut) {
-        break;
+      if (rider.wipedOut || rider.collisionImmune) {
+        break; // a heavy crash makes the rider immune; later obstacles wait
       }
     }
   }

@@ -22,7 +22,7 @@ See [iPhone build and device guide](docs/IPHONE.md). Physical-device signing and
 
 - **Drop In:** race any generated mountain. New Mountain selects another seed; `?seed=42` repeats a course.
 - **Practice:** three replayable, guided lessons teach a timed evade/counter, a clean pass around a defender, and a trick jump beside a daredevil. Practice never changes competitive records or rewards.
-- **Cup Series:** three races against the same four named rivals. Standings save between rounds and an interrupted round can be resumed from base camp. Placement points are 10 / 7 / 5 / 3 / 1; a wipeout scores zero. Final standings award gold, silver or bronze for a podium finish.
+- **Cup Series:** three races against the same four named rivals. Standings save between rounds and an interrupted round can be resumed from base camp. Placement points are 10 / 7 / 5 / 3 / 1; a wipeout (a second tree) scores zero. Final standings award gold, silver or bronze for a podium finish.
 - **Daily Run:** everyone on the same rules version gets the same course and rivals for the UTC date. Retry today's challenge, then share its seed, date, time and score. Older shared dates are clearly labelled practice.
 - **Locker:** earn and equip four board and four jacket colorways through six challenges. Finish a race, land three tricks, land five hits, finish a whole cup, reach a podium or win gold. Equipment is cosmetic only; there is no shop or currency.
 
@@ -51,7 +51,7 @@ your steering/jump briefly, so choose your line before swinging.
 - **Line defender:** protects its starting line. Pass on another lane or draw it into a strike.
 - **Daredevil:** seeks moguls and rocks, takes real jumps and can clash in the air. Watch its landing line.
 
-Trees end a run even while airborne. Jump rocks, use moguls and crests for trick air, and chain
+The first tree in a race is a heavy crash: you stop dead, tumble for 1.5s, then get 1.5s of immunity while you accelerate away, and it clears your ski pole, Flow chain and boost meter. A "LAST CHANCE" tag shows until the finish. The second tree ends the run, even while airborne. Rivals follow the same rule. Jump rocks, use moguls and crests for trick air, and chain
 clean hits, near misses and landings to build Flow. Damage breaks the chain.
 
 ## Mountains, ghosts and fair challenges

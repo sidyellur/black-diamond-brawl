@@ -532,7 +532,7 @@ check('pause, blur and wipeout never leave boost stuck on', () => {
   assert.equal(blurred.input.boostHeld(), true);
   const wiped = rig();
   wiped.input.setAction('boost', true, 'KeyS');
-  wiped.player.crashIntoTree();
+  wiped.player.crashIntoTree(); wiped.player.crashIntoTree(); // second strike: wiped out
   assert.equal(wiped.input.boostHeld(), false);
 });
 check('boost never queues a jump, steer or attack', () => {

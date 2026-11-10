@@ -32,7 +32,7 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
   const pose = () => ({ worldZ: player.worldZ, laneOffset: player.laneOffsetFraction,
     jumpHeight: player.jumpArcHeight, lean: player.leanDirection });
   ghostRecorder.capture(0, pose());
-  let prevWiped = false, prevTumbling = false;
+  let prevWiped = false, prevTumbling = false, prevCrashes = 0;
   return {
     seed, options: { runId: `natural-${seed}` }, countdownMs: 0, practiceObjective: null,
     player, aiRiders, aiCollisions, collisions, combat, scoreTracker,
@@ -60,8 +60,9 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
       collectPickups(player, this.pickups);
       if (combat.events.length) this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 50);
       if (player.wipedOut && !prevWiped) this.simulationHitStopMs = 133.33333333333334;
+      else if (player.heavyCrashing && player.treeCrashSerial > prevCrashes) this.simulationHitStopMs = 100;
       else if (player.tumbling && !prevTumbling) this.simulationHitStopMs = 83.33333333333334;
-      prevWiped = player.wipedOut; prevTumbling = player.tumbling;
+      prevWiped = player.wipedOut; prevTumbling = player.tumbling; prevCrashes = player.treeCrashSerial;
       scoreTracker.update(delta);
       ghostRecorder.capture(time, pose());
       const splits = this.checkpoints.update(previousZ, player.worldZ, time - delta, time, ghost);
@@ -136,3 +137,30 @@ console.log(JSON.stringify(reports.map(r => ({ seed: r.seed, finished: r.finishe
   ghostSamples: r.ghostSamples, replay: !!r.replay })), null, 2));
 assert.ok(reports.every(r => r.finished), 'Every selected natural-course regression seed must finish');
 console.log(`${reports.filter(r => r.finished).length}/${reports.length} full-course seeds finished; each successful seed replayed with three matching natural ghost splits.`);
+
+// Two-strike trees: natural play dodges trees entirely, a single tree is a
+// survivable heavy crash that the natural driver recovers from, and a second
+// tree ends the run.
+assert.ok(reports.every(report => report.treeStrikes === 0), 'the natural driver never touches a tree');
+{
+  const crashSeed = proven.seed;
+  const once = makeModel(crashSeed);
+  for (let step = 0; step < 600; step++) once.simulate(1000 / 60, 1000 / 60);
+  once.player.crashIntoTree();
+  assert.equal(once.player.wipedOut, false, 'the first tree does not end the run');
+  const onceResult = serializedDriver({ scene: once, render: false });
+  assert.equal(onceResult.wipedOut, false);
+  assert.equal(onceResult.finished, true, 'a once-crashed rider recovers and finishes');
+  assert.equal(onceResult.treeStrikes, 1);
+  assert.ok(onceResult.elapsedMs > proven.elapsedMs + 1500, 'the heavy crash cost real time');
+
+  const twice = makeModel(crashSeed);
+  for (let step = 0; step < 600; step++) twice.simulate(1000 / 60, 1000 / 60);
+  twice.player.crashIntoTree();
+  for (let step = 0; step < 300; step++) twice.simulate(1000 / 60, 1000 / 60);
+  twice.player.crashIntoTree(); // as a collision would once immunity lapsed
+  for (let step = 0; step < 30 && !twice.raceOver; step++) twice.simulate(1000 / 60, 1000 / 60);
+  assert.equal(twice.player.wipedOut, true);
+  assert.equal(twice.raceOver, true, 'the second tree ends the run');
+}
+console.log('Two-strike trees: natural driver never strikes; one tree is survived and finished; the second ends the run.');

@@ -215,7 +215,7 @@ export class ScoreTracker {
   }
 
   private get cleanRiding(): boolean {
-    return !this.player.wipedOut && !this.player.tumbling &&
+    return !this.player.wipedOut && !this.player.tumbling && !this.player.heavyCrashing &&
       !this.player.stumbling && !this.player.hitReacting;
   }
 

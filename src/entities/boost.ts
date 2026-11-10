@@ -12,6 +12,7 @@ export type BoostFeedbackKind = 'hit' | 'brush' | 'knockout' | 'near' | 'trick';
 /** The slice of player state the meter reads. Keeps this module Phaser-free. */
 export interface BoostPlayerState {
   wipedOut: boolean;
+  heavyCrashing: boolean;
   tumbling: boolean;
   stumbling: boolean;
   hitReacting: boolean;
@@ -33,6 +34,7 @@ export class BoostMeter {
   private _active = false;
   /** After a forced cut the button must be released before boost can restart. */
   private needsRelease = false;
+  private prevHeavyCrashing = false;
   private prevTumbling = false;
   private prevStumbling = false;
   private prevHitReacting = false;
@@ -70,6 +72,12 @@ export class BoostMeter {
     this.cut();
   }
 
+  /** Heavy tree crash: the meter is emptied and the boost ends. */
+  empty(): void {
+    this._value = 0;
+    this.cut();
+  }
+
   /** Mogul stumble: ends the boost only. */
   interrupt(): void {
     this.cut();
@@ -80,13 +88,16 @@ export class BoostMeter {
     this._value = 0;
     this._active = false;
     this.needsRelease = false;
-    this.prevTumbling = this.prevStumbling = this.prevHitReacting = false;
+    this.prevHeavyCrashing = this.prevTumbling = this.prevStumbling = this.prevHitReacting = false;
   }
 
   /** Edge-detect collision and combat losses from the player's state. */
   observe(player: BoostPlayerState): void {
-    if ((player.tumbling && !this.prevTumbling) || (player.hitReacting && !this.prevHitReacting)) this.penalize();
+    // A heavy crash also reads as a tumble; the stronger penalty wins.
+    if (player.heavyCrashing && !this.prevHeavyCrashing) this.empty();
+    else if ((player.tumbling && !this.prevTumbling) || (player.hitReacting && !this.prevHitReacting)) this.penalize();
     else if (player.stumbling && !this.prevStumbling) this.interrupt();
+    this.prevHeavyCrashing = player.heavyCrashing;
     this.prevTumbling = player.tumbling;
     this.prevStumbling = player.stumbling;
     this.prevHitReacting = player.hitReacting;
