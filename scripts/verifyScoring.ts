@@ -123,7 +123,8 @@ for (const [label, damage] of [
   ['rock tumble', (p: Player) => p.hitRock()],
   ['mogul stumble', (p: Player) => p.hitMogul()],
   ['losing a combat exchange', (p: Player) => p.notifyHit()],
-  ['tree wipeout', (p: Player) => p.crashIntoTree()]
+  ['first tree (heavy crash)', (p: Player) => p.crashIntoTree()],
+  ['tree wipeout', (p: Player) => { p.crashIntoTree(); p.crashIntoTree(); }]
 ] as const) {
   check(`${label} breaks flow and preserves already earned score`, () => {
     const { player, score, emit } = rig();
@@ -184,7 +185,7 @@ check('normal jumps and midair tree wipeouts never score a landed trick', () => 
   const crash = rig();
   crash.player.jump(true);
   crash.score.update(0);
-  crash.player.crashIntoTree();
+  crash.player.crashIntoTree(); // a first-strike heavy crash also cancels the jump (airborne = false)
   crash.score.update(16);
   assert.equal(crash.score.runningScore, 0);
   assert.equal(crash.score.finalize(false, 500, 5).trickJumpCount, 0);
@@ -254,7 +255,7 @@ check('rival overtakes count once; same-lane combat and wiped-out rivals are exc
   const sameLane = rider(2, 1180);
   const wiped = rider(3, 1180);
   const { score } = rig([], [passing, sameLane, wiped]);
-  wiped.crashIntoTree();
+  wiped.crashIntoTree(); wiped.crashIntoTree(); // second strike: wiped out
   [passing, sameLane, wiped].forEach((r) => { r.worldZ = 1220; });
   score.update(16);
   assert.equal(score.runningScore, POINTS.NEAR_MISS);
@@ -300,7 +301,7 @@ check('wipeout retains earned events and chain bonuses but excludes every finish
   const { player, score, emit } = rig();
   for (let i = 0; i < 10; i++) emit();
   const earned = score.runningScore;
-  player.crashIntoTree();
+  player.crashIntoTree(); player.crashIntoTree(); // second strike: wiped out
   score.update(0);
   const result = score.finalize(false, 5_000, 1);
   assert.equal(result.finished, false);
@@ -327,11 +328,11 @@ check('standings prefer finish order, then live racers, then DNF progress', () =
   const early = rider(0, 10_000); early.finishTimeMs = 10_000;
   const late = rider(1, 10_000); late.finishTimeMs = 12_000;
   const active = rider(3, 4500);
-  const out = rider(4, 9000); out.crashIntoTree();
+  const out = rider(4, 9000); out.crashIntoTree(); out.crashIntoTree();
   const riders = [early, late, active, out];
   assert.equal(computePlayerPosition(player, riders, 11_000), 2);
   assert.equal(computePlayerPosition(player, riders, null), 3);
-  player.crashIntoTree();
+  player.crashIntoTree(); player.crashIntoTree(); // second strike: wiped out
   assert.equal(computePlayerPosition(player, riders, null), 5);
 });
 check('real deliberate combat preserves charge cost, base hit score and subsequent knockout', () => {

@@ -97,7 +97,7 @@ export class ResultScene extends Phaser.Scene {
     menuText(this, 49, 387, recordNote, 11, UI.inkLow);
 
     this.addBreakdown(b);
-    const advice = !b.finished ? 'Trees end your run, even in the air. Jump rocks; carve around trees.'
+    const advice = !b.finished ? 'The first tree is a heavy crash; the second ends your run, even in the air. Jump rocks; carve around trees.'
       : b.combatHitCount === 0 ? 'Find the amber target and press F or K. Deliberate hits score 250 points.'
       : b.trickJumpCount === 0 ? 'Jump at a mogul or ride a crest at speed to launch a scoring trick.'
       : 'Same mountain. A faster line. A bigger score. Your record is waiting.';

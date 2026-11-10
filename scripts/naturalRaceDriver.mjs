@@ -112,7 +112,7 @@ export function naturalRaceDriver(options = {}) {
   }
   return {
     seed: scene.seed, over: scene.raceOver, finished: scene.raceOver && !player.wipedOut,
-    wipedOut: player.wipedOut, elapsedMs: scene.elapsedRaceMs,
+    wipedOut: player.wipedOut, treeStrikes: player.treeStrikes, elapsedMs: scene.elapsedRaceMs,
     startElapsedMs: trace.startElapsedMs, startWorldZ: trace.startWorldZ,
     worldZ: player.worldZ, finishZ: scene.finishSegment.z,
     fixedSteps: trace.fixedSteps, batchSteps,

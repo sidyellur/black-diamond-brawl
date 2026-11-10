@@ -144,6 +144,16 @@ export const ROCK_TUMBLE_MS = 1000; // ~1s no-steer tumble
  */
 export const ROCK_LOCK_SEGMENTS = 9;
 export const ROCK_IMMUNITY_MS = 1000; // ~1s collision immunity after recovery
+
+// Two-strike trees. The first tree in a race is a heavy crash: the rider stops
+// dead, tumbles with no steering or jumping, then is immune while accelerating
+// away from a standstill. The second tree ends the run (or eliminates a rival).
+// Immunity is counted from the END of the tumble: at PLAYER_ACCEL the rider
+// covers ~1,700 units (8-9 segments) in the 1.5s of immunity, and can steer for
+// all of it.
+export const TREE_CRASH_TUMBLE_MS = 1500;
+export const TREE_CRASH_IMMUNITY_MS = 1500;
+export const TREE_STRIKES_TO_WIPEOUT = 2;
 export const MOGUL_SPEED_FACTOR = 0.75; // ~25% speed loss on a ridden mogul
 export const MOGUL_STUMBLE_MS = 400; // brief wobble, no control loss
 

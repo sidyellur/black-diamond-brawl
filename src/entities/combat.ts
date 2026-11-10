@@ -80,7 +80,7 @@ export class CombatSystem {
   // keyed by rider covers both directions: the same rider can't re-trigger an
   // exchange with the player, but a DIFFERENT rider is unaffected).
   private readonly pairImmunityMs = new Map<AIRider, number>();
-  private readonly wasWipedOut = new Map<AIRider, boolean>();
+  private readonly seenTreeCrashes = new Map<AIRider, number>();
   /** Global attack cooldown, independent of target. Longer than pair
    *  immunity, so re-attacking the SAME rival is gated by this. */
   private attackCooldownMs = 0;
@@ -109,7 +109,7 @@ export class CombatSystem {
     private readonly riders: AIRider[],
     private readonly obstacles: Obstacle[]
   ) {
-    riders.forEach((rider) => this.wasWipedOut.set(rider, rider.wipedOut));
+    riders.forEach((rider) => this.seenTreeCrashes.set(rider, rider.treeCrashSerial));
   }
 
   /**
@@ -367,18 +367,19 @@ export class CombatSystem {
   }
 
   /**
-   * Knockout attribution (§4.6/§4.7): scans for a rider that just transitioned
-   * into `wipedOut` this frame (the only path there is a tree collision — see
-   * `AIRider.crashIntoTree`) and, if it happened within `KNOCKOUT_WINDOW_MS`
+   * Knockout attribution (§4.6/§4.7): scans for a rider that just
+   * hit a tree this frame (`treeCrashSerial` advanced: a first-strike heavy
+   * crash or the eliminating second strike — see `AIRider.crashIntoTree`;
+   * a rider cannot take both on one frame) and, if it happened within `KNOCKOUT_WINDOW_MS`
    * of losing a shove to the player, records a knockout event.
    */
   private checkKnockoutTransitions(nowMs: number): void {
     for (const rider of this.riders) {
-      const was = this.wasWipedOut.get(rider) ?? false;
-      if (!was && rider.wipedOut && rider.wasRecentlyShovedByPlayer(nowMs, KNOCKOUT_WINDOW_MS)) {
+      const seen = this.seenTreeCrashes.get(rider) ?? 0;
+      if (rider.treeCrashSerial > seen && rider.wasRecentlyShovedByPlayer(nowMs, KNOCKOUT_WINDOW_MS)) {
         this.events.push({ type: 'knockout', rider });
       }
-      this.wasWipedOut.set(rider, rider.wipedOut);
+      this.seenTreeCrashes.set(rider, rider.treeCrashSerial);
     }
   }
 

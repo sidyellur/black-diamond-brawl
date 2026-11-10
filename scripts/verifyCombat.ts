@@ -298,15 +298,27 @@ console.log('\n=== combat harness ===');
   check('an unrelated tree crash is NOT credited as a knockout', knockouts === 0, `${knockouts}`);
 }
 
+{
+  setDeterministicRuntime(7);
+  const { rider, combat } = makeWorld({ playerLane: 2, riderLane: 3, riderSpeed: MAX_SPEED * 0.5 });
+  attack(combat);
+  combat.events.length = 0;
+  rider.crashIntoTree(); // FIRST tree: a heavy crash, not an elimination
+  combat.update(16, 1500);
+  const knockouts = combat.events.filter((e) => e.type === 'knockout').length;
+  check('a shoved rival taking its FIRST tree (heavy crash, still racing) is credited a knockout',
+    knockouts === 1 && !rider.wipedOut, `${knockouts}`);
+}
+
 // ---------------------------------------------------------------------------
 // Guards.
 // ---------------------------------------------------------------------------
 {
   setDeterministicRuntime(7);
   const { player, rider, combat } = makeWorld({ playerLane: 2, riderLane: 3 });
-  rider.crashIntoTree();
+  rider.crashIntoTree(); rider.crashIntoTree(); // second strike: wiped out
   check('a wiped-out rider is not a combat target', attack(combat) === false);
-  player.crashIntoTree();
+  player.crashIntoTree(); player.crashIntoTree();
   check('a wiped-out player cannot attack', attack(combat) === false);
 }
 
@@ -410,7 +422,7 @@ console.log('\n=== combat harness ===');
 
   setDeterministicRuntime(7);
   const gone = makeWorld({ playerLane: 2, riderLane: 2 });
-  gone.rider.crashIntoTree();
+  gone.rider.crashIntoTree(); gone.rider.crashIntoTree(); // second strike: wiped out
   gone.combat.update(16, 1000);
   check('a wiped-out rival is not targeted', gone.combat.target === null);
 }

@@ -95,6 +95,7 @@ export class RaceScene extends Phaser.Scene {
    *  anything is watching. */
   private prevWiped = false;
   private prevTumbling = false;
+  private prevTreeCrashes = 0;
   private prevStumbling = false;
   private prevAirborne = false;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera;
@@ -178,6 +179,7 @@ export class RaceScene extends Phaser.Scene {
     this.worldObjects = [];
     this.prevWiped = false;
     this.prevTumbling = false;
+    this.prevTreeCrashes = 0;
     this.prevStumbling = false;
     this.prevAirborne = false;
 
@@ -531,7 +533,8 @@ export class RaceScene extends Phaser.Scene {
       } else this.finishPractice();
       return true;
     }
-    if (!objective.complete && (this.elapsedRaceMs > 8500 || this.player.wipedOut)) {
+    // Practice has no second chances: any tree (first strike included) restarts the lesson.
+    if (!objective.complete && (this.elapsedRaceMs > 8500 || this.player.treeStrikes > 0)) {
       this.raceOver = true;
       this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson,
         practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : 'Try again: stay in the center and JUMP just before the mound.' });
@@ -653,6 +656,7 @@ export class RaceScene extends Phaser.Scene {
     // Collision feedback, fired on state TRANSITIONS so neither the collision
     // system nor combat needs to know anything is watching.
     if (this.player.wipedOut && !this.prevWiped) this.simulationHitStopMs = 133.33333333333334;
+    else if (this.player.heavyCrashing && this.player.treeCrashSerial > this.prevTreeCrashes) this.simulationHitStopMs = 100;
     else if (this.player.tumbling && !this.prevTumbling) this.simulationHitStopMs = 83.33333333333334;
     this.emitCollisionFeedback();
 
@@ -760,6 +764,7 @@ export class RaceScene extends Phaser.Scene {
       boost: { value: this.boost.value, active: this.boost.active, ready: this.boost.ready },
       airborne: this.player.airborne,
       recovering: this.player.tumbling,
+      treeStrikes: this.player.treeStrikes,
       chain: this.scoreTracker.chain,
       chainRemaining: this.scoreTracker.chainRemaining,
       rivals: this.aiRiders.map(r => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[r.params.paletteIndex], out: r.wipedOut }))
@@ -965,10 +970,15 @@ export class RaceScene extends Phaser.Scene {
     const x = this.playerSprite.x;
     const y = this.playerSprite.y;
 
-    // Tree: run-ending. The heaviest hit in the game, so it gets the most.
+    // Tree, second strike: run-ending. The heaviest hit in the game, so it gets the most.
     if (this.player.wipedOut && !this.prevWiped) {
       this.juice.impact(x, y, 1);
       this.audio.play('crash');
+    } else if (this.player.heavyCrashing && this.player.treeCrashSerial > this.prevTreeCrashes) {
+      // Tree, first strike: the strongest non-fatal impact, recoverable once.
+      this.juice.impact(x, y, 0.85);
+      this.audio.play('crash');
+      this.hud.showMessage('TREE HIT · LAST CHANCE', UI.accentBad);
     } else if (this.player.tumbling && !this.prevTumbling) {
       // Rock: a hard knockdown, recoverable.
       this.juice.impact(x, y, 0.62);
@@ -1000,6 +1010,7 @@ export class RaceScene extends Phaser.Scene {
 
     this.prevWiped = this.player.wipedOut;
     this.prevTumbling = this.player.tumbling;
+    this.prevTreeCrashes = this.player.treeCrashSerial;
     this.prevStumbling = this.player.stumbling;
     this.prevAirborne = this.player.airborne;
   }

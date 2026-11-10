@@ -326,7 +326,7 @@ async function run() {
     const g = window.__game;
     const sc = g && g.scene.getScene('RaceScene');
     if (!sc || !sc.player) return 'no-scene';
-    sc.player.crashIntoTree(); // run-ending wipeout -> ResultScene
+    sc.player.crashIntoTree(); sc.player.crashIntoTree(); // first tree is a heavy crash; the second is the run-ending wipeout -> ResultScene
     return 'triggered';
   });
   await page.waitForTimeout(1200);

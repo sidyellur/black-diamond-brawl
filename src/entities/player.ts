@@ -18,6 +18,9 @@ import {
   ROCK_IMMUNITY_MS,
   ROCK_SPEED_FACTOR,
   ROCK_TUMBLE_MS,
+  TREE_CRASH_IMMUNITY_MS,
+  TREE_CRASH_TUMBLE_MS,
+  TREE_STRIKES_TO_WIPEOUT,
   WEAPON_CHARGES
 } from '../config';
 import { Collidable } from './collision';
@@ -100,6 +103,14 @@ export class Player implements Collidable {
    *  `RaceScene` detects this transition to end the run and show `ResultScene`. */
   wipedOut = false;
 
+  /** Trees hit this race. The first is a heavy crash, the
+   *  `TREE_STRIKES_TO_WIPEOUT`th sets `wipedOut`. */
+  treeStrikes = 0;
+  /** Increments on every tree contact (heavy crash or wipeout). Lets observers
+   *  (combat knockout credit) see a crash that did not flip `wipedOut`. */
+  treeCrashSerial = 0;
+  private heavyCrashMsRemaining = 0;
+
   /** Ski-pole charges (design-spec §4.6): 0 = baseline bump, >0 = armed.
    *  Cleared only by a run-ending wipeout or overwritten by a fresh pickup. */
   weaponCharges = 0;
@@ -128,7 +139,9 @@ export class Player implements Collidable {
     // Auto-acceleration toward MAX_SPEED (§4.1) — no brake/tuck control in v1.
     // Speed recovers automatically after a collision knocked it down.
     const boosted = boosting && !this.airborne && !this.tumbling;
-    if (boosted) {
+    if (this.heavyCrashMsRemaining > 0) {
+      this.speed = 0; // down hard: no sliding, no auto-acceleration until the tumble ends
+    } else if (boosted) {
       this.speed = Math.min(MAX_SPEED * BOOST_SPEED_FACTOR,
         this.speed + PLAYER_ACCEL * BOOST_ACCEL_FACTOR * deltaSeconds);
     } else if (this.speed > MAX_SPEED) {
@@ -141,6 +154,7 @@ export class Player implements Collidable {
     this.worldZ += this.speed * deltaSeconds;
 
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - deltaMs);
+    this.heavyCrashMsRemaining = Math.max(0, this.heavyCrashMsRemaining - deltaMs);
     this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - deltaMs);
     this.swingMsRemaining = Math.max(0, this.swingMsRemaining - deltaMs);
     if (this.bufferedDirection !== null) {
@@ -261,15 +275,36 @@ export class Player implements Collidable {
     return this.tumbleMsRemaining > 0;
   }
 
-  /** Tree collision (§4.4): run-ending wipeout — freeze the player;
-   *  `RaceScene` picks up the `wipedOut` transition to end the run. */
+  /** True during the no-control, zero-speed tumble of a first tree crash. */
+  get heavyCrashing(): boolean {
+    return this.heavyCrashMsRemaining > 0;
+  }
+
+  /**
+   * Tree collision (§4.4), two strikes: the first is a heavy crash (stop dead,
+   * tumble, then immunity while accelerating away); the second is the
+   * run-ending wipeout — freeze the player; `RaceScene` picks up the
+   * `wipedOut` transition to end the run.
+   */
   crashIntoTree(): void {
     if (this.wipedOut) {
       return;
     }
-    this.wipedOut = true;
+    this.treeStrikes++;
+    this.treeCrashSerial++;
     this.speed = 0;
     this.airborne = false;
+    this.tween = null;
+    if (this.treeStrikes < TREE_STRIKES_TO_WIPEOUT) {
+      this.heavyCrashMsRemaining = TREE_CRASH_TUMBLE_MS;
+      this.tumbleMsRemaining = TREE_CRASH_TUMBLE_MS;
+      this.immunityMsRemaining = TREE_CRASH_TUMBLE_MS + TREE_CRASH_IMMUNITY_MS;
+      this.swingMsRemaining = 0;
+      this.weaponCharges = 0; // a heavy crash drops the pole
+      this.clearInputBuffer();
+      return;
+    }
+    this.wipedOut = true;
     // A run-ending wipeout clears the pole regardless of remaining charges
     // (§4.6) — the run is over either way, but this keeps state consistent
     // for the restart flow (a fresh Player starts unarmed too).

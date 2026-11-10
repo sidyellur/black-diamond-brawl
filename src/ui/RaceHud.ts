@@ -21,6 +21,8 @@ export interface HudState {
   boost?: { value: number; active: boolean; ready: boolean };
   airborne: boolean;
   recovering: boolean;
+  /** Trees hit this race; 1 shows the LAST CHANCE tag. */
+  treeStrikes?: number;
   chain: number;
   chainRemaining: number;
   sectionName?: string;
@@ -36,6 +38,11 @@ export interface HudState {
 // road where the riders and the hint bar already compete for space.
 const BOOST_BAR_W = 150;
 const BOOST_BAR_X = 184;
+
+// Under the left panel, below the section/split lines.
+const LAST_CHANCE_X = 16;
+const LAST_CHANCE_Y = 156;
+const LAST_CHANCE_W = 270;
 
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
@@ -58,6 +65,7 @@ export class RaceHud {
   private readonly lessonBg: Phaser.GameObjects.Rectangle;
   private readonly boostLabel: Phaser.GameObjects.Text;
   private readonly boostCue: Phaser.GameObjects.Text;
+  private readonly lastChance: Phaser.GameObjects.Text;
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
@@ -98,6 +106,7 @@ export class RaceHud {
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
     this.boostLabel = this.text(BOOST_BAR_X, 0, '', 11, UI.panel, true).setStroke('#f3f8ff', 3);
     this.boostCue = this.text(BOOST_BAR_X + BOOST_BAR_W, 0, '', 11, UI.panel, true).setOrigin(1, 0).setStroke('#f3f8ff', 3);
+    this.lastChance = this.text(LAST_CHANCE_X + 30, LAST_CHANCE_Y + 5, 'LAST CHANCE · NEXT TREE ENDS RUN', 12, UI.panel, true).setVisible(false);
     this.section = this.text(30, 109, '', 14, UI.panel, true).setStroke('#f3f8ff', 3);
     this.split = this.text(30, 133, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
     this.lessonBg = scene.add.rectangle(SCREEN_W / 2, 231, 700, 112, UI.panel, 0.93).setDepth(10000).setVisible(false);
@@ -245,6 +254,15 @@ export class RaceHud {
     this.boostCue.setText(b.active ? 'BOOSTING' : b.ready ? (this.touch ? 'HOLD BOOST' : 'HOLD SHIFT') : '');
   }
 
+  /** Warning-triangle icon + text on a solid plate: shape and words, not colour alone. */
+  private drawLastChance(g: Phaser.GameObjects.Graphics): void {
+    const x = LAST_CHANCE_X, y = LAST_CHANCE_Y, h = 24;
+    g.fillStyle(UI.accentWarn).fillRoundedRect(x, y, LAST_CHANCE_W, h, 6);
+    g.lineStyle(2, UI.panel).strokeRoundedRect(x, y, LAST_CHANCE_W, h, 6);
+    g.fillStyle(UI.panel).fillTriangle(x + 14, y + 4, x + 5, y + 20, x + 23, y + 20);
+    g.fillStyle(UI.accentWarn).fillRect(x + 13, y + 9, 2, 6).fillRect(x + 13, y + 17, 2, 2);
+  }
+
   update(s: HudState): void {
     this.place.setText(`${s.position}${['', 'ST', 'ND', 'RD', 'TH', 'TH'][s.position]} / ${s.riderCount ?? 5}`);
     this.clock.setText(formatTime(s.elapsedMs / 1000));
@@ -257,7 +275,7 @@ export class RaceHud {
     this.lesson.setText(s.practice ? `${s.practice.title}\n${s.practice.instruction}\n${s.practice.feedback}` : '');
     this.attack.setText(s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
     this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
-    this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
+    this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  2 TREES END YOU  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();
     const x = 234, y = 51, w = 482;
@@ -276,6 +294,9 @@ export class RaceHud {
       g.fillStyle(UI.accentWarn).fillRect(805, 139, 120 * s.chainRemaining, 4);
     }
     this.drawBoost(g, s.boost);
+    const lastChance = (s.treeStrikes ?? 0) > 0;
+    this.lastChance.setVisible(lastChance);
+    if (lastChance) this.drawLastChance(g);
     if (s.attackCooldown > 0) {
       g.fillStyle(UI.accentWarn).fillRect(SCREEN_W / 2 - 84, SCREEN_H - 16, 168 * (1 - s.attackCooldown), 2);
     }

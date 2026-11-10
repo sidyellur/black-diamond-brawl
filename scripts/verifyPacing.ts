@@ -207,7 +207,7 @@ check('a player setback cannot activate catch-up assistance', () => {
 });
 check('finished and wiped-out opponents never move or resurrect', () => {
   const player = new Player(); player.speed = MAX_SPEED; player.worldZ = 100_000;
-  const out = new AIRider(params()); out.speed = MAX_SPEED; out.crashIntoTree();
+  const out = new AIRider(params()); out.speed = MAX_SPEED; out.crashIntoTree(); out.crashIntoTree(); // second strike: eliminated
   const finished = new AIRider(params()); finished.speed = MAX_SPEED; finished.finishTimeMs = 1;
   const outZ = out.worldZ; const finishZ = finished.worldZ;
   for (let i = 0; i < 100; i++) { out.update(50, [], player); finished.update(50, [], player); }

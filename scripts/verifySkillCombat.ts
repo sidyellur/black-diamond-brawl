@@ -127,7 +127,7 @@ test('player tumble, finish and wipeout invalidate counters and incoming strikes
   assert.equal(w.combat.counterReady, false);
   const finished = world(); finished.tell(); finished.rider.finishTimeMs = 100; finished.advance(windup);
   assert.equal(finished.combat.skillEvents.some(e => e.type === 'rival-hit'), false);
-  const crashed = world(); crashed.tell(); crashed.rider.crashIntoTree(); crashed.advance(windup);
+  const crashed = world(); crashed.tell(); crashed.rider.crashIntoTree(); crashed.rider.crashIntoTree(); crashed.advance(windup);
   assert.equal(crashed.player.hitReacting, false);
 });
 

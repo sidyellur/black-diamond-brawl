@@ -335,7 +335,7 @@ try {
 
   phase = 'results and repeated replay';
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.evaluate(() => window.__game.scene.getScene('RaceScene').player.crashIntoTree());
+    await page.evaluate(() => { const p = window.__game.scene.getScene('RaceScene').player; p.crashIntoTree(); p.crashIntoTree(); /* two strikes end the run */ });
     await scene('ResultScene');
     await page.keyboard.press('Enter');
     await scene('RaceScene');
@@ -344,7 +344,7 @@ try {
     check(`result replay ${attempt + 1} keeps one set of listeners`, (await state()).listeners, baselineListeners);
     await ready();
   }
-  await page.evaluate(() => window.__game.scene.getScene('RaceScene').player.crashIntoTree());
+  await page.evaluate(() => { const p = window.__game.scene.getScene('RaceScene').player; p.crashIntoTree(); p.crashIntoTree(); /* two strikes end the run */ });
   await scene('ResultScene');
   await clickGame(527, 480);
   await scene('RaceScene');

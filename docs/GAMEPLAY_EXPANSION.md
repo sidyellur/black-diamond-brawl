@@ -21,7 +21,10 @@ Wind-ups are 560–720ms depending on the opponent. A deliberate jump or steer w
 280ms can earn a 1,100ms counter opportunity. A counter belongs to the attacker you evaded,
 uses the existing Attack control, and expires on the simulation clock. Automatic crest launches
 do not qualify as deliberate evades. Hits/tumbles interrupt pending strikes. Tree and road-edge
-knockback constraints are unchanged.
+knockback constraints are unchanged. Trees are two-strike for everyone: the first is a heavy
+crash (1.5s stopped tumble, then 1.5s immunity while accelerating, pole/Flow/boost cleared) and
+the second wipes the rider out. A rival shoved by the player within the knockout window is credited
+a knockout for either tree.
 
 ### Championship
 
