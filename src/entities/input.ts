@@ -3,7 +3,7 @@ import { Player } from './player';
 import { oncePerKeyEvent } from '../input/keyboardEvents';
 import { APP_ACTIVE, APP_INACTIVE, isAppActive } from '../input/appLifecycle';
 
-export type PlayerAction = 'left' | 'right' | 'jump' | 'attack';
+export type PlayerAction = 'left' | 'right' | 'jump' | 'attack' | 'boost';
 /** Concise alias for UI bindings. */
 export type InputAction = PlayerAction;
 
@@ -23,6 +23,8 @@ export interface PlayerInput {
   // or the total time spent paused/in hit-stop. Omit for the normal 160ms budget.
   update(deltaMs: number, frameElapsedMs?: number): void;
   attackJustPressed(): boolean;
+  /** Boost is level-triggered: true only while a live, focused source holds it. */
+  boostHeld(): boolean;
   /** Disabling clears pending actions and requires held controls to be released. */
   setEnabled(enabled: boolean): void;
   reset(): void;
@@ -76,9 +78,10 @@ export class PlayerInputController implements PlayerInput {
     } else if (action === 'jump') {
       this.jumpPressedAt = at;
       this.jumpObserved = false;
-    } else {
+    } else if (action === 'attack') {
       this.attackPressedAt = at;
     }
+    // 'boost' is read from the held sources each frame; there is no edge to record.
   }
 
   update(deltaMs: number, frameElapsedMs = deltaMs): void {
@@ -148,6 +151,10 @@ export class PlayerInputController implements PlayerInput {
     return pressed;
   }
 
+  boostHeld(): boolean {
+    return this.enabled && this.focused && !this.destroyed && !this.player.wipedOut && this.isDown('boost');
+  }
+
   setEnabled(enabled: boolean): void {
     if (enabled === this.enabled || this.destroyed) return;
     this.enabled = enabled;
@@ -197,9 +204,10 @@ export class PlayerInputController implements PlayerInput {
 
 const KEY_ACTIONS: Readonly<Record<string, PlayerAction>> = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  Space: 'jump', ArrowUp: 'jump', KeyW: 'jump', KeyF: 'attack', KeyK: 'attack'
+  Space: 'jump', ArrowUp: 'jump', KeyW: 'jump', KeyF: 'attack', KeyK: 'attack',
+  ShiftLeft: 'boost', ShiftRight: 'boost', KeyS: 'boost', ArrowDown: 'boost'
 };
-const KEY_NAMES = ['LEFT', 'A', 'RIGHT', 'D', 'SPACE', 'UP', 'W', 'F', 'K'];
+const KEY_NAMES = ['LEFT', 'A', 'RIGHT', 'D', 'SPACE', 'UP', 'W', 'F', 'K', 'SHIFT', 'S', 'DOWN'];
 
 export function bindPlayerInput(
   scene: Phaser.Scene,
@@ -271,6 +279,7 @@ export function bindPlayerInput(
   return {
     update: (delta, frameElapsed) => controller.update(delta, frameElapsed),
     attackJustPressed: () => controller.attackJustPressed(),
+    boostHeld: () => controller.boostHeld(),
     setEnabled: (enabled) => controller.setEnabled(enabled),
     reset: () => controller.reset(),
     setAction: (action, pressed, source) => controller.setAction(action, pressed, source),

@@ -86,6 +86,24 @@ export const JUMP_AIRTIME_EXTENDED_MS = 1200;
 // Lane changes
 export const LANE_CHANGE_SEGMENTS = 3;
 
+// Boost meter. Earned from risky actions, spent by holding Boost. All starting
+// values. BOOST_SPEED_FACTOR must stay below 1.3 unless course placement's
+// lane-change model changes (see scripts/verifyBoost.ts).
+export const BOOST_MAX = 100;
+export const BOOST_SPEED_FACTOR = 1.2; // speed cap multiplier while boosting
+export const BOOST_ACCEL_FACTOR = 2; // acceleration multiplier while boosting
+export const BOOST_FULL_DURATION_MS = 2500; // a full meter burns out in this long
+export const BOOST_MIN_TO_START = 20; // meter needed to begin a boost
+export const BOOST_DECAY_MS = 500; // speed above MAX_SPEED bleeds off over this long
+export const BOOST_PENALTY_KEEP = 0.5; // fraction of meter kept after a rock / lost exchange
+export const BOOST_GAIN = {
+  NEAR_MISS: 8,
+  TRICK_LANDING: 15,
+  HIT: 12,
+  COUNTER: 25,
+  KNOCKOUT: 30
+};
+
 // Obstacle placement / density (design-spec §4.2). Obstacle *rows* per 100
 // segments ramp from START at t=0 to END at t=1 as the difficulty grows.
 export const OBSTACLE_ROWS_PER_100_START = 4;

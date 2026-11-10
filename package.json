@@ -17,6 +17,7 @@
     "verify:scoring": "node --import tsx scripts/verifyScoring.ts",
     "verify:rendering": "node --import tsx scripts/verifyRendering.ts",
     "verify:art": "node --import tsx scripts/verifyArt.ts",
+    "verify:boost": "node --import tsx scripts/verifyBoost.ts",
     "verify:pacing": "node --import tsx scripts/verifyPacing.ts",
     "ios:sync": "npm run build && cap sync ios",
     "ios:open": "npm run ios:sync && cap open ios",

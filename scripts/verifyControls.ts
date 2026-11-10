@@ -495,4 +495,52 @@ check('pause still discards a pending tap even inside the extended fresh-frame b
   assert.equal(player.airborne, false);
   assert.equal(input.attackJustPressed(), false);
 });
+check('boost is held, not edge-triggered, from every keyboard binding and touch', () => {
+  const { input } = rig();
+  for (const source of ['ShiftLeft', 'ShiftRight', 'KeyS', 'ArrowDown', 'touch:3']) {
+    assert.equal(input.boostHeld(), false);
+    input.setAction('boost', true, source);
+    assert.equal(input.boostHeld(), true, source);
+    input.update(16);
+    assert.equal(input.boostHeld(), true, `${source} stays held across frames`);
+    input.setAction('boost', false, source);
+    assert.equal(input.boostHeld(), false, source);
+  }
+  input.setAction('boost', true, 'ShiftLeft'); input.setAction('boost', true, 'touch:1');
+  input.setAction('boost', false, 'ShiftLeft');
+  assert.equal(input.boostHeld(), true, 'releasing one source leaves the other holding');
+});
+check('pause, blur and wipeout never leave boost stuck on', () => {
+  const paused = rig();
+  paused.input.setAction('boost', true, 'ShiftLeft');
+  paused.input.setEnabled(false);
+  assert.equal(paused.input.boostHeld(), false);
+  paused.input.setEnabled(true);
+  assert.equal(paused.input.boostHeld(), false, 'a key held across resume must be released first');
+  paused.input.setAction('boost', false, 'ShiftLeft');
+  paused.input.setAction('boost', true, 'ShiftLeft');
+  assert.equal(paused.input.boostHeld(), true);
+  paused.input.reset();
+  assert.equal(paused.input.boostHeld(), false, 'CANCEL_INPUT / reset releases boost');
+  const blurred = rig();
+  blurred.input.setAction('boost', true, 'touch:2');
+  blurred.input.setFocused(false);
+  assert.equal(blurred.input.boostHeld(), false);
+  blurred.input.setFocused(true);
+  assert.equal(blurred.input.boostHeld(), false, 'refocus does not resurrect a held boost');
+  blurred.input.setAction('boost', true, 'touch:2');
+  assert.equal(blurred.input.boostHeld(), true);
+  const wiped = rig();
+  wiped.input.setAction('boost', true, 'KeyS');
+  wiped.player.crashIntoTree();
+  assert.equal(wiped.input.boostHeld(), false);
+});
+check('boost never queues a jump, steer or attack', () => {
+  const { player, input, advance } = rig();
+  input.setAction('boost', true, 'ShiftLeft');
+  advance(16);
+  assert.equal(player.airborne, false);
+  assert.equal(player.leanDirection, 0);
+  assert.equal(input.attackJustPressed(), false);
+});
 console.log(`\n=== ${checks} control regressions passed ===\n`);
