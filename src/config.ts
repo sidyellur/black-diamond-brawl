@@ -303,12 +303,21 @@ export const TARGET_GRACE_MS = 100;
 // its own `aggression` (runtime randomness — NOT the seeded PRNG, per §4.5).
 export const AI_BUMP_CHECK_INTERVAL_MS = 500;
 
-// Weapon pickup — ski pole (design-spec §4.6).
+// Pickups: ski pole (design-spec §4.6), shield, speed wax and snowball (#36).
 export const WEAPON_CHARGES = 3;
-// Pickups spawn on a random clear lane roughly every 20-30s of travel
-// (~300-450 segments at MAX_SPEED), through the seeded RNG (§4.2).
-export const PICKUP_MIN_GAP_SEGMENTS = 300;
-export const PICKUP_MAX_GAP_SEGMENTS = 450;
+// Pickups spawn on a clear, reachable lane every 150-220 segments (~7 a course,
+// up from ~3), through a seeded stream derived from the course seed.
+export const PICKUP_MIN_GAP_SEGMENTS = 150;
+export const PICKUP_MAX_GAP_SEGMENTS = 220;
+/** Relative weights for the kind of each placed pickup. */
+export const PICKUP_KIND_WEIGHTS = { pole: 35, shield: 25, wax: 20, snowball: 20 } as const;
+/** A thrown snowball reaches a rival up to this far ahead, in the same or an adjacent lane. */
+export const SNOWBALL_RANGE_SEGMENTS = 12;
+/** Boost meter added the moment a speed wax pickup is collected. */
+export const WAX_BOOST_GAIN = 60;
+/** Fixed presentation-only flight time of a thrown snowball. The hit itself
+ *  resolves on the throw frame. */
+export const SNOWBALL_FLIGHT_MS = 260;
 
 // Near-miss (design-spec §4.7): a one-shot check per entity, evaluated when
 // the entity's world-Z crosses the player's. Only counts a genuinely close

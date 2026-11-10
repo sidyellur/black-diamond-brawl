@@ -292,6 +292,15 @@ export const PICKUP = {
   glow: 0xffd978
 } as const;
 
+/** Shield, speed wax and snowball pickups. Each has its own shape and a letter
+ *  badge, so none relies on its hue to be told apart. */
+export const PICKUP_KINDS_PALETTE = {
+  shield: { face: 0x2f7fd0, lit: 0x9bd6ff, deep: 0x16477f, trim: 0xd8dde4 },
+  wax: { body: 0x35c46b, lit: 0xa6f2b8, deep: 0x13693a, bolt: 0xffe066 },
+  snowball: { lit: 0xffffff, mid: 0xd3e4f6, shade: 0x8fa8c9, deep: 0x2f4f78 },
+  badge: 0x121a24
+} as const;
+
 /** UI ink levels. Three, not five — a HUD with more than three weights stops
  *  reading as a hierarchy. */
 export const UI = {

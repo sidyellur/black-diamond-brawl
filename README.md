@@ -48,6 +48,24 @@ and can be taken while airborne. An early dodge is safe but does not earn the ti
 Normal attacks still favor speed or a ski pole; each pole has three charges. Attacking commits
 your steering/jump briefly, so choose your line before swinging.
 
+## Pickups
+
+About seven pickups sit on every mountain, always on a lane you can reach without crossing a tree.
+Each has its own shape and a letter, so none depends on colour. Drive over one to collect it,
+airborne or not. Rivals never collect them.
+
+| Pickup | Letter | Effect |
+| --- | --- | --- |
+| Ski pole | P | Three charges. A deliberate attack auto-wins and knocks the rival two lanes. |
+| Shield | S | Absorbs the next lost combat exchange or the next rock hit, then breaks. Never stops a tree. One at a time. |
+| Speed wax | W | Adds 60 to the boost meter instantly. |
+| Snowball | B | One throw. Press Attack with no melee target in reach to hit the nearest rival ahead in your lane or an adjacent one, up to 12 segments away. A blue chevron marks who it will hit. With a melee target in reach, Attack stays a melee hit and the snowball is kept. |
+
+The pole and the snowball share one weapon slot, so picking up one replaces the other. A snowball
+hit pays as a clean hit and adds one stagger pip. The first tree (a heavy crash) drops the pole or
+snowball but keeps a shield; the second ends the run. The HUD strip under the score shows the weapon
+and the shield you are holding.
+
 Every rival has a **stagger meter** of three pips, drawn as three squares in its nameplate (filled
 means damage taken). An unarmed hit adds 1, a ski-pole hit adds 2, a counter adds 2, and a passive
 body check adds none. A rival that goes 6 seconds without being hit recovers a pip. At three pips
@@ -99,7 +117,7 @@ There is no live multiplayer or server verification. The native app shares repro
 also includes the current game's challenge URL. If sharing or clipboard access is unavailable,
 a selectable text dialog is provided.
 
-Current competitive identity is `fixed60-v3 / mountain-v2`. Earlier records remain stored but
+Current competitive identity is `fixed60-v3 / mountain-v3`. Earlier records remain stored but
 are kept separate because courses and combat changed. Corrupt or full storage never prevents
 playing; unsaved progress remains available for the current session. Browser multi-tab updates
 are reconciled where possible, but localStorage is not a cross-process transaction system.

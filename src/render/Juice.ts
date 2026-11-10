@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { MAX_SPEED, SCREEN_H, SCREEN_W } from '../config';
+import { MAX_SPEED, SCREEN_H, SCREEN_W, SNOWBALL_FLIGHT_MS } from '../config';
 import { DEPTH } from './depth';
 import { FLAKE_KEY, SNOW_PUFF_KEY, SPARK_KEY } from './particleArt';
 import { SNOW, UI } from './palette';
@@ -26,6 +26,10 @@ export class Juice {
   private ambient!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   private speedLines!: Phaser.GameObjects.Graphics;
+  private snowballGfx!: Phaser.GameObjects.Graphics;
+  /** In-flight snowball visuals. Presentation only: the hit resolved in the
+   *  simulation on the throw frame. */
+  private readonly shots: Array<{ born: number; from: { x: number; y: number }; ref: unknown }> = [];
   private flash!: Phaser.GameObjects.Rectangle;
   private readonly rings = Array.from({ length: 6 }, () => ({
     x: 0, y: 0, life: 0, duration: 1, radius: 0, color: 0, impact: false
@@ -109,11 +113,14 @@ export class Juice {
     this.speedLines = scene.add.graphics();
     this.speedLines.setDepth(DEPTH.VFX + 1);
 
+    this.snowballGfx = scene.add.graphics();
+    this.snowballGfx.setDepth(DEPTH.VFX + 1);
+
     this.flash = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, SCREEN_W * 1.2, SCREEN_H * 1.2, 0xffffff);
     this.flash.setDepth(DEPTH.VFX + 2);
     this.flash.setAlpha(0);
 
-    [this.spray, this.burst, this.sparks, this.ambient, this.speedLines, this.flash].forEach(register);
+    [this.spray, this.burst, this.sparks, this.ambient, this.speedLines, this.snowballGfx, this.flash].forEach(register);
   }
 
   /** True while the world should not advance — see `hitStopMs`. */
@@ -176,6 +183,38 @@ export class Juice {
     }
     if (!this.reducedMotion) this.worldCam.shake(knockdown ? 180 : 110, knockdown ? 0.014 : 0.008);
     this.hitStopMs = knockdown ? 110 : 55;
+  }
+
+  /** The shield breaking: a cool ring and a few sparks, no shake (nothing hurt). */
+  shieldBreak(x: number, y: number): void {
+    this.sparks.emitParticleAt(x, y - 20, 10);
+    this.addRing(x, y - 20, 58, UI.accentInfo, false);
+    this.flashScreen(0.08);
+  }
+
+  /** Starts a snowball visual from `from` toward the rival `ref`. Skipped under
+   *  reduced motion; the hit and its ring still play. */
+  launchSnowball(from: { x: number; y: number }, ref: unknown): void {
+    if (this.reducedMotion) return;
+    this.shots.push({ born: this.scene.time.now, from, ref });
+  }
+
+  /** Draws every snowball in flight along a fixed `SNOWBALL_FLIGHT_MS` arc to
+   *  wherever `resolve` currently projects its target. */
+  renderSnowballs(now: number, resolve: (ref: unknown) => { x: number; y: number } | null): void {
+    const g = this.snowballGfx.clear();
+    for (let i = this.shots.length - 1; i >= 0; i--) {
+      const shot = this.shots[i];
+      const t = (now - shot.born) / SNOWBALL_FLIGHT_MS;
+      const to = resolve(shot.ref);
+      if (t >= 1 || !to) { this.shots.splice(i, 1); continue; }
+      const x = shot.from.x + (to.x - shot.from.x) * t;
+      const y = shot.from.y + (to.y - shot.from.y) * t - Math.sin(t * Math.PI) * 38;
+      const r = 11 - 6 * t;
+      g.fillStyle(UI.panel, 0.9).fillCircle(x, y, r + 2);
+      g.fillStyle(SNOW.packed, 1).fillCircle(x, y, r);
+      g.fillStyle(UI.accentInfo, 0.5).fillCircle(x - r * 0.3, y - r * 0.3, r * 0.4);
+    }
   }
 
   /** A landed trick. Celebratory, no shake — shaking on a reward would read

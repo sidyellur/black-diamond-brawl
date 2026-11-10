@@ -2,7 +2,7 @@ import { SEGMENT_LENGTH } from '../config';
 import type { Segment } from './segment';
 
 /** Increment when geometry or placement changes make previous runs incomparable. */
-export const MOUNTAIN_GENERATOR_VERSION = 2;
+export const MOUNTAIN_GENERATOR_VERSION = 3;
 
 export type MountainTheme = 'forest' | 'ridge' | 'bowl';
 export type MountainSetpiece =

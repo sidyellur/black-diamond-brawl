@@ -62,7 +62,7 @@ support is not part of this prototype.
 - Personal bests, records for the last 64 mountains, the latest 8 personal ghosts,
   cup standings/medals, cosmetic unlocks/equipment and mute preference use native
   Preferences/UserDefaults. Browser play retains localStorage. Old v1 records
-  remain stored separately from current fixed60-v3/mountain-v2 competition.
+  remain stored separately from current fixed60-v3/mountain-v3 competition.
 - Native storage is hydrated before menus appear, and writes are ordered to
   prevent older saves replacing newer ones. Unavailable storage leaves the
   game playable in memory. Deleting the app deletes its local progress.

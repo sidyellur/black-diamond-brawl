@@ -15,6 +15,12 @@ export interface HudState {
   elapsedMs: number;
   progress: number;
   charges: number;
+  /** A snowball is held (shares the weapon slot with the pole). */
+  snowball?: boolean;
+  /** A shield is up. */
+  shield?: boolean;
+  /** A thrown snowball would hit someone right now (no melee target). */
+  throwTarget?: boolean;
   attackCooldown: number;
   /** 0..1 remaining cooldown of the directional shove. */
   pushCooldown?: number;
@@ -45,6 +51,13 @@ export interface HudState {
 const BOOST_BAR_W = 150;
 const BOOST_BAR_X = 184;
 
+// Held-item strip under the score panel: weapon slot (pole with charges, or a
+// snowball) on the left, shield on the right. Only drawn while something is held.
+const HELD_X = 750;
+const HELD_Y = 98;
+const HELD_W = 194;
+const HELD_H = 28;
+
 // Under the left panel, below the section/split lines.
 const LAST_CHANCE_X = 16;
 const LAST_CHANCE_Y = 156;
@@ -72,6 +85,8 @@ export class RaceHud {
   private readonly boostLabel: Phaser.GameObjects.Text;
   private readonly boostCue: Phaser.GameObjects.Text;
   private readonly lastChance: Phaser.GameObjects.Text;
+  private readonly weaponText: Phaser.GameObjects.Text;
+  private readonly shieldText: Phaser.GameObjects.Text;
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
@@ -106,7 +121,9 @@ export class RaceHud {
     const helpBg = scene.add.rectangle(SCREEN_W / 2, SCREEN_H - 30, 464, 30, UI.panel, 0.88).setDepth(9999);
     this.objects.push(helpBg);
     this.status = this.text(SCREEN_W / 2, 91, '', 13, UI.panel, true).setOrigin(0.5);
-    this.chain = this.text(925, 115, '', 17, UI.panel, true).setOrigin(1, 0);
+    this.chain = this.text(925, 133, '', 17, UI.panel, true).setOrigin(1, 0);
+    this.weaponText = this.text(HELD_X + 30, HELD_Y + 7, '', 12, UI.inkHigh, true);
+    this.shieldText = this.text(HELD_X + 136, HELD_Y + 7, 'SHIELD', 12, UI.inkHigh, true);
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
@@ -265,6 +282,35 @@ export class RaceHud {
     this.boostCue.setText(b.active ? 'BOOSTING' : b.ready ? (this.touch ? 'HOLD BOOST' : 'HOLD SHIFT') : '');
   }
 
+  /** Weapon slot and shield: an icon, a word and (for the pole) a charge count,
+   *  so what is held never depends on colour. */
+  private drawHeld(g: Phaser.GameObjects.Graphics, s: HudState): void {
+    const pole = s.charges > 0;
+    const snowball = !pole && !!s.snowball;
+    const shield = !!s.shield;
+    this.weaponText.setText(pole ? `POLE ×${s.charges}` : snowball ? 'SNOWBALL' : '').setVisible(pole || snowball);
+    this.shieldText.setVisible(shield);
+    if (!pole && !snowball && !shield) return;
+    g.fillStyle(UI.panel, 0.9).fillRoundedRect(HELD_X, HELD_Y, HELD_W, HELD_H, 8);
+    const cy = HELD_Y + HELD_H / 2;
+    if (pole) {
+      const x = HELD_X + 16;
+      g.lineStyle(3, UI.inkHigh).lineBetween(x - 6, cy + 8, x + 6, cy - 8).lineBetween(x + 6, cy + 8, x - 6, cy - 8);
+      g.fillStyle(UI.accentWarn).fillRect(x - 8, cy + 3, 5, 3).fillRect(x + 3, cy + 3, 5, 3);
+    } else if (snowball) {
+      const x = HELD_X + 16;
+      g.fillStyle(UI.inkHigh).fillCircle(x, cy, 8);
+      g.lineStyle(2, UI.accentInfo).strokeCircle(x, cy, 8);
+    }
+    if (shield) {
+      const x = HELD_X + 116;
+      g.fillStyle(UI.accentInfo).beginPath();
+      g.moveTo(x - 8, cy - 9).lineTo(x + 8, cy - 9).lineTo(x + 8, cy).lineTo(x, cy + 10).lineTo(x - 8, cy).closePath();
+      g.fillPath();
+      g.fillStyle(UI.panel).fillRect(x - 1.5, cy - 5, 3, 8);
+    }
+  }
+
   /** Warning-triangle icon + text on a solid plate: shape and words, not colour alone. */
   private drawLastChance(g: Phaser.GameObjects.Graphics): void {
     const x = LAST_CHANCE_X, y = LAST_CHANCE_Y, h = 24;
@@ -291,9 +337,11 @@ export class RaceHud {
       : s.target && s.attackCooldown <= 0 ? (s.targetAdvantage ? `${hit} · ${shove}` : `FASTER RIVAL · ${shove} ALWAYS LANDS`)
       : s.push ? `${shove} · HIT RECHARGING`
       : s.attackCooldown > 0 || (s.pushCooldown ?? 0) > 0 ? (s.attackCooldown > 0 && (s.pushCooldown ?? 0) > 0 ? 'HIT + SHOVE RECHARGING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : 'SHOVE RECHARGING')
-      : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS · SHOVES PUSH 2 LANES` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER';
+      : s.throwTarget && s.attackCooldown <= 0 ? `${this.touch ? 'TAP HIT' : 'F / K'} · THROW SNOWBALL`
+      : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS · SHOVES PUSH 2 LANES`
+      : s.snowball ? 'SNOWBALL READY · LINE UP A RIVAL AHEAD' : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER';
     this.attack.setText(text);
-    this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.push && s.pushHazard ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
+    this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.push && s.pushHazard ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : s.throwTarget ? UI.accentInfo : UI.inkMid));
     this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();
@@ -307,10 +355,10 @@ export class RaceHud {
     }
     const px = x + w * s.progress;
     g.fillStyle(UI.inkHigh).fillTriangle(px, y - 5, px - 4, y - 10, px + 4, y - 10);
-    if (s.charges > 0) for (let i = 0; i < s.charges; i++) g.fillStyle(UI.accentWarn).fillRect(872 + i * 15, 59, 9, 6);
+    this.drawHeld(g, s);
     if (s.chain >= 2) {
-      g.fillStyle(UI.panelEdge, 0.55).fillRect(805, 139, 120, 4);
-      g.fillStyle(UI.accentWarn).fillRect(805, 139, 120 * s.chainRemaining, 4);
+      g.fillStyle(UI.panelEdge, 0.55).fillRect(805, 157, 120, 4);
+      g.fillStyle(UI.accentWarn).fillRect(805, 157, 120 * s.chainRemaining, 4);
     }
     this.drawBoost(g, s.boost);
     const lastChance = (s.treeStrikes ?? 0) > 0;

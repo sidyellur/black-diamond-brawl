@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { drawRider, RIDER_FRAME_SIZE, RiderPose, PLAYER_RIDER_PALETTE, RIVAL_RIDER_PALETTES } from '../entities/riderArt';
 import { drawObstacle, OBSTACLE_ART_SIZE, ObstacleArtKind } from '../entities/obstacleArt';
-import { drawPickup, PICKUP_ART_SIZE } from '../entities/pickupArt';
+import { drawPickupKind, PICKUP_ART_SIZE } from '../entities/pickupArt';
+import { PICKUP_KIND_LIST } from '../entities/pickup';
 import { MIN_OUTLINE_DELTA_L, SNOW, UI } from '../render/palette';
 import { measureOutlineContrast, PixelCanvas } from '../render/pixel';
 
@@ -41,7 +42,10 @@ export class SpriteLabScene extends Phaser.Scene {
     for (const kind of obstacles) {
       entries.push({ name: `obstacle/${kind}`, cv: drawObstacle(kind) });
     }
-    entries.push({ name: 'pickup/ski-pole', cv: drawPickup() });
+    const pickupNames = { pole: 'ski-pole', shield: 'shield', wax: 'speed-wax', snowball: 'snowball' } as const;
+    for (const kind of PICKUP_KIND_LIST) {
+      entries.push({ name: `pickup/${pickupNames[kind]}`, cv: drawPickupKind(kind) });
+    }
 
     // Snow strip behind everything — sprites must be judged against the
     // surface they actually sit on, not a neutral grey.

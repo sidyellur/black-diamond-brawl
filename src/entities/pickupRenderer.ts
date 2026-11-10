@@ -6,7 +6,7 @@ import { Camera, projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment } from '../render/RoadRenderer';
 import { Segment } from '../track/segment';
 import { laneFraction } from './obstacle';
-import { PICKUP_FRAME, PICKUP_FRAME_SIZE, PICKUP_TEXTURE_KEY } from './pickupSprite';
+import { PICKUP_FRAMES, PICKUP_FRAME_SIZE, PICKUP_TEXTURE_KEY } from './pickupSprite';
 import { Pickup } from './pickup';
 
 // On-screen width as a fraction of the projected road half-width, matching
@@ -57,6 +57,7 @@ export class PickupRenderer {
         projected.screenW * WIDTH_FRACTION,
         SCREEN_W * MAX_ENTITY_SCREEN_FRACTION
       );
+      sprite.setFrame(PICKUP_FRAMES[pickup.kind]);
       sprite.setScale(widthPx / PICKUP_FRAME_SIZE);
       sprite.setPosition(projected.screenX, projected.screenY);
       sprite.setDepth(entityDepth(pickup.z));
@@ -72,7 +73,7 @@ export class PickupRenderer {
   private acquire(index: number): Phaser.GameObjects.Sprite {
     let sprite = this.pool[index];
     if (!sprite) {
-      sprite = this.scene.add.sprite(0, 0, PICKUP_TEXTURE_KEY, PICKUP_FRAME);
+      sprite = this.scene.add.sprite(0, 0, PICKUP_TEXTURE_KEY, PICKUP_FRAMES.pole);
       sprite.setOrigin(0.5, 1);
       this.pool[index] = sprite;
       this.onCreate?.(sprite);

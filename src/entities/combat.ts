@@ -12,6 +12,7 @@ import {
   SEGMENT_LENGTH,
   SHOVE_IMMUNITY_MS,
   SHOVE_SPEED_LOSS_FACTOR,
+  SNOWBALL_RANGE_SEGMENTS,
   SAME_LANE_EPSILON,
   SHOVE_Z_WINDOW,
   STAGGER_PIPS,
@@ -40,6 +41,8 @@ const LANE_COUNT = LANES.length;
  * trees within `KNOCKOUT_WINDOW_MS` of the loss, and is paid on top of
  * whichever of the two caused it.
  */
+/** A snowball thrown this frame, for presentation (the hit already resolved). */
+export interface ThrowEvent { rider: AIRider; fromLane: number }
 export type CombatEvent = { type: 'hit' | 'brush' | 'knockout' | 'push'; rider: AIRider };
 /** Where a directional shove would send a rival, and whether a tree or rock is
  *  waiting there. The HUD cue and `attemptPush` both read this one value, so
@@ -89,6 +92,8 @@ export type SkillCombatEvent = {
 export class CombatSystem {
   readonly events: CombatEvent[] = [];
   readonly skillEvents: SkillCombatEvent[] = [];
+  /** Snowballs thrown, drained by the scene to launch the projectile visual. */
+  readonly throwEvents: ThrowEvent[] = [];
   private readonly observedAttacks = new Map<AIRider, number>();
   private counterRider: AIRider | null = null;
   private counterRemainingMs = 0;
@@ -257,6 +262,55 @@ export class CombatSystem {
     if (!rider || rider === this.counterTarget) return null;
     if (!this.isEligible(rider, this.pushCooldownMs, true) || this.targetScore(rider, true) === null) return null;
     return rider;
+  }
+
+  /**
+   * The rival a thrown snowball would hit right now, or null.
+   *
+   * Only exists while a snowball is held and NO melee target is available
+   * (the melee attack takes priority and keeps the snowball). It is the
+   * nearest rival strictly ahead, in the player's lane or an adjacent one,
+   * within `SNOWBALL_RANGE_SEGMENTS`, that passes the same eligibility guards a
+   * melee exchange does (airborne, tumbling, pair immunity, cooldown). The HUD
+   * chevron and `attemptThrow` both read this one value, so the marker cannot
+   * promise a throw that is then refused. Ties on distance go to the nearer
+   * lane, then to roster order.
+   */
+  get throwTarget(): AIRider | null {
+    if (this.player.snowballs <= 0 || this.target !== null) return null;
+    const reach = SNOWBALL_RANGE_SEGMENTS * SEGMENT_LENGTH;
+    let best: AIRider | null = null;
+    let bestDz = Infinity;
+    let bestLane = Infinity;
+    for (const rider of this.riders) {
+      const dz = rider.worldZ - this.player.worldZ;
+      const lanes = Math.abs(rider.laneIndex - this.player.laneIndex);
+      if (dz <= 0 || dz > reach || lanes > 1) continue;
+      if (!this.isEligible(rider)) continue;
+      if (dz < bestDz || (dz === bestDz && lanes < bestLane)) {
+        best = rider;
+        bestDz = dz;
+        bestLane = lanes;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * The player pressed attack with a snowball held and no melee target.
+   * Resolves as an ordinary deliberate exchange the rival loses (no pole
+   * bonus), spends the snowball and starts the normal attack cooldown. No
+   * swing: throwing does not lock steering. Returns whether it threw.
+   */
+  attemptThrow(nowMs: number): boolean {
+    const rider = this.throwTarget;
+    if (!rider) return false;
+    const fromLane = rider.laneIndex;
+    this.attackCooldownMs = ATTACK_COOLDOWN_MS;
+    this.player.consumeSnowball();
+    this.resolveExchange(rider, nowMs, true, 'player', false, true);
+    this.throwEvents.push({ rider, fromLane });
+    return true;
   }
 
   /** Where a shove at `rider` would send it, given the steer key held. */
@@ -494,7 +548,7 @@ export class CombatSystem {
    * rear-ended into a rival burned a pole charge for it.
    */
   private resolveExchange(rider: AIRider, nowMs: number, deliberate: boolean,
-    winner?: 'player' | 'rival', allowAirborne = false): boolean {
+    winner?: 'player' | 'rival', allowAirborne = false, snowball = false): boolean {
     if (this.player.wipedOut || rider.wipedOut || (!allowAirborne && (this.player.airborne || rider.airborne)) || rider.finishTimeMs !== null) {
       return false;
     }
@@ -507,8 +561,8 @@ export class CombatSystem {
 
     // The ski pole is a weapon you SWING. It applies to deliberate attacks
     // only, so a passive brush neither auto-wins nor spends a charge.
-    const counter = winner === 'player';
-    const armed = deliberate && this.player.armed && !counter;
+    const counter = winner === 'player' && !snowball;
+    const armed = deliberate && this.player.armed && !counter && !snowball;
     const playerWins = winner ? winner === 'player' : armed || this.player.speed >= rider.speed;
     const maxShift = armed && playerWins ? 2 : 1;
     const speedLossFactor = (armed || counter) && playerWins ? ARMED_SHOVE_SPEED_LOSS_FACTOR : SHOVE_SPEED_LOSS_FACTOR;
@@ -538,11 +592,17 @@ export class CombatSystem {
         if (this.counterRider === rider) { this.counterRider = null; this.counterRemainingMs = 0; }
       }
     } else {
-      this.player.applyKnockback(targetLane, speedLossFactor, allowAirborne);
-      // The player losing an exchange used to produce no signal at all — no
-      // event, no state, nothing for the scene to react to. Now it recoils
-      // and flashes exactly like a rival does.
-      this.player.notifyHit();
+      if (this.player.breakShield()) {
+        // The shield eats the whole exchange: no knockback, speed loss or
+        // recoil. Pair immunity below still applies, so the same rival cannot
+        // land a second blow on the broken shield's heels.
+      } else {
+        this.player.applyKnockback(targetLane, speedLossFactor, allowAirborne);
+        // The player losing an exchange used to produce no signal at all — no
+        // event, no state, nothing for the scene to react to. Now it recoils
+        // and flashes exactly like a rival does.
+        this.player.notifyHit();
+      }
     }
 
     this.pairImmunityMs.set(rider, SHOVE_IMMUNITY_MS);
