@@ -57,8 +57,10 @@ try {
   }));
   // Wait for the "!" cue (a rock in the lane a shove would send the rival to), then press the real key.
   await page.waitForFunction(() => { const s = window.__game.scene.getScene('RaceScene'); const t = s.combat.pushTarget; return t && s.combat.pushPlan(t, 0).hazard === 'rock'; });
-  await shot('practice-shove-cue');
+  // Press before anything else: the cue lasts about a second of race time, and
+  // a screenshot here spent most of it on a software-rendered runner.
   await page.keyboard.press('KeyG');
+  await shot('practice-shove');
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').practiceComplete);
   check('a real SHOVE key press into the rock finishes the shove lesson', true);
   await shot('practice-complete');
