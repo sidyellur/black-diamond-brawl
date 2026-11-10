@@ -17,6 +17,7 @@ import { CUP_SEEDS, cupRivalParams } from '../src/progression/cup';
 import { CheckpointTracker, GhostRecorder, checkpointWorldZs, type GhostRecording } from '../src/progression/ghost';
 import { generateTrack } from '../src/track/generator';
 import { surfaceAtZ } from '../src/track/surface';
+import { chuteAhead } from '../src/track/chute';
 // Plain JavaScript intentionally keeps the exact function browser-serializable.
 // @ts-expect-error JavaScript acceptance helper is outside production tsconfig.
 import { naturalRaceDriver } from './naturalRaceDriver.mjs';
@@ -44,17 +45,21 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
     crestApexZs: generated.crestApexes.map(index => index * SEGMENT_LENGTH + SEGMENT_LENGTH / 2),
     finishSegment, ghostRecorder, ghost, ghostSplit: '',
     checkpoints: new CheckpointTracker(checkpointWorldZs(player.worldZ, finishSegment.z)),
-    elapsedRaceMs: 0, simulationHitStopMs: 0, raceOver: false, recording: null as GhostRecording | null,
+    wallLaneSteps: 0, elapsedRaceMs: 0, simulationHitStopMs: 0, raceOver: false, recording: null as GhostRecording | null,
     simulate(delta: number, _inputFrameElapsedMs: number) {
       this.elapsedRaceMs += delta;
       const time = this.elapsedRaceMs;
       if (this.simulationHitStopMs > 0) { this.simulationHitStopMs = Math.max(0, this.simulationHitStopMs - delta); return; }
       const previousZ = player.worldZ;
       player.update(delta, false, surfaceAtZ(generated.segments, player.worldZ));
+      // The tree chute's outer lanes are walls: count every step the natural driver spends in one (it must be none).
+      const underfoot = generated.segments[Math.min(generated.segments.length - 1, Math.floor(player.worldZ / SEGMENT_LENGTH))];
+      const wallsNear = underfoot.chute || (underfoot.chuteFunnel && generated.segments[Math.floor(player.worldZ / SEGMENT_LENGTH) + 3]?.chute);
+      if (wallsNear && Math.abs(player.laneOffsetFraction) > 0.6) this.wallLaneSteps++;
       if (this.crestApexZs.some(z => previousZ < z && player.worldZ >= z)) player.jump(true, false);
       collisions.update(player, this.obstacles);
       aiRiders.forEach((rider, i) => {
-        rider.update(delta, this.obstacles, player, surfaceAtZ(generated.segments, rider.worldZ));
+        rider.update(delta, this.obstacles, player, surfaceAtZ(generated.segments, rider.worldZ), chuteAhead(generated.segments, rider.worldZ));
         if (rider.finishTimeMs === null && rider.worldZ >= finishSegment.z) rider.finishTimeMs = time;
         if (rider.finishTimeMs !== null) rider.worldZ = finishSegment.z;
         aiCollisions[i].update(rider, this.obstacles);
@@ -85,6 +90,7 @@ const seeds = (process.argv.find(arg => arg.startsWith('--seeds='))?.slice(8) ??
 const reports = seeds.map(seed => {
   const first = makeModel(seed);
   const run = serializedDriver({ scene: first, render: false });
+  assert.equal(first.wallLaneSteps, 0, `seed ${seed}: the natural driver never rides a wall lane of the tree chute`);
   if (!run.finished) return { ...run, replay: null };
   assert.ok(first.recording, `seed ${seed}: genuine complete ghost`);
   const replay = makeModel(seed, first.recording);
@@ -140,6 +146,7 @@ console.log(JSON.stringify(reports.map(r => ({ seed: r.seed, finished: r.finishe
   collected: r.collected, rockRecoveries: r.rockRecoveries, rivalHitReactions: r.rivalHitReactions,
   ghostSamples: r.ghostSamples, replay: !!r.replay })), null, 2));
 assert.ok(reports.every(r => r.finished), 'Every selected natural-course regression seed must finish');
+console.log(`${reports.length} courses, each with a tree chute: 0 steps in a wall lane, 0 wall trees touched.`);
 console.log(`${reports.filter(r => r.finished).length}/${reports.length} full-course seeds finished; each successful seed replayed with three matching natural ghost splits.`);
 
 // Two-strike trees: natural play dodges trees entirely, a single tree is a

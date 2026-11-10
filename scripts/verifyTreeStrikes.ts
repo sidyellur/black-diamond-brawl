@@ -249,7 +249,10 @@ test('immunity distance: a rider can steer for the whole second half, and no cra
   let sites = 0, needed = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const { obstacles } = generateTrack(seed);
-    for (const t of obstacles.filter(o => o.kind === 'tree').filter((_, i) => i % 3 === 0)) {
+    // A chute's wall trees stand every second segment, so "a lane clear at the exact spot immunity ends" is no test
+    // of them: a rider who stays in a wall lane meets the next tree a moment later. They are checked with the right
+    // rule (steer INWARD at the first steerable moment) in scripts/verifyChute.ts, for every wall and both sides.
+    for (const t of obstacles.filter(o => o.kind === 'tree' && !o.wall).filter((_, i) => i % 3 === 0)) {
       const p = new Player();
       p.applyKnockback(t.lane, 0);
       for (let i = 0; i < 12; i++) p.update(STEP);

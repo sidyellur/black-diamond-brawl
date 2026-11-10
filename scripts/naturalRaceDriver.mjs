@@ -60,9 +60,16 @@ export function naturalRaceDriver(options = {}) {
     // the lane it slides into: 3 units per ms of extra tween at MAX_SPEED.
     const slideUnits = Math.max(0, (player.tweenDurationMs ?? 150) - 150) * 3;
     if (!current || current.z - player.worldZ > 1400 + slideUnits) return;
-    const candidates = [player.laneIndex - 1, player.laneIndex + 1].filter(lane => lane >= 0 && lane < 5)
-      .map(lane => ({ lane, clearance: (nearest(lane)?.z ?? Infinity) - player.worldZ }))
-      .sort((a, b) => b.clearance - a.clearance);
+    // A tree chute's outer lanes are walled: a lane with a wall tree coming up is never a candidate. (The driver
+    // can still be IN one when the walls come into view, in which case the blocked current lane below moves it out.)
+    const wallLane = (lane) => scene.obstacles.some(o => o.wall && o.lane === lane &&
+      o.z >= player.worldZ - 100 && o.z <= player.worldZ + 2600);
+    const clearanceOf = (lane) => lane < 0 || lane > 4 ? 0 : (nearest(lane)?.z ?? Infinity) - player.worldZ;
+    // Adjacent lanes tie when a whole row blocks both neighbours (two rocks beside a tree). Break the tie toward the
+    // side whose NEXT lane is clearer, so the driver heads for the gap two lanes over instead of into the first rock.
+    const candidates = [player.laneIndex - 1, player.laneIndex + 1].filter(lane => lane >= 0 && lane < 5 && !wallLane(lane))
+      .map(lane => ({ lane, clearance: clearanceOf(lane), beyond: clearanceOf(lane + Math.sign(lane - player.laneIndex)) }))
+      .sort((a, b) => Math.round(b.clearance / 200) - Math.round(a.clearance / 200) || b.beyond - a.beyond);
     if (candidates[0]?.clearance > 1000 + slideUnits) {
       const previousSerial = player.maneuverSerial;
       player.requestLaneShift(candidates[0].lane > player.laneIndex ? 1 : -1);

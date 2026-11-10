@@ -101,12 +101,13 @@ clean hits, near misses and landings to build Flow. Damage breaks the chain.
 
 ## Mountains, ghosts and fair challenges
 
-Each seeded mountain combines six named features: forest slaloms with changing openings,
+Each seeded mountain combines six named features: forest slaloms with changing openings and a tree chute,
 exposed ridge launches with clear landing zones, and broad bowls with space to fight.
 Warm-up, transitions and finish runout remain protected. Course geometry, setpieces,
 obstacles, pickups and rival decision streams reproduce for a seed.
 
-Terrain rides differently, not just looks different. Each bowl holds one **powder field**,
+Terrain rides differently, not just looks different: bowls hold powder, ridges hold ice and each course
+has one tree chute in a forest. Each bowl holds one **powder field**,
 15 to 25 segments of deep powder in the entry hill or the exit curve (never the combat arena).
 On the ground, top speed is capped at 80% of normal, and the boost cap shrinks by the same ratio;
 dropping in above the cap bleeds speed off over about half a second rather than snapping.
@@ -135,6 +136,28 @@ had to go where they do not, the offending obstacles inside it are thinned, neve
 re-rolled). Ice reads as a pale-blue glaze with long streak marks, sheen patches and a frozen
 threshold where it begins (not powder's white stipple); the HUD says **ICE · SLOW CARVE** on
 entry and **SLOW CARVE · CLOSE CALLS x2** beside the pace readout.
+
+Each course also has exactly one **tree chute**, in one of its two forests (never the warm-up lodge):
+a stretch of 20 to 30 segments where the two outer lanes are walled with real trees on every second
+segment, so only the three inner lanes are rideable. A 10-segment **entry funnel** comes first. It is
+obstacle-free, its shading tapers in toward the walls and red-and-white marker poles stand every second
+segment, so the narrowing reads from far up the course, and it is where the HUD says **CHUTE · THREE
+LANES**. A rider arriving in lane 0 or 4 has the whole funnel to move inward (it lasts 556 ms at boost
+speed; a lane change takes 150 ms). Inside, the only obstacles are a few rocks and moguls in lanes 1 to 3,
+never a tree, always leaving an inner lane clear. The walls are ordinary `tree` obstacles, so collision,
+two-strike crashes, rival dodging and the directional shove's "TREE AHEAD" cue all work unchanged: a first
+wall hit is a heavy crash (steer inward at the first moment you can and it is only ever one), a rival's
+attack still cannot knock you into the wall (the tree clamp always finds a wall tree ahead of lane 0 or 4
+inside the chute), and **you can shove a rival into it**. Rivals in a wall lane move inward in the funnel
+whatever their personality prefers, and one that crashes into the wall gets back inward after it recovers.
+Wall trees pay no near misses (riding between them is the course, not a close call), nothing is picked up
+in a wall lane or in the last 7 segments of the funnel, and the chute is placed from its own seed-derived
+stream: geometry, sections, rivals and every obstacle outside the funnel and walls are those of a course
+without one (it replaces the 7 or so obstacles that stood in its stretch). It is judged by the same
+reachability model as the rest of the field with the outer lanes closed from the first wall to the last,
+the funnel leaving any lane able to reach an inner one, and the rows after it passable for a rider leaving
+in any inner lane. Because a trick jump flies straight and a boosted one flies furthest, no mogul stands in
+a wall lane within 22 segments of the first wall tree. `npm run verify:chute` covers all of it.
 
 A successful finish saves your fastest **personal ghost**. Replay the same mountain to see its
 translucent rider and signed checkpoint splits at 25%, 50% and 75%. The ghost never collides,

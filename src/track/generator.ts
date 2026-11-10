@@ -5,6 +5,7 @@ import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { MOUNTAIN_GENERATOR_VERSION, MOUNTAIN_SETPIECES, MountainSection, MountainTheme } from './mountain';
 import { placeObstacles } from './placement';
+import { chuteStream, placeChute, type Chute } from './chute';
 import { iceStream, placeIce, type IceSheet } from './ice';
 import { placePowder, powderStream, type PowderField } from './powder';
 import { pickupStream, placePickups, skipLegacyPickupDraws } from './pickupPlacement';
@@ -168,29 +169,40 @@ export interface GeneratedTrack {
   powder: PowderField[];
   /** Ice sheets, one per ridge section; their segments carry `surface: 'ice'`. */
   ice: IceSheet[];
+  /** The tree chute, one per course (none only if no forest section could host it); its segments
+   *  carry `chuteFunnel` / `chute` and its wall trees `wall: true`. */
+  chute: Chute[];
 }
 
-/** One seed, strictly ordered passes, no runtime randomness. Pickups, powder
- *  and ice draw from their own derived streams, not the shared generator (see
- *  `pickupStream`, `powderStream`, `iceStream`), so none re-rolls geometry,
+export interface GenerateOptions {
+  /** `false` skips the chute pass: the course as it was before the chute (model checks compare against it). */
+  chute?: boolean;
+}
+
+/** One seed, strictly ordered passes, no runtime randomness. Pickups, powder,
+ *  ice and the chute draw from their own derived streams, not the shared generator (see
+ *  `pickupStream`, `powderStream`, `iceStream`, `chuteStream`), so none re-rolls geometry,
  *  obstacles or rivals. */
-export function generateTrack(seed: number): GeneratedTrack {
+export function generateTrack(seed: number, options: GenerateOptions = {}): GeneratedTrack {
   const prng = mulberry32(seed);
   const geometry = buildGeometry(prng);
   const placed = placeObstacles(geometry, prng);
   // Pickups draw from their own seed-derived stream; the shared generator
   // still advances exactly as before so rival parameters are unchanged.
   skipLegacyPickupDraws(placed, geometry.placeableStart, geometry.placeableEnd, prng);
-  // Ice sheets come first because they can thin ridge rows, and the powder and
-  // pickup passes then see that final field. Powder fields are decided after the shared generator is finished with, from
-  // their own stream. Their entry moguls are the only obstacles it adds, and
-  // pickups are placed last so they see the final obstacle field.
+  // Ice sheets come first because they can thin ridge rows; powder, then the chute,
+  // see that final field. Each is decided after the shared generator is finished with,
+  // from its own stream. Powder's entry moguls and the chute's walls and inner rows are
+  // the only obstacles they add, and pickups are placed last so they see the final field.
   const { obstacles: afterIce, sheets: ice } = placeIce(geometry, placed, iceStream(seed));
-  const { obstacles, fields: powder } = placePowder(geometry, afterIce, powderStream(seed));
+  const { obstacles: afterPowder, fields: powder } = placePowder(geometry, afterIce, powderStream(seed));
+  // The chute replaces the obstacles of its own forest stretch and is judged against the finished field.
+  const { obstacles, chutes: chute } = options.chute === false
+    ? { obstacles: afterPowder, chutes: [] } : placeChute(geometry, afterPowder, chuteStream(seed));
   const pickups = placePickups({ obstacles, crestApexes: geometry.crestApexes,
     placeableStart: geometry.placeableStart, placeableEnd: geometry.placeableEnd,
     segments: geometry.segments }, pickupStream(seed));
   const aiRiders = spawnAIRiders(prng);
   return { generatorVersion: MOUNTAIN_GENERATOR_VERSION, sections: geometry.sections,
-    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups, powder, ice };
+    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups, powder, ice, chute };
 }

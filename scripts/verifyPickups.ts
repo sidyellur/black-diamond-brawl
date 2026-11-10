@@ -28,6 +28,7 @@ import { COURSE_VERSION } from '../src/progression/rules';
 import { generateTrack } from '../src/track/generator';
 import { pickupStream, placePickups } from '../src/track/pickupPlacement';
 import { gapLaneChangeSegments } from '../src/track/surface';
+import { chuteEnd } from '../src/track/chute';
 
 const STEP = 1000 / 60;
 let passed = 0;
@@ -36,10 +37,13 @@ function test(name: string, run: () => void): void { run(); passed++; console.lo
 // --- course level -----------------------------------------------------------
 const SEEDS = 1000;
 const courses = Array.from({ length: SEEDS }, (_, i) => generateTrack(i + 1));
-// [obstacles, aiRiders] hashes recorded on `mountain-v2`, before the pickup rework.
+// [obstacles, aiRiders] hashes recorded on `mountain-v2`, before the pickup rework. The obstacle hash is of every
+// obstacle OUTSIDE the tree chute (#39, part 3), which replaces 3-6 of them per course: the rival hashes are the
+// original v2 values; the obstacle hashes were re-recorded from `main`'s own obstacle lists with the chute's funnel
+// and walled stretch cut out (and the powder entry moguls left out, as before), so they still prove that nothing else moved.
 const PINNED_V2: Record<number, [string, string]> = {
-  7919: ['e8d10106c96d', '1a74cadd4fda'], 15838: ['102281d8a3b8', '6f2412957e2c'],
-  23757: ['519c139a5ec4', '5cde15b8cf42'], 2375700: ['b09630657e27', '44c99764c656']
+  7919: ['93133d08db66', '1a74cadd4fda'], 15838: ['38c56e61018f', '6f2412957e2c'],
+  23757: ['da0ce85dd911', '5cde15b8cf42'], 2375700: ['9ecbbc24a59c', '44c99764c656']
 };
 console.log('\n=== pickups: course generation ===');
 
@@ -156,7 +160,9 @@ test('generation is deterministic, and pickup placement never touches obstacles 
     // Powder (#39) appends entry moguls after the pinned v2 obstacle field was
     // recorded; every other obstacle must still be byte-identical to it.
     const entry = new Set(t.powder.flatMap((f) => f.moguls.map((lane) => `${f.start}:${lane}`)));
-    actual[seed] = [h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)))), h(t.aiRiders)];
+    const chute = t.chute[0];
+    const cut = (o: { segIndex: number }) => o.segIndex >= chute.funnelStart && o.segIndex < chuteEnd(chute);
+    actual[seed] = [h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)) && !cut(o))), h(t.aiRiders)];
   }
   assert.deepEqual(actual, PINNED_V2);
 });

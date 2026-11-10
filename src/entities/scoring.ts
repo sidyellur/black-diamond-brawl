@@ -210,6 +210,11 @@ export class ScoreTracker {
       if (!speedOk) {
         continue;
       }
+      // A tree chute's wall trees pay nothing: riding between them is not a close call, it is the
+      // course (a tree every second segment would otherwise be 10-15 near misses a pass).
+      if (obstacle.wall) {
+        continue;
+      }
       if (this.playerCollisions.wasHit(obstacle)) {
         continue; // a real hit isn't a "near" miss
       }

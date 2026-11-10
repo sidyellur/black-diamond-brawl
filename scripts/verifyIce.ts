@@ -34,6 +34,7 @@ import type { Segment, Surface } from '../src/track/segment';
 import {
   gapLaneChangeSegments, laneChangeSegments, laneTweenMs, SURFACE_CUES, surfaceAtZ, surfaceEntryCue, surfaceTagDetail
 } from '../src/track/surface';
+import { chuteAhead } from '../src/track/chute';
 // @ts-expect-error JavaScript acceptance helper is outside production tsconfig.
 import { naturalRaceDriver } from './naturalRaceDriver.mjs';
 
@@ -482,7 +483,7 @@ test('rivals are not farmed by ice: rock hits around ice sheets, slow carve agai
           if (this.crestApexZs.some((z: number) => previous < z && p.worldZ >= z)) p.jump(true, false);
           colls.update(p, track.obstacles);
           riders.forEach((r, i) => {
-            r.update(delta, track.obstacles, p, rivalsSlowOnIce ? surfaceAtZ(track.segments, r.worldZ) : undefined);
+            r.update(delta, track.obstacles, p, rivalsSlowOnIce ? surfaceAtZ(track.segments, r.worldZ) : undefined, chuteAhead(track.segments, r.worldZ));
             if (r.finishTimeMs === null && r.worldZ >= finish.z) r.finishTimeMs = this.elapsedRaceMs;
             if (r.finishTimeMs !== null) r.worldZ = finish.z;
             aiColls[i].update(r, track.obstacles);
