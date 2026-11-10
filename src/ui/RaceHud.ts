@@ -275,7 +275,7 @@ export class RaceHud {
     this.lesson.setText(s.practice ? `${s.practice.title}\n${s.practice.instruction}\n${s.practice.feedback}` : '');
     this.attack.setText(s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
     this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
-    this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  2 TREES END YOU  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
+    this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();
     const x = 234, y = 51, w = 482;
