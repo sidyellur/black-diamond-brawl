@@ -168,14 +168,14 @@ export class Juice {
    *  with the treed rival long out of view): the screen-space feedback,
    *  shake and hit-stop, still plays, but no particles are emitted at a
    *  stale or meaningless position. */
-  combatHit(at: { x: number; y: number } | null): void {
+  combatHit(at: { x: number; y: number } | null, knockdown = false): void {
     if (at) {
-      this.sparks.emitParticleAt(at.x, at.y, 12);
-      this.burst.emitParticleAt(at.x, at.y, 6);
-      this.addRing(at.x, at.y, 44, UI.accentWarn, true);
+      this.sparks.emitParticleAt(at.x, at.y, knockdown ? 24 : 12);
+      this.burst.emitParticleAt(at.x, at.y, knockdown ? 16 : 6);
+      this.addRing(at.x, at.y, knockdown ? 72 : 44, UI.accentWarn, true);
     }
-    if (!this.reducedMotion) this.worldCam.shake(110, 0.008);
-    this.hitStopMs = 55;
+    if (!this.reducedMotion) this.worldCam.shake(knockdown ? 180 : 110, knockdown ? 0.014 : 0.008);
+    this.hitStopMs = knockdown ? 110 : 55;
   }
 
   /** A landed trick. Celebratory, no shake — shaking on a reward would read

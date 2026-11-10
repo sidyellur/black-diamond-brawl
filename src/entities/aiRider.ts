@@ -5,6 +5,8 @@ import {
   HIT_REACTION_MS,
   JUMP_AIRTIME_EXTENDED_MS,
   JUMP_AIRTIME_MS,
+  KNOCKDOWN_IMMUNITY_MS,
+  KNOCKDOWN_MS,
   LANE_TWEEN_MS,
   LANES,
   MAX_SPEED,
@@ -16,6 +18,8 @@ import {
   ROCK_TUMBLE_MS,
   SEGMENT_LENGTH,
   SHOVE_Z_WINDOW,
+  STAGGER_DECAY_MS,
+  STAGGER_MAX,
   TREE_CRASH_IMMUNITY_MS,
   TREE_CRASH_TUMBLE_MS,
   TREE_STRIKES_TO_WIPEOUT
@@ -59,6 +63,11 @@ export class AIRider implements Collidable {
   /** Increments on every tree contact, so combat can credit a first-strike crash. */
   treeCrashSerial = 0;
   private heavyCrashMsRemaining = 0;
+  /** Stagger pips taken from the player's hits (0..STAGGER_MAX - 1 while up). */
+  stagger = 0;
+  staggerDecayMs = 0;
+  /** Counts down while knocked down; separate from tree strikes on purpose. */
+  knockdownMsRemaining = 0;
   airborne = false;
   finishTimeMs: number | null = null;
   readonly personality: RivalPersonality;
@@ -102,8 +111,9 @@ export class AIRider implements Collidable {
     if (this.wipedOut || this.finishTimeMs !== null) { this.attack.cancel(); return; }
     const dt = Math.max(0, deltaMs);
     this.bumpCooldownMs -= dt;
+    this.updateStaggerDecay(dt);
     this.packGraceMs = Math.max(0, this.packGraceMs - dt);
-    if (this.heavyCrashMsRemaining > 0) {
+    if (this.heavyCrashMsRemaining > 0 || this.knockdownMsRemaining > 0) {
       this.speed = 0; // down hard: no sliding or acceleration until the tumble ends
     } else {
       this.speed = Math.min(this.cruiseSpeedFor(player, dt), this.speed + PLAYER_ACCEL * dt / 1000);
@@ -111,6 +121,7 @@ export class AIRider implements Collidable {
     this.worldZ += this.speed * dt / 1000;
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - dt);
     this.heavyCrashMsRemaining = Math.max(0, this.heavyCrashMsRemaining - dt);
+    this.knockdownMsRemaining = Math.max(0, this.knockdownMsRemaining - dt);
     this.hitReactionMsRemaining = Math.max(0, this.hitReactionMsRemaining - dt);
     this.immunityMsRemaining = Math.max(0, this.immunityMsRemaining - dt);
     this.stumbleMsRemaining = Math.max(0, this.stumbleMsRemaining - dt);
@@ -167,6 +178,7 @@ export class AIRider implements Collidable {
   get collisionImmune(): boolean { return this.tumbleMsRemaining > 0 || this.immunityMsRemaining > 0; }
   get tumbling(): boolean { return this.tumbleMsRemaining > 0; }
   get heavyCrashing(): boolean { return this.heavyCrashMsRemaining > 0; }
+  get knockedDown(): boolean { return this.knockdownMsRemaining > 0; }
   get stumbling(): boolean { return this.stumbleMsRemaining > 0; }
   get hitReacting(): boolean { return this.hitReactionMsRemaining > 0; }
   get leanDirection(): -1 | 0 | 1 {
@@ -195,6 +207,38 @@ export class AIRider implements Collidable {
     }
     this.wipedOut = true;
   }
+
+  /**
+   * Adds stagger pips from a landed player hit. Returns true when this hit
+   * knocks the rival down. A finished, eliminated, already-down or immune
+   * rival cannot be staggered. Each hit restarts the decay timer.
+   */
+  addStagger(pips: number): boolean {
+    if (pips <= 0 || this.wipedOut || this.finishTimeMs !== null || this.knockedDown || this.collisionImmune) return false;
+    this.stagger = Math.min(STAGGER_MAX, this.stagger + pips);
+    this.staggerDecayMs = STAGGER_DECAY_MS;
+    if (this.stagger < STAGGER_MAX) return false;
+    this.stagger = 0;
+    this.staggerDecayMs = 0;
+    this.preserveSetback();
+    this.knockdownMsRemaining = KNOCKDOWN_MS;
+    this.tumbleMsRemaining = KNOCKDOWN_MS;
+    this.immunityMsRemaining = KNOCKDOWN_MS + KNOCKDOWN_IMMUNITY_MS;
+    this.speed = 0;
+    this.airborne = false;
+    this.tween = null;
+    this.attack.cancel();
+    return true;
+  }
+
+  private updateStaggerDecay(dt: number): void {
+    if (this.stagger <= 0 || this.knockedDown) return;
+    this.staggerDecayMs -= dt;
+    if (this.staggerDecayMs > 0) return;
+    this.stagger--;
+    this.staggerDecayMs = this.stagger > 0 ? STAGGER_DECAY_MS : 0;
+  }
+
   hitRock(): void {
     this.preserveSetback();
     this.speed *= ROCK_SPEED_FACTOR;
@@ -326,6 +370,8 @@ export class AIRider implements Collidable {
       { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0 };
   }
   markShovedByPlayer(nowMs: number): void { this.shovedByPlayerAtMs = nowMs; }
+  /** Spends the shove attribution once a knockout has been paid for it. */
+  consumeShoveCredit(): void { this.shovedByPlayerAtMs = null; }
   wasRecentlyShovedByPlayer(nowMs: number, windowMs: number): boolean {
     return this.shovedByPlayerAtMs !== null && nowMs - this.shovedByPlayerAtMs <= windowMs;
   }

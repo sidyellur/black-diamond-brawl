@@ -47,6 +47,15 @@ and can be taken while airborne. An early dodge is safe but does not earn the ti
 Normal attacks still favor speed or a ski pole; each pole has three charges. Attacking commits
 your steering/jump briefly, so choose your line before swinging.
 
+Every rival has a **stagger meter** of three pips, drawn as three squares in its nameplate (filled
+means damage taken). An unarmed hit adds 1, a ski-pole hit adds 2, a counter adds 2, and a passive
+body check adds none. A rival that goes 6 seconds without being hit recovers a pip. At three pips
+it is **knocked down**: it tumbles to a stop for 2.5 seconds, then gets up with 1.5 seconds of
+immunity and an empty meter, well behind the pack. A knockdown pays the 500-point knockout and shows
+`KNOCKOUT · NAME`. It is not a tree strike and never eliminates a rival, and a rival that has
+finished can no longer be staggered. Shoving a rival into a tree still pays the same single
+knockout. You have no stagger meter: a lost exchange costs you a lane and speed, as before.
+
 - **Bully:** follows your lane and hunts a fight. Bait its tell, evade and counter.
 - **Line defender:** protects its starting line. Pass on another lane or draw it into a strike.
 - **Daredevil:** seeks moguls and rocks, takes real jumps and can clash in the air. Watch its landing line.

@@ -19,6 +19,7 @@
     "verify:art": "node --import tsx scripts/verifyArt.ts",
     "verify:boost": "node --import tsx scripts/verifyBoost.ts",
     "verify:trees": "node --import tsx scripts/verifyTreeStrikes.ts",
+    "verify:stagger": "node --import tsx scripts/verifyStagger.ts",
     "verify:pacing": "node --import tsx scripts/verifyPacing.ts",
     "ios:sync": "npm run build && cap sync ios",
     "ios:open": "npm run ios:sync && cap open ios",

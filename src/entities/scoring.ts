@@ -152,7 +152,7 @@ export class ScoreTracker {
         this.award('brush', 'BODY CHECK', POINTS.COMBAT_BRUSH);
       } else {
         this.knockoutCount++;
-        this.award('knockout', 'KNOCKOUT', POINTS.KNOCKOUT);
+        this.award('knockout', `KNOCKOUT · ${(event.rider.params.name ?? event.rider.personalityName).toUpperCase()}`, POINTS.KNOCKOUT);
       }
     }
     this.combat.events.length = 0;
