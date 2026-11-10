@@ -336,6 +336,8 @@ export const POINTS = {
    *  split the scoreboard could not tell intent from accident. */
   COMBAT_BRUSH: 50,
   KNOCKOUT: 500,
+  /** One-time bonus for knocking down a rival you had a score to settle with (Cup only). */
+  SETTLED: 500,
   /** The directional shove (`PUSH_*`); a knockout is paid on top if it trees. */
   PUSH: 100,
   NEAR_MISS: 100,
@@ -349,3 +351,15 @@ export const POINTS = {
   POSITION_BONUS_FOURTH: 250,
   POSITION_BONUS_FIFTH: 0
 };
+
+// ---- Cup grudges (src/progression/grudge.ts) ----
+/** Highest grudge level a rival can hold. */
+export const GRUDGE_MAX = 2;
+/** Added to a rival's aggression for each grudge level (capped at 1.0 overall). */
+export const GRUDGE_AGGRESSION_PER_LEVEL = 0.15;
+/** Multiplies a rival's attack interval once per grudge level (smaller = attacks more often). */
+export const GRUDGE_INTERVAL_FACTOR = 0.85;
+/** Deliberate hits on one rival in a race that earn it a grudge. */
+export const GRUDGE_HITS_TO_ANGER = 3;
+/** Hits a rival must land on the player in a race to leave a score to settle. */
+export const GRUDGE_HITS_TO_OWE = 2;

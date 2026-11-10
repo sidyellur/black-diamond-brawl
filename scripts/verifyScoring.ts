@@ -43,7 +43,7 @@ function rig(obstacles: Obstacle[] = [], riders: AIRider[] = []) {
   return { player, collisions, combat, score, emit };
 }
 function categoryTotal(score: ScoreBreakdown): number {
-  return score.combatHitPoints + score.brushPoints + score.pushPoints + score.knockoutPoints +
+  return score.combatHitPoints + score.brushPoints + score.pushPoints + score.knockoutPoints + score.settledPoints +
     score.nearMissPoints + score.trickJumpPoints + score.chainBonusPoints;
 }
 

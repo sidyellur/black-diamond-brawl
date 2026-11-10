@@ -1,6 +1,7 @@
 import { STORAGE_KEYS } from '../platform/storage';
 import { CHALLENGES, COSMETICS, cosmetic, type CosmeticSlot } from './cosmetics';
 import { applyCupRound, createCup, cupRace, getCupStandings, parseCup, type CupState, type Medal, type RacerSnapshot } from './cup';
+import type { RaceTally } from './grudge';
 import { clone, integer, localStore, object, parseStored, saveStored, validId, type ValueStore } from './persistence';
 import { newRunId, validRunSummary, type RaceOptions, type RunSummary } from './race';
 
@@ -115,11 +116,11 @@ export function createCareerStore(store: ValueStore) {
     startCup: (): CupState => { const cup = createCup(); replaceCup(cup); return clone(cup); },
     getCupRace: (): RaceOptions | null => { const cup = read().cup; return cup ? cupRace(cup) : null; },
     abandonCup: (): void => { replaceCup(null); },
-    completeCupRound: (options: RaceOptions, racers: readonly RacerSnapshot[]): CupState | null => {
+    completeCupRound: (options: RaceOptions, racers: readonly RacerSnapshot[], tally?: RaceTally): CupState | null => {
       const career = read();
       if (!career.cup) return null;
       const previous = career.cup;
-      const next = applyCupRound(previous, options, racers);
+      const next = applyCupRound(previous, options, racers, tally);
       if (next !== previous) {
         career.cup = next;
         if (next.status === 'complete' && next.medal) career.medals[next.medal] = Math.min(1e9, career.medals[next.medal] + 1);

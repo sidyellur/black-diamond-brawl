@@ -2,6 +2,7 @@ export * from './rules';
 export * from './race';
 export * from './daily';
 export * from './cup';
+export * from './grudge';
 export * from './career';
 export * from './cosmetics';
 export * from './records';

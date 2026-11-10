@@ -11,6 +11,7 @@ import { AIRider } from './aiRider';
 import { CollisionSystem } from './collision';
 import { CombatSystem } from './combat';
 import { Obstacle } from './obstacle';
+import type { GrudgeTracker } from '../progression/grudge';
 import { Player } from './player';
 
 /** Full score breakdown for the Result screen (design-spec §4.7). */
@@ -19,6 +20,9 @@ export interface ScoreBreakdown {
   combatHitPoints: number;
   knockoutCount: number;
   knockoutPoints: number;
+  /** Cup only: one-time bonus for knocking down a rival you had a score to settle with. */
+  settledCount: number;
+  settledPoints: number;
   brushCount: number;
   brushPoints: number;
   /** Directional shoves (G / L): 100 each, plus any knockout they cause. */
@@ -68,7 +72,7 @@ const POSITION_BONUS_BY_PLACE: Record<number, number> = {
 export interface ScoreEvent {
   label: string;
   points: number;
-  kind: 'hit' | 'brush' | 'push' | 'knockout' | 'near' | 'trick';
+  kind: 'hit' | 'brush' | 'push' | 'knockout' | 'near' | 'trick' | 'settled';
 }
 
 const FLOW_WINDOW_MS = 4200;
@@ -81,6 +85,7 @@ export class ScoreTracker {
   private chainBonus = 0;
   private combatHitCount = 0;
   private knockoutCount = 0;
+  private settledCount = 0;
   private brushCount = 0;
   private pushCount = 0;
   private nearMissCount = 0;
@@ -99,7 +104,9 @@ export class ScoreTracker {
     private readonly riders: AIRider[],
     private readonly obstacles: Obstacle[],
     private readonly playerCollisions: CollisionSystem,
-    private readonly combat: CombatSystem
+    private readonly combat: CombatSystem,
+    /** Cup only. Absent in Drop In, Daily and Practice, so those never change. */
+    private readonly grudge?: GrudgeTracker
   ) {
     this.previousPlayerZ = player.worldZ;
     this.previousAirborne = player.airborne;
@@ -148,7 +155,9 @@ export class ScoreTracker {
    */
   private drainCombatEvents(): void {
     for (const event of this.combat.events) {
+      const rivalId = `rival-${this.riders.indexOf(event.rider)}`;
       if (event.type === 'hit') {
+        this.grudge?.hit(rivalId);
         this.combatHitCount++;
         this.award('hit', 'CLEAN HIT', POINTS.COMBAT_HIT);
       } else if (event.type === 'push') {
@@ -159,7 +168,15 @@ export class ScoreTracker {
         this.award('brush', 'BODY CHECK', POINTS.COMBAT_BRUSH);
       } else {
         this.knockoutCount++;
-        this.award('knockout', `KNOCKOUT · ${(event.rider.params.name ?? event.rider.personalityName).toUpperCase()}`, POINTS.KNOCKOUT);
+        const name = (event.rider.params.name ?? event.rider.personalityName).toUpperCase();
+        const settled = this.grudge?.knockdown(rivalId) ?? false;
+        this.award('knockout', `KNOCKOUT · ${name}`, POINTS.KNOCKOUT);
+        if (settled) {
+          // Flat bonus: no flow bonus on top and it does not extend the chain.
+          this.settledCount++;
+          this.eventPoints += POINTS.SETTLED;
+          this.feedback.push({ kind: 'settled', label: `SETTLED · ${name}`, points: POINTS.SETTLED });
+        }
       }
     }
     this.combat.events.length = 0;
@@ -294,6 +311,8 @@ export class ScoreTracker {
       combatHitPoints: this.combatHitCount * POINTS.COMBAT_HIT,
       knockoutCount: this.knockoutCount,
       knockoutPoints: this.knockoutCount * POINTS.KNOCKOUT,
+      settledCount: this.settledCount,
+      settledPoints: this.settledCount * POINTS.SETTLED,
       brushCount: this.brushCount,
       brushPoints: this.brushCount * POINTS.COMBAT_BRUSH,
       pushCount: this.pushCount,

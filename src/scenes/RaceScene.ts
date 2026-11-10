@@ -29,7 +29,7 @@ import { PLAYER_FRAME_SIZE, PLAYER_FRAMES, PLAYER_TEXTURE_KEY, getSelectedPlayer
 import { computePlayerPosition, ScoreTracker } from '../entities/scoring';
 import { FixedRaceClock, RaceOptions, createQuickRace, retryRace, normalizeRaceOptions, cupRivalParams,
   recordRun, awardRun, completeCupRound, GhostRecorder, GhostRecording, loadGhost, saveGhost,
-  sampleGhost, CheckpointTracker, checkpointWorldZs } from '../progression';
+  sampleGhost, CheckpointTracker, checkpointWorldZs, getCup, cupGrudges, GrudgeTracker, grudgeSummary, cupBanner, RIVALS, type GrudgeState } from '../progression';
 import { menuButton, menuText, menuKeys } from '../frontend/menu';
 import { PRACTICE_LESSON_COUNT, PRACTICE_LESSONS, PracticeObjectives } from '../practice/lessons';
 import { MountainSection, sectionAtZ } from '../track/mountain';
@@ -123,6 +123,9 @@ export class RaceScene extends Phaser.Scene {
   private pickups: Pickup[] = [];
   private pickupRenderer!: PickupRenderer;
   private scoreTracker!: ScoreTracker;
+  /** Cup only: the grudge state this race started with (same on every attempt of a round) and its tally. */
+  private grudges: GrudgeState | null = null;
+  private grudgeTracker: GrudgeTracker | undefined;
 
   private seed = 0;
   private hud!: RaceHud;
@@ -238,7 +241,12 @@ export class RaceScene extends Phaser.Scene {
     // CollisionSystem instance — the `hit` set inside CollisionSystem is
     // per-rider, so sharing one across riders would let one rider's dodge
     // failure silently clear an obstacle for everyone else.
-    this.aiRiders = generated.aiRiders.map((params, i) => new AIRider(cupRivalParams(i, params)));
+    // Grudges are read from the saved cup, which only changes when a round is
+    // committed, so a resumed or retried round starts from the same state.
+    const cup = this.options.mode === 'cup' ? getCup() : null;
+    this.grudges = cup && cup.id === this.options.cupId ? cupGrudges(cup) : null;
+    this.grudgeTracker = this.grudges ? new GrudgeTracker(this.grudges) : undefined;
+    this.aiRiders = generated.aiRiders.map((params, i) => new AIRider(cupRivalParams(i, params, this.grudges)));
     this.aiCollisions = this.aiRiders.map(() => new CollisionSystem());
     this.aiRiderRenderer = new AIRiderRenderer(this, this.registerWorld);
     this.aiRiderRenderer.reducedMotion = this.reducedMotion;
@@ -258,7 +266,7 @@ export class RaceScene extends Phaser.Scene {
     this.targetMarker.setDepth(DEPTH.SHADOW + 1);
     this.registerWorld(this.targetMarker);
 
-    this.scoreTracker = new ScoreTracker(this.player, this.aiRiders, this.obstacles, this.collisions, this.combat);
+    this.scoreTracker = new ScoreTracker(this.player, this.aiRiders, this.obstacles, this.collisions, this.combat, this.grudgeTracker);
 
     this.playerSprite = this.add.sprite(SCREEN_W / 2, SCREEN_H * 0.8, getSelectedPlayerTexture(this), PLAYER_FRAMES.CENTER);
     this.playerSprite.setOrigin(0.5, 1);
@@ -281,6 +289,8 @@ export class RaceScene extends Phaser.Scene {
 
     this.audio = getRaceAudio();
     this.buildHud();
+    const banner = this.options.mode === 'cup' ? cupBanner(this.options.cupId ?? '', this.options.roundIndex ?? 0, this.grudges) : null;
+    this.hud.setTaunt(banner ? { name: banner.name, tag: banner.tag, color: RIVAL_SUITS[banner.index], text: banner.text } : null);
     this.bindRaceLifecycle();
     this.playerInput.setEnabled(false);
     if (!isAppActive(this.game)) this.setPaused(true);
@@ -405,6 +415,7 @@ export class RaceScene extends Phaser.Scene {
       this.hud.setCountdown(this.countdownMs > 1200 ? '3' : this.countdownMs > 600 ? '2' : this.countdownMs > 0 ? '1' : '');
       if (this.countdownMs === 0) {
         this.playerInput.setEnabled(true);
+        this.hud.setTaunt(null);
         this.hud.showMessage('DROP IN!', UI.accentGood);
         this.audio.play('go');
       }
@@ -665,6 +676,7 @@ export class RaceScene extends Phaser.Scene {
       if (event.type === 'counter') counterThisFrame = true;
       this.practiceObjective?.combat(event.type);
       if (event.type === 'evade') { this.hud.showMessage('EVADED · COUNTER NOW!', UI.accentGood); this.audio.play('score'); }
+      if (event.type === 'rival-hit') this.grudgeTracker?.rivalHit(`rival-${this.aiRiders.indexOf(event.rider)}`, !!event.absorbed);
       if (event.type === 'counter') { this.counterCount++; this.hud.showMessage('COUNTER HIT!', UI.accentGood); }
     }
     if (this.practiceObjective && this.advancePractice()) return;
@@ -706,10 +718,10 @@ export class RaceScene extends Phaser.Scene {
     // must run after all of the above.
     this.scoreTracker.update(delta);
     const feedback = this.scoreTracker.feedback;
-    this.boost.addFeedback(feedback.map(e => e.kind), counterThisFrame);
+    this.boost.addFeedback(feedback.flatMap(e => e.kind === 'settled' ? [] : [e.kind]), counterThisFrame);
     this.boost.observe(this.player);
     if (feedback.length > 0) {
-      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit' || e.kind === 'push') ?? feedback[feedback.length - 1];
+      const primary = feedback.find(e => e.kind === 'settled') ?? feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit' || e.kind === 'push') ?? feedback[feedback.length - 1];
       const total = feedback.reduce((sum, e) => sum + e.points, 0);
       this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
       if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
@@ -779,9 +791,11 @@ export class RaceScene extends Phaser.Scene {
     const cup = this.options.mode === 'cup' ? completeCupRound(this.options, [
       { id: 'player', worldZ: this.player.worldZ, finishTimeMs: playerFinishTimeMs, wipedOut: !finished },
       ...this.aiRiders.map((r, i) => ({ id: `rival-${i}` as 'rival-0' | 'rival-1' | 'rival-2' | 'rival-3', worldZ: r.worldZ, finishTimeMs: r.finishTimeMs, wipedOut: r.wipedOut }))
-    ]) : null;
+    ], this.grudgeTracker?.tally) : null;
+    const grudgeNote = cup && this.grudges && cup.grudges && cup.status === 'active' && cup.rounds.length === (this.options.roundIndex ?? 0) + 1
+      ? grudgeSummary(this.grudges, cup.grudges, Object.fromEntries(RIVALS.map(rival => [rival.id, rival.name]))) : '';
     this.scene.start('ResultScene', { seed: this.seed, breakdown, bestScore: course.bestScore,
-      isNewBest: course.isNewBest, options: this.options, course, awards, cup, ghostSaved });
+      isNewBest: course.isNewBest, options: this.options, course, awards, cup, ghostSaved, grudgeNote });
   }
 
   private updateHud(): void {

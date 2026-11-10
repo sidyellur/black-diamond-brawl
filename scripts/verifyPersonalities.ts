@@ -9,6 +9,7 @@ import type { Obstacle } from '../src/entities/obstacle';
 import { generateTrack } from '../src/track/generator';
 import { mulberry32 } from '../src/track/prng';
 import { spawnAIRiders } from '../src/track/aiSpawn';
+import { applyGrudge } from '../src/progression';
 
 let passed = 0;
 function test(name: string, run: () => void): void { run(); passed++; console.log(`  PASS ${name}`); }
@@ -134,6 +135,31 @@ test('aerial interaction uses jump heights; ordinary grounded attacks do not str
   assert.equal(p.airborne, true);
   assert.equal(sawAirHit, true, 'matching airborne trajectories resolve a telegraphed air collision');
   assert.equal(p.hitReacting, true);
+});
+
+/** Strikes a lone rival starts against a player riding beside it for 30 seconds. */
+function attacksStarted(level: number, behaviorSeed: number, personality: RivalPersonality): number {
+  const r = new AIRider(applyGrudge({ cruiseSpeedFactor: 1, aggression: 0.3, reactionDistanceSegments: 8, startLane: 3,
+    startZOffset: 10000, paletteIndex: 0, personality, behaviorSeed }, level));
+  const p = player(3, 10000);
+  let last = r.attackId; let count = 0;
+  for (let time = 20; time <= 30000; time += 20) {
+    p.worldZ = r.worldZ; p.speed = r.speed; // keep both riders level so only the AI's own decision varies
+    r.update(20, [], p); r.consumeStrike();
+    if (r.attackId !== last) { count++; last = r.attackId; }
+  }
+  return count;
+}
+
+test('grudge raises attack frequency (aggression and a shorter interval) and stays deterministic', () => {
+  for (const personality of PERSONALITY_ORDER) {
+    let calm = 0, angry = 0;
+    for (const seed of [3, 11, 42, 99]) {
+      assert.equal(attacksStarted(2, seed, personality), attacksStarted(2, seed, personality), 'same inputs, same strikes');
+      calm += attacksStarted(0, seed, personality); angry += attacksStarted(2, seed, personality);
+    }
+    assert.ok(angry > calm, `${personality}: grudge 2 struck ${angry} times vs ${calm} at grudge 0`);
+  }
 });
 
 function replay(seed: number, perturb: boolean): string {

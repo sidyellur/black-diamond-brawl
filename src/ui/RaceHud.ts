@@ -63,6 +63,9 @@ const LAST_CHANCE_X = 16;
 const LAST_CHANCE_Y = 156;
 const LAST_CHANCE_W = 270;
 
+// Countdown digit is centred at 0.42 * SCREEN_H and ~72px tall; the hint bar sits at the bottom.
+const TAUNT_Y = 318;
+
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
   readonly objects: Phaser.GameObjects.GameObject[] = [];
@@ -78,6 +81,11 @@ export class RaceHud {
   private readonly message: Phaser.GameObjects.Text;
   private readonly pauseOverlay: Phaser.GameObjects.Container;
   private readonly countdown: Phaser.GameObjects.Text;
+  private readonly taunt: Phaser.GameObjects.Container;
+  private readonly tauntChip: Phaser.GameObjects.Rectangle;
+  private readonly tauntName: Phaser.GameObjects.Text;
+  private readonly tauntLine: Phaser.GameObjects.Text;
+  private readonly tauntPlate: Phaser.GameObjects.Rectangle;
   private readonly section: Phaser.GameObjects.Text;
   private readonly split: Phaser.GameObjects.Text;
   private readonly lesson: Phaser.GameObjects.Text;
@@ -127,6 +135,14 @@ export class RaceHud {
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
+    // Start-line taunt: below the countdown digit and above the hint bar, so it
+    // never touches the "3-2-1", the hint line or the control hints.
+    this.tauntPlate = scene.add.rectangle(0, 0, 100, 44, UI.panel, 0.92).setStrokeStyle(2, UI.panelEdge);
+    this.tauntChip = scene.add.rectangle(0, 0, 14, 14, UI.inkHigh).setStrokeStyle(2, UI.inkHigh);
+    this.tauntName = scene.add.text(0, 0, '', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px', fontStyle: 'bold', color: hex(UI.accentWarn) }).setOrigin(0, 0.5);
+    this.tauntLine = scene.add.text(0, 0, '', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '16px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0, 0.5);
+    this.taunt = scene.add.container(SCREEN_W / 2, TAUNT_Y, [this.tauntPlate, this.tauntChip, this.tauntName, this.tauntLine]).setDepth(10002).setVisible(false);
+    this.objects.push(this.taunt);
     this.boostLabel = this.text(BOOST_BAR_X, 0, '', 11, UI.panel, true).setStroke('#f3f8ff', 3);
     this.boostCue = this.text(BOOST_BAR_X + BOOST_BAR_W, 0, '', 11, UI.panel, true).setOrigin(1, 0).setStroke('#f3f8ff', 3);
     this.lastChance = this.text(LAST_CHANCE_X + 30, LAST_CHANCE_Y + 5, 'LAST CHANCE · NEXT TREE ENDS RUN', 12, UI.panel, true).setVisible(false);
@@ -263,6 +279,18 @@ export class RaceHud {
     this.releaseTouchControls.forEach(release => release());
   }
   setCountdown(label: string): void { this.countdown.setText(label); }
+  /** Start-line rival taunt: name + colour chip on one row, quote beneath. Null hides it. */
+  setTaunt(taunt: { name: string; tag: string; color: number; text: string } | null): void {
+    this.taunt.setVisible(!!taunt);
+    if (!taunt) return;
+    this.tauntName.setText(`${taunt.name}  ·  ${taunt.tag}`);
+    this.tauntLine.setText(`“${taunt.text}”`);
+    const width = Math.min(SCREEN_W - 64, Math.max(this.tauntLine.width, this.tauntName.width + 24) + 40);
+    this.tauntPlate.setSize(width, 58);
+    this.tauntChip.setFillStyle(taunt.color).setPosition(-width / 2 + 22, -14);
+    this.tauntName.setPosition(-width / 2 + 36, -14);
+    this.tauntLine.setPosition(-width / 2 + 20, 11);
+  }
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 
   /** Boost bar: fill + a tick at the minimum-to-start level + text, so the

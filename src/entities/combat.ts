@@ -63,6 +63,8 @@ export type SkillCombatEvent = {
   type: 'windup' | 'evade' | 'counter' | 'rival-hit' | 'whiff';
   rider: AIRider;
   evade?: 'steer' | 'jump';
+  /** `rival-hit` only: the player's shield ate the blow (no knockback). */
+  absorbed?: boolean;
 };
 
 /**
@@ -508,8 +510,9 @@ export class CombatSystem {
         } else this.skillEvents.push({ type: 'whiff', rider });
         continue;
       }
+      const shielded = this.player.shielded;
       if (!struckPlayer && this.resolveExchange(rider, nowMs, false, 'rival', strike.airborne)) {
-        this.skillEvents.push({ type: 'rival-hit', rider });
+        this.skillEvents.push({ type: 'rival-hit', rider, absorbed: shielded });
         this.counterRemainingMs = 0;
         this.counterRider = null;
         struckPlayer = true;
