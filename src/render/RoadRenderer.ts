@@ -3,7 +3,7 @@ import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
 import { MountainTheme, themeAtSegment } from '../track/mountain';
 import { RUMBLE, SNOW, mix } from './palette';
-import { project } from './project';
+import { project, type ProjectedPoint } from './project';
 
 // All surface colours now come from the shared palette rather than being
 // declared here, so the road and the sprites standing on it are guaranteed to
@@ -35,6 +35,24 @@ const SHAKE_BLEED_PX = 48;
  *  the reason this is capped rather than drawn to the horizon. */
 const CORDUROY_SEGMENTS = 18;
 const CORDUROY_LINES = 9;
+
+/** Powder is read through its stipple: flecks scattered across each segment on
+ *  a world-anchored hash (so they scroll with the road and never swim), dense
+ *  up close and thinner farther out. Capped for the same sub-pixel reason as
+ *  the corduroy, and cheap: one rect each, only while a powder field is in view. */
+const POWDER_STIPPLE_SEGMENTS = 44;
+/** Flecks per segment by draw slot: the nearest slots cover most of the screen
+ *  and need the most; far ones are thin slivers. */
+const POWDER_FLECKS_BY_SLOT: readonly [number, number][] = [[3, 70], [8, 46], [18, 30], [32, 18], [44, 10]];
+
+/** Cheap deterministic hash to [0, 1), render-only (never feeds the simulation). */
+function hash01(a: number, b: number): number {
+  let h = Math.imul(a ^ 0x9e3779b1, 0x85ebca6b) ^ Math.imul(b + 0x27d4eb2f, 0xc2b2ae35);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3a5d);
+  h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
 
 /**
  * Per-drawn-segment horizontal offset walk data (design-spec §3.3), recorded so
@@ -96,6 +114,11 @@ interface SurfaceShades {
   seam: number;
   corduroy: number;
   terrain: number;
+  powder: number;
+  powderSeam: number;
+  powderFleck: number;
+  powderSpark: number;
+  powderEdge: number;
 }
 
 /**
@@ -108,7 +131,8 @@ export class RoadRenderer {
   private readonly graphics: Phaser.GameObjects.Graphics;
   private lastFogColor = -1;
   private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS * THEMES.length }, () => ({
-    snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0, terrain: 0
+    snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0, terrain: 0,
+    powder: 0, powderSeam: 0, powderFleck: 0, powderSpark: 0, powderEdge: 0
   }));
   private readonly markers = Array.from({ length: 20 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
   private markerCount = 0;
@@ -311,12 +335,13 @@ export class RoadRenderer {
         );
       }
 
-      const surface = colors.snow;
+      const powder = segment.surface === 'powder';
       this.fillTrapezoid(
         near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
         far.screenX - far.screenW, far.screenX + far.screenW, far.screenY,
-        surface
+        powder ? colors.powder : colors.snow
       );
+      if (powder) this.drawPowder(segIndex, i, near, far, colors, track[(segIndex - 1 + len) % len].surface !== 'powder');
 
       // Piste markers belong to exact world segments and are rendered after
       // the terrain pass so further snow cannot paint over their raised tops.
@@ -338,7 +363,7 @@ export class RoadRenderer {
       // actual lane boundaries (not the centres), giving a clear dodge/jump
       // corridor without painted road markings or competing with hazards.
       if (i < 36) {
-        const seamColor = colors.seam;
+        const seamColor = powder ? colors.powderSeam : colors.seam;
         for (let lane = 1; lane < 5; lane++) {
           const edge = lane * 0.4 - 1;
           const nearHalf = Math.max(0.35, near.screenW * 0.0019);
@@ -358,7 +383,7 @@ export class RoadRenderer {
       // pixel and turn into shimmer, and drawing them the whole way would add
       // ~800 fill paths a frame on top of the existing ~300 for no visible
       // gain. This is a LOD, not a shortcut.
-      if (i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
+      if (!powder && i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
         const groove = colors.corduroy;
         for (let g = 1; g < CORDUROY_LINES; g++) {
           const t = g / CORDUROY_LINES - 0.5;
@@ -373,6 +398,39 @@ export class RoadRenderer {
 
     this.drawMarkers();
     return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
+  }
+
+  /** The deep-powder look: a soft threshold where the field begins, then
+   *  blue-grey flecks and bright sparkles stippled across the road. The groomed
+   *  corduroy is dropped and the lane seams softened, so the lanes stay legible
+   *  but the surface no longer looks pressed flat. */
+  private drawPowder(segIndex: number, i: number, near: ProjectedPoint, far: ProjectedPoint,
+    colors: SurfaceShades, threshold: boolean): void {
+    if (threshold) {
+      // A soft blue drift line across the whole road, one step thick.
+      const band = 0.34;
+      const farY = near.screenY + (far.screenY - near.screenY) * band;
+      const farX = near.screenX + (far.screenX - near.screenX) * band;
+      const farW = near.screenW + (far.screenW - near.screenW) * band;
+      this.fillTrapezoid(near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
+        farX - farW, farX + farW, farY, colors.powderEdge);
+    }
+    if (i >= POWDER_STIPPLE_SEGMENTS) return;
+    const count = POWDER_FLECKS_BY_SLOT.find(([upTo]) => i < upTo)![1];
+    for (let pass = 0; pass < 2; pass++) {
+      this.graphics.fillStyle(pass === 0 ? colors.powderFleck : colors.powderSpark);
+      for (let k = pass; k < count; k += 2) {
+        const u = hash01(segIndex, k * 2 + 1);
+        const v = hash01(segIndex + 7919, k * 2 + 2);
+        const halfW = near.screenW + (far.screenW - near.screenW) * v;
+        const x = near.screenX + (far.screenX - near.screenX) * v + (u * 2 - 1) * halfW * 0.98;
+        const y = near.screenY + (far.screenY - near.screenY) * v;
+        // Short wind-ripple dashes, wider than tall, so the surface reads as
+        // drifted rather than sprinkled with grit.
+        const w = Math.max(2, halfW * (pass === 0 ? 0.028 : 0.018) * (0.6 + hash01(segIndex + 31, k) * 0.8));
+        this.graphics.fillRect(x - w / 2, y - Math.max(0.5, w * 0.12), w, Math.max(1, w * 0.24));
+      }
+    }
   }
 
   private drawMarkers(): void {
@@ -415,6 +473,11 @@ export class RoadRenderer {
           colors.terrain = mix(terrain, fogColor, fog);
           colors.seam = mix(colors.snow, SNOW.shadow, 0.22 * Math.max(0, 1 - i / 42));
           colors.corduroy = mix(colors.snow, SNOW.shadow, 0.16 * Math.max(0, 1 - i / CORDUROY_SEGMENTS));
+          colors.powder = mix(mix(SNOW.powder, SNOW.powderAlt, variation * 0.45), fogColor, fog);
+          colors.powderSeam = mix(colors.powder, SNOW.shadow, 0.09 * Math.max(0, 1 - i / 42));
+          colors.powderFleck = mix(SNOW.powderFleck, fogColor, Math.min(0.9, fog * 1.1));
+          colors.powderSpark = mix(0xffffff, fogColor, fog);
+          colors.powderEdge = mix(mix(SNOW.powder, SNOW.powderFleck, 0.62), fogColor, fog);
         }
       }
     }

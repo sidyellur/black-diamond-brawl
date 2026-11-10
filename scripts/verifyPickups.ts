@@ -131,7 +131,10 @@ test('generation is deterministic, and pickup placement never touches obstacles 
   const actual: Record<number, [string, string]> = {};
   for (const seed of Object.keys(PINNED_V2).map(Number)) {
     const t = generateTrack(seed);
-    actual[seed] = [h(t.obstacles), h(t.aiRiders)];
+    // Powder (#39) appends entry moguls after the pinned v2 obstacle field was
+    // recorded; every other obstacle must still be byte-identical to it.
+    const entry = new Set(t.powder.flatMap((f) => f.moguls.map((lane) => `${f.start}:${lane}`)));
+    actual[seed] = [h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)))), h(t.aiRiders)];
   }
   assert.deepEqual(actual, PINNED_V2);
 });

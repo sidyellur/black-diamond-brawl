@@ -95,6 +95,11 @@ export const BOOST_ACCEL_FACTOR = 2; // acceleration multiplier while boosting
 export const BOOST_FULL_DURATION_MS = 2500; // a full meter burns out in this long
 export const BOOST_MIN_TO_START = 20; // meter needed to begin a boost
 export const BOOST_DECAY_MS = 500; // speed above MAX_SPEED bleeds off over this long
+/** How fast speed above the current cap bleeds off, in units/sec: a full boost's
+ *  excess over `MAX_SPEED` in `BOOST_DECAY_MS`. Shared by the player and rivals,
+ *  so dropping into powder at full pace slows down at the same rate boost
+ *  fading does, never in a snap. */
+export const OVERSPEED_DECAY_PER_SECOND = (MAX_SPEED * (BOOST_SPEED_FACTOR - 1) * 1000) / BOOST_DECAY_MS;
 export const BOOST_PENALTY_KEEP = 0.5; // fraction of meter kept after a rock / lost exchange
 export const BOOST_GAIN = {
   NEAR_MISS: 8,
@@ -103,6 +108,17 @@ export const BOOST_GAIN = {
   COUNTER: 25,
   KNOCKOUT: 30
 };
+
+// Powder fields (#39): one full-width stretch in each bowl section. On the
+// ground the top speed, and the boost top speed, are scaled by this factor.
+// Airborne riders ignore it, which is why every field opens with moguls to jump.
+export const POWDER_SPEED_FACTOR = 0.8;
+export const POWDER_MIN_SEGMENTS = 15;
+export const POWDER_MAX_SEGMENTS = 25;
+/** Moguls across the first segment of a field: at least two lanes, so a timed
+ *  trick jump (JUMP_REACH_EXTENDED segments) is always on offer. */
+export const POWDER_ENTRY_MOGULS_MIN = 2;
+export const POWDER_ENTRY_MOGULS_MAX = 3;
 
 // Obstacle placement / density (design-spec §4.2). Obstacle *rows* per 100
 // segments ramp from START at t=0 to END at t=1 as the difficulty grows.

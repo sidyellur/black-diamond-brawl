@@ -16,6 +16,7 @@ import { ScoreTracker } from '../src/entities/scoring';
 import { CUP_SEEDS, cupRivalParams } from '../src/progression/cup';
 import { CheckpointTracker, GhostRecorder, checkpointWorldZs, type GhostRecording } from '../src/progression/ghost';
 import { generateTrack } from '../src/track/generator';
+import { surfaceAtZ } from '../src/track/surface';
 // Plain JavaScript intentionally keeps the exact function browser-serializable.
 // @ts-expect-error JavaScript acceptance helper is outside production tsconfig.
 import { naturalRaceDriver } from './naturalRaceDriver.mjs';
@@ -49,11 +50,11 @@ function makeModel(seed: number, ghost: GhostRecording | null = null) {
       const time = this.elapsedRaceMs;
       if (this.simulationHitStopMs > 0) { this.simulationHitStopMs = Math.max(0, this.simulationHitStopMs - delta); return; }
       const previousZ = player.worldZ;
-      player.update(delta);
+      player.update(delta, false, surfaceAtZ(generated.segments, player.worldZ));
       if (this.crestApexZs.some(z => previousZ < z && player.worldZ >= z)) player.jump(true, false);
       collisions.update(player, this.obstacles);
       aiRiders.forEach((rider, i) => {
-        rider.update(delta, this.obstacles, player);
+        rider.update(delta, this.obstacles, player, surfaceAtZ(generated.segments, rider.worldZ));
         if (rider.finishTimeMs === null && rider.worldZ >= finishSegment.z) rider.finishTimeMs = time;
         if (rider.finishTimeMs !== null) rider.worldZ = finishSegment.z;
         aiCollisions[i].update(rider, this.obstacles);

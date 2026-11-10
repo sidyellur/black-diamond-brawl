@@ -5,6 +5,7 @@ import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { MOUNTAIN_GENERATOR_VERSION, MOUNTAIN_SETPIECES, MountainSection, MountainTheme } from './mountain';
 import { placeObstacles } from './placement';
+import { placePowder, powderStream, type PowderField } from './powder';
 import { pickupStream, placePickups, skipLegacyPickupDraws } from './pickupPlacement';
 import { mulberry32, Prng, randInt } from './prng';
 import { addCurve, addHill, addStraight, createBuilder, pushSegment, TrackBuilder } from './sections';
@@ -162,20 +163,28 @@ export interface GeneratedTrack {
   crestApexes: number[];
   aiRiders: AIRiderParams[];
   pickups: Pickup[];
+  /** Powder stretches, one per bowl section; their segments carry `surface: 'powder'`. */
+  powder: PowderField[];
 }
 
-/** One seed, four strictly ordered passes, no runtime randomness. Pickups
- *  draw from a derived stream, not the shared generator (see `pickupStream`). */
+/** One seed, strictly ordered passes, no runtime randomness. Pickups and powder
+ *  draw from their own derived streams, not the shared generator (see
+ *  `pickupStream`, `powderStream`), so neither re-rolls geometry, obstacles or
+ *  rivals. */
 export function generateTrack(seed: number): GeneratedTrack {
   const prng = mulberry32(seed);
   const geometry = buildGeometry(prng);
-  const obstacles = placeObstacles(geometry, prng);
+  const placed = placeObstacles(geometry, prng);
   // Pickups draw from their own seed-derived stream; the shared generator
   // still advances exactly as before so rival parameters are unchanged.
-  skipLegacyPickupDraws(obstacles, geometry.placeableStart, geometry.placeableEnd, prng);
+  skipLegacyPickupDraws(placed, geometry.placeableStart, geometry.placeableEnd, prng);
+  // Powder fields are decided after the shared generator is finished with, from
+  // their own stream. Their entry moguls are the only obstacles it adds, and
+  // pickups are placed last so they see the final obstacle field.
+  const { obstacles, fields: powder } = placePowder(geometry, placed, powderStream(seed));
   const pickups = placePickups({ obstacles, crestApexes: geometry.crestApexes,
     placeableStart: geometry.placeableStart, placeableEnd: geometry.placeableEnd }, pickupStream(seed));
   const aiRiders = spawnAIRiders(prng);
   return { generatorVersion: MOUNTAIN_GENERATOR_VERSION, sections: geometry.sections,
-    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups };
+    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups, powder };
 }

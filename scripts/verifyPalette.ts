@@ -47,7 +47,17 @@ const cases: Case[] = [
   { label: 'rock body vs packed snow', a: ROCK.body, b: SNOW.packed, min: MIN_GAMEPLAY_DELTA_L },
   // Sprite outlines have a higher bar — this is what stops riders dissolving
   // into the brightest backdrop in the game.
-  { label: 'rider rim vs packed snow', a: rim(0xd23b3b), b: SNOW.packed, min: MIN_OUTLINE_DELTA_L }
+  { label: 'rider rim vs packed snow', a: rim(0xd23b3b), b: SNOW.packed, min: MIN_OUTLINE_DELTA_L },
+  // Powder fields (#39): everything that stands on or beside the surface must
+  // read against it, and the surface must still read against the off-piste.
+  { label: 'mogul lee vs powder', a: MOGUL.lee, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'mogul lee vs powder alt band', a: MOGUL.lee, b: SNOW.powderAlt, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'powder vs off-piste', a: SNOW.powder, b: SNOW.offPiste, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'powder alt vs off-piste alt', a: SNOW.powderAlt, b: SNOW.offPisteAlt, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'rock body vs powder', a: ROCK.body, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'rider rim vs powder', a: rim(0xd23b3b), b: SNOW.powder, min: MIN_OUTLINE_DELTA_L },
+  // The stipple has to be seen, or the field looks like ordinary snow.
+  { label: 'powder fleck vs powder', a: SNOW.powderFleck, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L }
 ];
 
 // Every rival must clear the outline bar and be separable from its neighbours.
@@ -56,6 +66,12 @@ RIVAL_SUITS.forEach((suit, i) => {
     label: `rival ${i} rim vs packed snow`,
     a: rim(suit),
     b: SNOW.packed,
+    min: MIN_OUTLINE_DELTA_L
+  });
+  cases.push({
+    label: `rival ${i} rim vs powder`,
+    a: rim(suit),
+    b: SNOW.powder,
     min: MIN_OUTLINE_DELTA_L
   });
 });

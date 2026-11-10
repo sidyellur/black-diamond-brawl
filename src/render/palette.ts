@@ -199,7 +199,14 @@ export const SNOW = {
   /** Shadowed snow — under trees, in troughs, behind moguls. */
   shadow: 0x8fa8c9,
   /** Wind-scoured ice. */
-  ice: 0xc9dcf0
+  ice: 0xc9dcf0,
+  /** Deep powder: brighter and cooler than groomed piste, read mostly through
+   *  its stipple. Kept at or above `packed` in lightness so every hazard and
+   *  sprite that clears the packed-snow gate clears this one too. */
+  powder: 0xfbfdff,
+  powderAlt: 0xe9f1fb,
+  /** The blue-grey flecks and drift shadows stippled across a powder field. */
+  powderFleck: 0xa9c1e1
 } as const;
 
 /** Sky and atmosphere. The fog colour is sampled from these at runtime rather

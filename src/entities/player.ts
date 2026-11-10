@@ -8,10 +8,10 @@ import {
   MOGUL_SPEED_FACTOR,
   ATTACK_SWING_MS,
   BOOST_ACCEL_FACTOR,
-  BOOST_DECAY_MS,
   BOOST_SPEED_FACTOR,
   HIT_REACTION_MS,
   MOGUL_STUMBLE_MS,
+  OVERSPEED_DECAY_PER_SECOND,
   PLAYER_ACCEL,
   PLAYER_START_Z,
   ROAD_WIDTH,
@@ -24,7 +24,8 @@ import {
   WEAPON_CHARGES
 } from '../config';
 import { Collidable } from './collision';
-import { roadElevationAt, Segment } from '../track/segment';
+import { roadElevationAt, Segment, type Surface } from '../track/segment';
+import { surfaceSpeedFactor } from '../track/surface';
 
 const CENTER_LANE_INDEX = Math.floor(LANES.length / 2);
 /** Late landing/recovery forgiveness; never queues an entire jump/tumble. */
@@ -61,6 +62,10 @@ export class Player implements Collidable {
    *  of the track array. */
   worldZ = PLAYER_START_Z;
   speed = 0;
+  /** Ground top-speed multiplier applied on the last update (1 on piste, and
+   *  while airborne). Rivals read it so catch-up judges the player against the
+   *  pace the surface allows, not against full speed. */
+  speedCapFactor = 1;
 
   private _laneIndex = CENTER_LANE_INDEX;
   private tween: LaneTween | null = null;
@@ -135,8 +140,12 @@ export class Player implements Collidable {
    * `boosting` is the BoostMeter's active flag. It is ignored while airborne,
    * tumbling or wiped out: jump airtime is constant, so a boosted jump would
    * outrun the landing zones course placement guarantees (see `jump`).
+   *
+   * `surface` is what the road is under the player (`surfaceAtZ`), passed in so
+   * the entity never holds the track. Powder scales the ground top speed and
+   * the boost top speed alike; an airborne rider ignores it.
    */
-  update(deltaMs: number, boosting = false): void {
+  update(deltaMs: number, boosting = false, surface?: Surface): void {
     if (this.wipedOut) {
       return; // run-ending wipeout: frozen until the result screen restarts the race
     }
@@ -144,20 +153,20 @@ export class Player implements Collidable {
     this.maneuverAgeMs += deltaMs;
     const deltaSeconds = deltaMs / 1000;
 
-    // Auto-acceleration toward MAX_SPEED (§4.1) — no brake/tuck control in v1.
+    // Auto-acceleration toward the top speed (§4.1) — no brake/tuck control in v1.
     // Speed recovers automatically after a collision knocked it down.
     const boosted = boosting && !this.airborne && !this.tumbling;
+    this.speedCapFactor = this.airborne ? 1 : surfaceSpeedFactor(surface);
+    const cap = MAX_SPEED * this.speedCapFactor;
+    const limit = boosted ? cap * BOOST_SPEED_FACTOR : cap;
     if (this.heavyCrashMsRemaining > 0) {
       this.speed = 0; // down hard: no sliding, no auto-acceleration until the tumble ends
-    } else if (boosted) {
-      this.speed = Math.min(MAX_SPEED * BOOST_SPEED_FACTOR,
-        this.speed + PLAYER_ACCEL * BOOST_ACCEL_FACTOR * deltaSeconds);
-    } else if (this.speed > MAX_SPEED) {
-      // Boost over: bleed the excess off linearly rather than snapping.
-      const decayPerSecond = (MAX_SPEED * (BOOST_SPEED_FACTOR - 1) * 1000) / BOOST_DECAY_MS;
-      this.speed = Math.max(MAX_SPEED, this.speed - decayPerSecond * deltaSeconds);
+    } else if (this.speed > limit) {
+      // Boost over, or powder under a fast rider: bleed the excess off linearly
+      // rather than snapping.
+      this.speed = Math.max(limit, this.speed - OVERSPEED_DECAY_PER_SECOND * deltaSeconds);
     } else {
-      this.speed = Math.min(MAX_SPEED, this.speed + PLAYER_ACCEL * deltaSeconds);
+      this.speed = Math.min(limit, this.speed + PLAYER_ACCEL * (boosted ? BOOST_ACCEL_FACTOR : 1) * deltaSeconds);
     }
     this.worldZ += this.speed * deltaSeconds;
 
