@@ -140,7 +140,9 @@ export class AIRiderRenderer {
     const phase = rider.knockedDown ? 'DOWN' : winding ? (late ? 'EVADE NOW' : 'WIND-UP') : rider.attackPhase === 'strike' ? 'STRIKE' :
       rider.attackPhase === 'recovery' ? 'OPEN' : rider.airborne ? 'AIR' : '';
     const name = width >= 55 ? (rider.params.name ?? definition.name) : definition.glyph;
-    const subtitle = phase || (rider.params.name && width >= 55 ? definition.name : '');
+    // A grudge shows as words (not only colour) on the plate's last line.
+    const grudge = rider.grudgeLevel > 0 ? (rider.grudgeLevel > 1 ? 'GRUDGE II' : 'GRUDGE') : '';
+    const subtitle = phase || grudge || (rider.params.name && width >= 55 ? definition.name : '');
     // Stagger pips live inside the plate (filled square = damage taken), so the
     // meter adds no floating element. The top text line is a blank spacer the
     // squares are drawn over; shape (filled vs hollow), not colour, carries the count.

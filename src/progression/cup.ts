@@ -1,5 +1,6 @@
 import type { AIRiderParams } from '../entities/aiRider';
 import { clone, finite, integer, object, validId } from './persistence';
+import { applyGrudge, bannerRival, pickTaunt, tauntContext, cloneGrudges, grudgeLevel, emptyGrudges, emptyTally, parseTally, updateGrudges, type GrudgeState, type RaceTally } from './grudge';
 import { newRunId, type RaceOptions } from './race';
 import { COURSE_VERSION, hashIdentity, RULES_VERSION } from './rules';
 
@@ -18,7 +19,11 @@ export type RacerId = typeof RACER_IDS[number];
 export type Medal = 'gold' | 'silver' | 'bronze';
 export interface RacerSnapshot { id: RacerId; worldZ: number; finishTimeMs: number | null; wipedOut: boolean }
 export interface CupRoundEntry extends RacerSnapshot { position: number; points: number }
-export interface CupRound { index: number; seed: number; runId: string; results: CupRoundEntry[] }
+export interface CupRound {
+  index: number; seed: number; runId: string; results: CupRoundEntry[];
+  /** What happened between the player and each rival. Absent in cups saved before grudges. */
+  tally?: RaceTally;
+}
 export interface CupState {
   id: string;
   rulesVersion: string;
@@ -27,18 +32,44 @@ export interface CupState {
   rounds: CupRound[];
   status: 'active' | 'complete';
   medal: Medal | null;
+  /** Derived from each round's tally. Optional so cups saved before grudges still load. */
+  grudges?: GrudgeState;
 }
 export interface CupStanding {
   id: RacerId; name: string; points: number; position: number; wins: number;
   finishedRounds: number; totalTimeMs: number;
 }
-export function cupRivalParams(index: number, generated: AIRiderParams): AIRiderParams {
+export function cupRivalParams(index: number, generated: AIRiderParams, grudges?: GrudgeState | null): AIRiderParams {
   const rival = RIVALS[index];
-  return rival ? { ...generated, name: rival.name, personality: rival.personality, cruiseSpeedFactor: rival.cruiseSpeedFactor,
-    aggression: rival.aggression, reactionDistanceSegments: rival.reactionDistanceSegments, paletteIndex: index } : { ...generated };
+  if (!rival) return { ...generated };
+  const params = { ...generated, name: rival.name, personality: rival.personality, cruiseSpeedFactor: rival.cruiseSpeedFactor,
+    aggression: rival.aggression, reactionDistanceSegments: rival.reactionDistanceSegments, paletteIndex: index };
+  // Only a Cup race passes grudges; every other mode keeps the plain rival.
+  return grudges ? applyGrudge(params, grudgeLevel(grudges, rival.id)) : params;
+}
+/** The quote for one rival going into `cup`'s next race (Cup screen). */
+export function cupQuote(cup: CupState, rivalId: string): string {
+  const rival = RIVALS.find(item => item.id === rivalId);
+  if (!rival) return '';
+  const grudges = cupGrudges(cup);
+  return pickTaunt(cup.id, cup.rounds.length, rival.id, rival.personality, tauntContext(grudges, rival.id));
+}
+/** Start-line banner: the highest-grudge rival's taunt, or null when nobody has a grudge or a score. */
+export function cupBanner(cupId: string, roundIndex: number, grudges: GrudgeState | null): { rivalId: string; index: number; name: string; tag: string; text: string } | null {
+  const id = bannerRival(grudges);
+  const index = RIVALS.findIndex(item => item.id === id);
+  if (!grudges || index < 0) return null;
+  const rival = RIVALS[index];
+  const level = grudgeLevel(grudges, rival.id);
+  const tag = level > 1 ? 'GRUDGE II' : level > 0 ? 'GRUDGE' : 'SCORE TO SETTLE';
+  return { rivalId: rival.id, index, name: rival.name, tag, text: pickTaunt(cupId, roundIndex, rival.id, rival.personality, tauntContext(grudges, rival.id)) };
 }
 export function createCup(id = newRunId('cup')): CupState {
-  return { id, rulesVersion: RULES_VERSION, courseVersion: COURSE_VERSION, seeds: [...CUP_SEEDS], rounds: [], status: 'active', medal: null };
+  return { id, rulesVersion: RULES_VERSION, courseVersion: COURSE_VERSION, seeds: [...CUP_SEEDS], rounds: [], status: 'active', medal: null, grudges: emptyGrudges() };
+}
+/** The grudge state going into the next race (empty for cups saved before grudges). */
+export function cupGrudges(cup: CupState | null | undefined): GrudgeState {
+  return cup?.grudges ? cloneGrudges(cup.grudges) : emptyGrudges();
 }
 export function cupRace(cup: CupState): RaceOptions | null {
   if (cup.status !== 'active' || cup.rounds.length >= 3) return null;
@@ -89,7 +120,7 @@ export function cupMedal(cup: CupState): Medal | null {
 }
 /** Pure, idempotent transition. A stale result from an abandoned/replaced cup,
  * an already committed round or a wrong seed can never score again. */
-export function applyCupRound(cup: CupState, options: RaceOptions, racers: readonly RacerSnapshot[]): CupState {
+export function applyCupRound(cup: CupState, options: RaceOptions, racers: readonly RacerSnapshot[], tally: RaceTally = emptyTally()): CupState {
   const expected = cupRace(cup);
   if (!expected || options.mode !== 'cup' || options.cupId !== expected.cupId || options.roundIndex !== expected.roundIndex ||
       options.seed !== expected.seed || options.runId !== expected.runId) return cup;
@@ -97,7 +128,8 @@ export function applyCupRound(cup: CupState, options: RaceOptions, racers: reado
   const player = results.find(result => result.id === 'player');
   if (!player || (!player.wipedOut && player.finishTimeMs === null)) return cup;
   const next = clone(cup);
-  next.rounds.push({ index: expected.roundIndex!, seed: expected.seed, runId: expected.runId, results });
+  next.rounds.push({ index: expected.roundIndex!, seed: expected.seed, runId: expected.runId, results, tally });
+  next.grudges = updateGrudges(cupGrudges(cup), tally);
   if (next.rounds.length === 3) { next.status = 'complete'; next.medal = cupMedal(next); }
   return next;
 }
@@ -112,7 +144,7 @@ export function parseCup(value: unknown): CupState | null {
         saved.seed !== cup.seeds[saved.index] || !Array.isArray(saved.results) || !saved.results.every(validSnapshot)) return null;
     const options = cupRace(cup)!;
     if (saved.runId !== options.runId) return null;
-    const next = applyCupRound(cup, options, saved.results);
+    const next = applyCupRound(cup, options, saved.results, parseTally(saved.tally));
     if (next === cup) return null;
     cup = next;
   }

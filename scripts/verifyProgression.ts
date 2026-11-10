@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createStorage, STORAGE_KEYS } from '../src/platform/storage';
 import {
-  applyCupRound, COSMETICS, createCareerStore, createCup, createQuickRace, createRecordsStore,
+  applyCupRound, cupGrudges, emptyGrudges, emptyTally, COSMETICS, createCareerStore, createCup, createQuickRace, createRecordsStore,
   CUP_SEEDS, cupRace, cupRivalParams, getCupStandings, parseCup, PLACEMENT_POINTS,
   RACER_IDS, retryRace, RULES_VERSION, type RacerSnapshot, type RunSummary
 } from '../src/progression';
@@ -305,4 +305,17 @@ await native.flush();
 assert.equal(durable.get(STORAGE_KEYS.records), 'legacy-preserved');
 assert.ok(durable.get(STORAGE_KEYS.career));
 console.log('  PASS native Preferences hydrates every new key, persists progression and preserves legacy records'); passed++;
+check('cups saved without grudges parse as an empty grudge state; new cups keep per-round tallies and grudges', () => {
+  const legacy = JSON.parse(JSON.stringify(applyCupRound(createCup('cup-old'), cupRace(createCup('cup-old'))!, racers())));
+  delete legacy.grudges; delete legacy.rounds[0].tally;
+  const parsed = parseCup(legacy)!;
+  assert.equal(parsed.rounds.length, 1);
+  assert.deepEqual(cupGrudges(parsed), emptyGrudges());
+  const tally = emptyTally(); tally.rivals['rival-1'].knockdowns = 1;
+  const fresh = createCup('cup-new');
+  const next = applyCupRound(fresh, cupRace(fresh)!, racers(), tally);
+  assert.equal(next.grudges!.levels['rival-1'], 1);
+  assert.deepEqual(parseCup(JSON.parse(JSON.stringify(next))), next, 'a saved grudge cup round-trips exactly');
+  assert.deepEqual(fresh.grudges, emptyGrudges(), 'applyCupRound does not mutate the previous cup');
+});
 console.log(`\n${passed} progression checks passed.`);

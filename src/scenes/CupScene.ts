@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { getRaceAudio } from '../audio/RaceAudio';
 import { SCREEN_H, SCREEN_W } from '../config';
-import { CUP_ROUND_NAMES, CupState, getCup, getCupRace, getCupStandings, startCup } from '../progression';
+import { CUP_ROUND_NAMES, CupState, cupGrudges, cupQuote, getCup, getCupRace, getCupStandings, grudgeLevel, startCup } from '../progression';
 import { UI } from '../render/palette';
 import { menuButton, menuKeys, menuText, mountainName, MONO } from '../frontend/menu';
 
@@ -84,14 +84,23 @@ export class CupScene extends Phaser.Scene {
     menuText(this, 461, 154, `${cup.rounds.length} OF 3 ROUNDS COMPLETE`, 10, UI.inkLow, true).setFontFamily(MONO);
     menuText(this, 795, 182, 'WINS', 10, UI.inkLow, true).setOrigin(1, 0);
     menuText(this, 888, 182, 'POINTS', 10, UI.inkLow, true).setOrigin(1, 0);
+    const grudges = cupGrudges(cup);
     standings.forEach((rider, index) => {
-      const y = 218 + index * 34;
+      const y = 206 + index * 38;
       const player = rider.id === 'player';
       if (player) {
-        const art = this.add.graphics(); art.fillStyle(UI.accentWarn, 0.1); art.fillRoundedRect(452, y - 13, 447, 30, 4);
+        const art = this.add.graphics(); art.fillStyle(UI.accentWarn, 0.1); art.fillRoundedRect(452, y - 14, 447, 30, 4);
       }
       menuText(this, 464, y, `${rider.position}.`, 16, player ? UI.accentWarn : UI.inkMid, true).setOrigin(0, 0.5);
-      menuText(this, 505, y, player ? 'YOU' : rider.name.toUpperCase(), 15, player ? UI.accentWarn : UI.inkHigh, player).setOrigin(0, 0.5);
+      const name = menuText(this, 505, y, player ? 'YOU' : rider.name.toUpperCase(), 15, player ? UI.accentWarn : UI.inkHigh, player).setOrigin(0, 0.5);
+      if (!player && cup.status === 'active') {
+        // Words, not just colour: GRUDGE / GRUDGE II and the SETTLE bonus are tags beside the name.
+        const level = grudgeLevel(grudges, rider.id);
+        const tags = [level > 0 ? (level > 1 ? 'GRUDGE II' : 'GRUDGE') : '', grudges.scores.includes(rider.id) ? 'SETTLE +500' : ''].filter(Boolean).join('  ·  ');
+        if (tags) menuText(this, 505 + name.width + 10, y, tags, 10, level > 0 ? UI.accentBad : UI.accentWarn, true).setOrigin(0, 0.5);
+        // The quote reflects the rival's current state; it is stable for this cup and round.
+        menuText(this, 505, y + 15, `“${cupQuote(cup, rider.id)}”`, 10, UI.inkMid).setOrigin(0, 0.5);
+      }
       menuText(this, 795, y, String(rider.wins), 14, UI.inkMid).setOrigin(1, 0.5).setFontFamily(MONO);
       menuText(this, 888, y, String(rider.points), 19, player ? UI.accentWarn : UI.inkHigh, true).setOrigin(1, 0.5);
     });

@@ -16,6 +16,8 @@ export interface ResultSceneData {
   awards?: RunAwards;
   cup?: CupState | null;
   ghostSaved?: boolean;
+  /** Cup only: one-line summary of new grudges, e.g. "SLATE won't forget that." */
+  grudgeNote?: string;
 }
 
 interface Row {
@@ -95,6 +97,7 @@ export class ResultScene extends Phaser.Scene {
       ? `${Math.abs(b.finishTimeSeconds - course.previousBestTime).toFixed(1)}s ${course.isNewTime ? 'faster than your previous record' : 'off your mountain record'}`
       : b.finished ? 'Your first finish on this mountain. Beat it.' : 'Survive the descent to claim a course record.';
     menuText(this, 49, 387, recordNote, 11, UI.inkLow);
+    if (data.grudgeNote) menuText(this, 49, 406, data.grudgeNote, 12, UI.accentWarn, true);
 
     this.addBreakdown(b);
     const advice = !b.finished ? 'The first tree is a heavy crash; the second ends your run, even in the air. Jump rocks; carve around trees.'
@@ -136,6 +139,8 @@ export class ResultScene extends Phaser.Scene {
     const rows: Row[] = [
       { label: 'Combat hits', count: String(b.combatHitCount), points: b.combatHitPoints, color: UI.accentBad },
       { label: 'Knockouts', count: String(b.knockoutCount), points: b.knockoutPoints, color: UI.accentBad },
+      // Cup only, and only once earned: the table stays ten rows otherwise.
+      ...((b.settledCount ?? 0) > 0 ? [{ label: 'SETTLED', count: String(b.settledCount), points: b.settledPoints ?? 0, color: UI.accentWarn }] : []),
       { label: 'Body checks', count: String(b.brushCount), points: b.brushPoints, color: UI.inkMid },
       { label: 'Shoves', count: String(b.pushCount ?? 0), points: b.pushPoints ?? 0, color: UI.accentBad },
       { label: 'Near misses', count: String(b.nearMissCount), points: b.nearMissPoints, color: UI.accentInfo },
@@ -146,12 +151,15 @@ export class ResultScene extends Phaser.Scene {
       { label: 'Race position', count: b.finished ? ORDINALS[b.position] ?? `${b.position}TH` : 'DNF', points: b.positionBonus, color: UI.accentGood }
     ];
     const details = this.add.graphics();
+    // Ten rows sit on a 25px pitch; an eleventh (SETTLED) tightens the pitch so
+    // the last row stays inside the panel (it ends at y 407).
+    const pitch = Math.min(25, 225 / (rows.length - 1));
+    const finishRow = rows.findIndex(row => row.label === 'Crossing the finish');
     rows.forEach((row, index) => {
-      // Ten rows: pitched to keep the last one inside the panel.
-      const y = 150 + index * 25;
-      if (index === 7) {
+      const y = 150 + index * pitch;
+      if (index === finishRow) {
         details.lineStyle(1, UI.panelEdge);
-        details.lineBetween(437, y - 13, 888, y - 13);
+        details.lineBetween(437, y - pitch / 2 + 3, 888, y - pitch / 2 + 3);
       }
       details.fillStyle(row.points > 0 ? row.color : UI.panelEdge);
       details.fillCircle(441, y + 3, 3);

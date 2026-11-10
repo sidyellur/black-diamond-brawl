@@ -50,6 +50,10 @@ export interface AIRiderParams {
   name?: string;
   personality?: RivalPersonality;
   behaviorSeed?: number;
+  /** Overrides the personality's attack interval (Cup grudges shorten it). */
+  attackIntervalMs?: number;
+  /** Cup grudge level (0..GRUDGE_MAX), for the nameplate tag. */
+  grudgeLevel?: number;
 }
 
 /** A deterministic rival. Obstacle rules, acceleration and pack pacing remain
@@ -102,6 +106,8 @@ export class AIRider implements Collidable {
     this.bumpCooldownMs = this.random() * AI_BUMP_CHECK_INTERVAL_MS;
   }
 
+  get grudgeLevel(): number { return this.params.grudgeLevel ?? 0; }
+  private get attackIntervalMs(): number { return this.params.attackIntervalMs ?? PERSONALITIES[this.personality].attackIntervalMs; }
   get personalityName(): string { return PERSONALITIES[this.personality].name; }
   get attackPhase(): AttackPhase { return this.attack.phase; }
   get attackProgress(): number { return this.attack.progress; }
@@ -271,7 +277,7 @@ export class AIRider implements Collidable {
     const definition = PERSONALITIES[this.personality];
     if (!this.attack.begin(player.laneOffsetFraction, this.airborne, definition.windupMs, definition.recoveryMs)) return false;
     this.attackManeuverSerial = player.maneuverSerial;
-    this.bumpCooldownMs = definition.attackIntervalMs;
+    this.bumpCooldownMs = this.attackIntervalMs;
     return true;
   }
 
@@ -279,7 +285,7 @@ export class AIRider implements Collidable {
 
   private maybeAttack(player: Player): boolean {
     if (this.bumpCooldownMs > 0 || this.params.aggression <= 0) return false;
-    this.bumpCooldownMs = PERSONALITIES[this.personality].attackIntervalMs;
+    this.bumpCooldownMs = this.attackIntervalMs;
     // Defenders only challenge someone encroaching on the protected line;
     // bullies chase players, while daredevils primarily follow terrain.
     if (this.personality === 'line-defender' &&
