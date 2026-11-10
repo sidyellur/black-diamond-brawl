@@ -33,6 +33,11 @@ export interface Segment {
   slalomLane?: number;
   /** Riding surface under this segment; absent on ordinary piste. */
   surface?: Surface;
+  /** Walled stretch of a tree chute (#39): lanes 0 and 4 are lined with trees on
+   *  every second segment and only lanes 1-3 are rideable. */
+  chute?: boolean;
+  /** The obstacle-free entry funnel before a chute's walls, marked with poles. */
+  chuteFunnel?: boolean;
 }
 
 /**

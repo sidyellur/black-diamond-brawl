@@ -9,6 +9,8 @@ import { Obstacle, segmentCentreZ } from '../entities/obstacle';
 import { Pickup, PICKUP_KIND_LIST, PickupKind } from '../entities/pickup';
 import { mulberry32, Prng, randInt } from './prng';
 import type { Segment } from './segment';
+import { outerLanesClosed } from './chute';
+import { advanceLanes, obstacleRows } from './rows';
 import { gapLaneChangeSegments } from './surface';
 
 const LANE_COUNT = LANES.length;
@@ -35,15 +37,7 @@ export interface PickupPlacementInput {
   placeableEnd: number;
   /** The course's segments, so a pickup on or after ice is judged with the ice
    *  lane-change cost. Optional for geometry-only callers. */
-  segments?: readonly Segment[];
-}
-
-function dilate(from: ReadonlySet<number>, maxShift: number): Set<number> {
-  const out = new Set<number>();
-  for (const lane of from) {
-    for (let l = Math.max(0, lane - maxShift); l <= Math.min(LANE_COUNT - 1, lane + maxShift); l++) out.add(l);
-  }
-  return out;
+  segments?: readonly Pick<Segment, 'surface' | 'chute'>[];
 }
 
 /**
@@ -62,14 +56,11 @@ function reachableLaneSets(input: PickupPlacementInput, segs: number[]): Set<num
   }
   for (let s = 0; s <= placeableEnd; s++) locked[s + 1] = locked[s] + (isLocked[s] ? 1 : 0);
 
-  const rows = new Map<number, Set<number>>();
-  for (const o of obstacles) {
-    if (!rows.has(o.segIndex)) rows.set(o.segIndex, new Set());
-    rows.get(o.segIndex)!.add(o.lane);
-  }
+  // A chute's wall trees are not rows (see `obstacleRows`): `advanceLanes` keeps the outer lanes closed.
+  const rows = obstacleRows(obstacles, input.segments);
   const rowSegs = [...rows.keys()].sort((a, b) => a - b);
 
-  const steer = (from: number, to: number): number => {
+  const shiftOver = (from: number, to: number): number => {
     const lockedInGap = locked[to + 1] - locked[from + 1];
     return Math.floor(Math.max(0, to - from - lockedInGap) / gapLaneChangeSegments(input.segments, from, to));
   };
@@ -82,13 +73,16 @@ function reachableLaneSets(input: PickupPlacementInput, segs: number[]): Set<num
     // Advance through every obstacle row strictly before this pickup.
     while (next < rowSegs.length && rowSegs[next] < seg) {
       const row = rowSegs[next++];
-      const arrival = dilate(reachable, steer(prevRow, row));
+      const arrival = advanceLanes(reachable, prevRow, row, input.segments, shiftOver);
       reachable = new Set([...arrival].filter((l) => !rows.get(row)!.has(l)));
       prevRow = row;
     }
-    const arrival = dilate(reachable, steer(prevRow, seg));
+    const arrival = advanceLanes(reachable, prevRow, seg, input.segments, shiftOver);
     const here = rows.get(seg);
-    result.push(here ? new Set([...arrival].filter((l) => !here.has(l))) : arrival);
+    const free = here ? new Set([...arrival].filter((l) => !here.has(l))) : arrival;
+    // No pickup in a wall lane, nor in the last of the funnel, where taking it would leave too little
+    // road to come back inward.
+    result.push(outerLanesClosed(input.segments, seg) ? new Set([...free].filter((l) => l !== 0 && l !== LANE_COUNT - 1)) : free);
   }
   return result;
 }
@@ -141,7 +135,7 @@ export function placePickups(input: PickupPlacementInput, stream: Prng): Pickup[
   const reachable = reachableLaneSets(input, segs);
   segs.forEach((s, i) => {
     const candidates = [...reachable[i]].sort((a, b) => a - b);
-    const pool = candidates.length > 0 ? candidates : ALL_LANES;
+    const pool = candidates.length > 0 ? candidates : outerLanesClosed(input.segments, s) ? ALL_LANES.slice(1, -1) : ALL_LANES;
     const lane = pool[Math.min(pool.length - 1, Math.floor(laneRolls[i] * pool.length))];
     pickups.push({ kind: kinds[i], lane, segIndex: s, z: segmentCentreZ(s), collected: false });
   });

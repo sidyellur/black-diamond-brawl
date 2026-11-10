@@ -21,6 +21,10 @@ export interface Obstacle {
   segIndex: number;
   /** World-Z of the obstacle, at the CENTRE of its segment. */
   z: number;
+  /** A tree in the wall of a tree chute (#39). An ordinary tree in every other
+   *  respect (collision, dodging, shove hazards); the flag exists so scoring can
+   *  decline to pay near misses for simply riding between the walls. */
+  wall?: true;
 }
 
 /** Whether a kind can be cleared by an airborne player (design-spec §4.4). */

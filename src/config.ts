@@ -139,6 +139,37 @@ export const ICE_TREE_FREE_SEGMENTS = 10;
  *  `gapLaneChangeSegments` in `track/surface.ts`. */
 export const ICE_LANE_CHANGE_SEGMENTS = Math.ceil((ICE_LANE_TWEEN_MS / 1000) * MAX_SPEED / SEGMENT_LENGTH);
 
+// Tree chute (#39, part 3): once per course, inside one forest section, a
+// stretch where the two outer lanes are walled with real trees on every second
+// segment and only the three inner lanes are rideable. A tree-free entry funnel
+// of `CHUTE_FUNNEL_SEGMENTS` (with marker poles) comes first, so the narrowing is
+// readable, and a rider arriving in an outer lane has room to move inward.
+export const CHUTE_MIN_SEGMENTS = 20;
+export const CHUTE_MAX_SEGMENTS = 30;
+export const CHUTE_FUNNEL_SEGMENTS = 10;
+/** Wall trees stand on every this-many-th segment of the walled stretch. */
+export const CHUTE_WALL_SPACING = 2;
+/** Segments an extended (trick) jump can carry the fastest rider: its airtime at BOOST speed (a rival's
+ *  cruise, 105% catch-up and the player's boost all exceed the `MAX_SPEED` that `JUMP_REACH_EXTENDED` is
+ *  quoted at), plus a segment for taking off up to half a segment late and for the collision window. A wall
+ *  tree is hit mid-air, so a flight that ends beyond one still hits it. */
+export const CHUTE_BOOSTED_FLIGHT_SEGMENTS = Math.ceil(
+  ((JUMP_AIRTIME_EXTENDED_MS / 1000) * MAX_SPEED * BOOST_SPEED_FACTOR + SEGMENT_LENGTH) / SEGMENT_LENGTH);
+/** Segments before the funnel in which an OUTER-lane mogul would launch a rider into the first wall tree
+ *  (a trick jump flies straight, however fast the rider). The funnel itself is obstacle-free, so the margin
+ *  the generator has to police is what is left of the flight. */
+export const CHUTE_MOGUL_MARGIN_SEGMENTS = CHUTE_BOOSTED_FLIGHT_SEGMENTS - 1 - CHUTE_FUNNEL_SEGMENTS;
+/** Rivals and the cue start treating the outer lanes as closed this many
+ *  segments before the first wall tree: the funnel plus a short run-up. */
+export const CHUTE_AWARENESS_SEGMENTS = CHUTE_FUNNEL_SEGMENTS + 2;
+/** No pickup sits in an outer lane this close to (or inside) the walls: the rider
+ *  has to move inward again after taking it, which needs a lane change's distance
+ *  and some reaction time. */
+export const CHUTE_PICKUP_BUFFER_SEGMENTS = 7;
+/** First segments of the walled stretch kept free of inner-lane obstacles, so a
+ *  rider who has just made it into the chute has settled before the first one. */
+export const CHUTE_INNER_LEAD_SEGMENTS = 4;
+
 // Obstacle placement / density (design-spec §4.2). Obstacle *rows* per 100
 // segments ramp from START at t=0 to END at t=1 as the difficulty grows.
 export const OBSTACLE_ROWS_PER_100_START = 4;

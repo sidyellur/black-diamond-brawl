@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import {
-  BLIND_LANDING_SEGMENTS, CAMERA_HEIGHT, COURSE_LENGTH_SEGMENTS, DRAW_DISTANCE, ICE_EDGE_MARGIN_SEGMENTS, ICE_MAX_SEGMENTS,
+  BLIND_LANDING_SEGMENTS, CAMERA_HEIGHT, CHUTE_FUNNEL_SEGMENTS, CHUTE_MAX_SEGMENTS, CHUTE_MIN_SEGMENTS, CHUTE_WALL_SPACING, COURSE_LENGTH_SEGMENTS, DRAW_DISTANCE, ICE_EDGE_MARGIN_SEGMENTS, ICE_MAX_SEGMENTS,
   ICE_MIN_SEGMENTS, ICE_TREE_FREE_SEGMENTS, JUMP_REACH_EXTENDED, LANES,
   POWDER_ENTRY_MOGULS_MIN, POWDER_MAX_SEGMENTS, POWDER_MIN_SEGMENTS, SEGMENT_LENGTH
 } from '../src/config';
+import { chuteEnd } from '../src/track/chute';
 import { generateTrack } from '../src/track/generator';
 import { MOUNTAIN_GENERATOR_VERSION, MountainTheme, sectionAtZ } from '../src/track/mountain';
 import { roadElevationAt } from '../src/track/segment';
@@ -20,6 +21,9 @@ const layouts = new Set<string>();
 const totals = { forests: 0, ridges: 0, bowls: 0, crests: 0, combatSegments: 0, obstacles: 0 };
 const powderStats = { fields: 0, minLength: Infinity, maxLength: 0, threeMogulFields: 0, hillFields: 0, curveFields: 0,
   minTreeDistanceAfterEntry: Infinity };
+const chuteStats = { courses: 0, walls: 0, inner: 0, removed: 0, demoted: 0, thinned: 0, minLength: Infinity, maxLength: 0,
+  sections: new Set<string>(), bySection: { first: 0, second: 0 } };
+const forestStats = { gateRowsKept: 0, minGates: Infinity };
 const iceStats = { sheets: 0, minLength: Infinity, maxLength: 0, thinnedSheets: 0, thinnedObstacles: 0, minForestGap: Infinity,
   minCrestGap: Infinity, withRows: 0 };
 for (let seed = 0; seed < 1000; seed++) {
@@ -84,16 +88,29 @@ for (let seed = 0; seed < 1000; seed++) {
       assert.equal(crests.length, 0);
       assert.ok(segments.some((segment) => segment.curve > 0.4));
       assert.ok(segments.some((segment) => segment.curve < -0.4));
-      const desired = rows.map(([index, blocked]) => {
+      // The tree chute (#39) replaces the gates inside its funnel and walls, so the slalom assertions below
+      // are about the gates that remain, taken as two runs (before and after the chute): the chute
+      // re-centres the rider on the inner lanes, so successive gates are not asked to overlap across it.
+      const chute = track.chute.find((c) => c.sectionIndex === sectionIndex);
+      const inChute = (index: number) => !!chute && index >= chute.funnelStart && index < chuteEnd(chute);
+      const gates = rows.filter(([index]) => !inChute(index));
+      assert.ok(gates.length >= 4, `${seed}: ${gates.length} slalom gates remain around the chute`);
+      const runs: number[][] = [[]];
+      for (const [index, blocked] of gates) {
         assert.equal(blocked.size, LANES.length - 2, 'slalom gate has exactly two open lanes');
         assert.ok(track.segments[index].slalomLane !== undefined);
+        assert.ok(!track.segments[index].chute && !track.segments[index].chuteFunnel, 'a gate is never a chute row');
         const clear = LANES.map((_, lane) => lane).filter((lane) => !blocked.has(lane));
         assert.equal(clear[1] - clear[0], 1, 'readable adjacent opening');
-        return clear[0];
-      });
+        if (chute && index >= chuteEnd(chute) && runs.length === 1) runs.push([]);
+        runs.at(-1)!.push(clear[0]);
+      }
+      const desired = runs.flat();
       assert.ok(Math.max(...desired) - Math.min(...desired) >= 1, 'forest physically asks for lane changes');
-      assert.ok(desired.every((lane, i) => i === 0 || Math.abs(lane - desired[i - 1]) <= 1), 'successive gates overlap');
-      assert.ok(desired.filter((lane, i) => i > 0 && desired[i - 1] !== lane).length >= 2);
+      for (const run of runs) assert.ok(run.every((lane, i) => i === 0 || Math.abs(lane - run[i - 1]) <= 1), 'successive gates overlap');
+      assert.ok(runs.reduce((n, run) => n + run.filter((lane, i) => i > 0 && run[i - 1] !== lane).length, 0) >= 2);
+      forestStats.gateRowsKept += gates.length;
+      forestStats.minGates = Math.min(forestStats.minGates, gates.length);
     } else if (section.theme === 'ridge') {
       totals.ridges++;
       assert.ok(crests.length >= 1 && crests.length <= 2);
@@ -122,7 +139,7 @@ for (let seed = 0; seed < 1000; seed++) {
   // ---- powder fields (#39) ------------------------------------------------
   // Only the six stage bowls carry powder: not the warm-up, forests, ridges or the finish runout.
   const surfaced = track.segments.filter((segment) => segment.surface !== undefined);
-  assert.ok(surfaced.every((segment) => segment.surface === 'powder' || segment.surface === 'ice'), 'only powder and ice are generated so far');
+  assert.ok(surfaced.every((segment) => segment.surface === 'powder' || segment.surface === 'ice'), 'only powder and ice are surfaces');
   assert.equal(track.powder.length, 2, `${seed}: one field in each of the two bowl sections`);
   assert.equal(surfaced.filter((segment) => segment.surface === 'powder').length, track.powder.reduce((n, f) => n + f.length, 0),
     'no powder outside the recorded fields');
@@ -225,27 +242,102 @@ console.log(`PASS ice: ${iceStats.sheets} sheets over 1,000 seeds (two per mount
   `${iceStats.withRows} hold at least one obstacle row; nearest forest after any sheet: ${iceStats.minForestGap} segments (margin ${ICE_TREE_FREE_SEGMENTS}); ` +
   `nearest jump zone: ${iceStats.minCrestGap} segments; ${iceStats.thinnedSheets} sheets needed obstacles thinned (${iceStats.thinnedObstacles} obstacles).`);
 
-// Powder and ice must not re-roll anything they do not own. Hashes recorded on `main` before powder existed:
-// segments (surface aside), sections, obstacles (minus the entry moguls powder appends) and rival parameters.
-// Ice leaves them all untouched: it is placed where the existing rows already pass its stricter lane-change cost.
+// ---- tree chute (#39, part 3) -------------------------------------------------------------------
+for (let seed = 0; seed < 1000; seed++) {
+  const track = generateTrack(seed);
+  assert.equal(track.chute.length, 1, `${seed}: exactly one chute per course`);
+  const chute = track.chute[0];
+  const section = track.sections[chute.sectionIndex];
+  const end = chuteEnd(chute);
+  assert.equal(section.theme, 'forest');
+  assert.notEqual(section.setpiece, 'warmup', 'never the warm-up lodge');
+  assert.ok(chute.length >= CHUTE_MIN_SEGMENTS && chute.length <= CHUTE_MAX_SEGMENTS, `${seed}: chute length ${chute.length}`);
+  assert.equal(chute.start - chute.funnelStart, CHUTE_FUNNEL_SEGMENTS);
+  assert.ok(chute.funnelStart >= section.startSegment && end <= section.endSegment, 'chute stays inside its forest');
+  assert.equal(track.chute.filter((c) => c.sectionIndex === chute.sectionIndex).length, 1);
+  // Segment flags: funnel then walls, nothing else, and never over a safe zone.
+  const flagged = track.segments.filter((segment) => segment.chute || segment.chuteFunnel);
+  assert.equal(flagged.length, CHUTE_FUNNEL_SEGMENTS + chute.length);
+  for (let index = chute.funnelStart; index < end; index++) {
+    const segment = track.segments[index];
+    assert.equal(!!segment.chuteFunnel, index < chute.start);
+    assert.equal(!!segment.chute, index >= chute.start);
+    assert.equal(segment.safeZone, undefined);
+    assert.equal(segment.theme, 'forest');
+  }
+  // Entry funnel: obstacle-free (the pole markers are drawn on exactly these segments).
+  assert.ok(!track.obstacles.some((o) => o.segIndex >= chute.funnelStart && o.segIndex < chute.start), `${seed}: funnel is obstacle-free`);
+  // Walls: a real tree in lanes 0 and 4 on every second segment of the stretch, and only there.
+  const walls = track.obstacles.filter((o) => o.wall);
+  assert.equal(walls.length, chute.walls);
+  assert.equal(walls.length, 2 * Math.ceil(chute.length / CHUTE_WALL_SPACING));
+  for (const wall of walls) {
+    assert.equal(wall.kind, 'tree');
+    assert.ok(wall.lane === 0 || wall.lane === LANES.length - 1);
+    assert.ok(wall.segIndex >= chute.start && wall.segIndex < end && (wall.segIndex - chute.start) % CHUTE_WALL_SPACING === 0);
+  }
+  // Inside the stretch: rocks and moguls in the inner lanes only, at least one inner lane clear in every row.
+  const inside = track.obstacles.filter((o) => !o.wall && o.segIndex >= chute.start && o.segIndex < end);
+  assert.equal(inside.length, chute.inner);
+  assert.ok(inside.every((o) => o.kind !== 'tree' && o.lane >= 1 && o.lane <= LANES.length - 2), `${seed}: inner rows are rocks and moguls in lanes 1-3`);
+  assert.ok(track.obstacles.filter((o) => o.segIndex >= chute.start && o.segIndex < end && o.kind === 'tree').every((o) => o.wall), 'no other tree');
+  const rowsInside = new Map<number, Set<number>>();
+  for (const o of inside) { if (!rowsInside.has(o.segIndex)) rowsInside.set(o.segIndex, new Set()); rowsInside.get(o.segIndex)!.add(o.lane); }
+  assert.ok([...rowsInside.values()].every((lanes) => lanes.size < LANES.length - 2), 'an inner lane is clear in every row');
+  // Mogul rule: nothing in a wall lane before the walls can launch a rider into them, and inner moguls clear every tree downstream.
+  const treesAll = track.obstacles.filter((o) => o.kind === 'tree');
+  for (const mogul of track.obstacles.filter((o) => o.kind === 'mogul')) {
+    assert.ok(!treesAll.some((t) => t.lane === mogul.lane && t.segIndex > mogul.segIndex && t.segIndex <= mogul.segIndex + JUMP_REACH_EXTENDED),
+      `${seed}: mogul at ${mogul.segIndex} lane ${mogul.lane} launches into a tree`);
+  }
+  // Kept outside the chute: the generator touched nothing else except what it reports.
+  chuteStats.courses++;
+  chuteStats.walls += walls.length;
+  chuteStats.inner += inside.length;
+  chuteStats.removed += chute.removed;
+  chuteStats.demoted += chute.demoted;
+  chuteStats.thinned += chute.thinned;
+  chuteStats.minLength = Math.min(chuteStats.minLength, chute.length);
+  chuteStats.maxLength = Math.max(chuteStats.maxLength, chute.length);
+  chuteStats.sections.add(section.setpiece);
+  chuteStats.bySection[section.id.startsWith('forest-0') ? 'first' : 'second']++;
+}
+assert.equal(chuteStats.courses, 1000, 'every seed hosts a chute');
+assert.ok(chuteStats.minLength === CHUTE_MIN_SEGMENTS && chuteStats.maxLength === CHUTE_MAX_SEGMENTS, 'the full chute length range is exercised');
+assert.equal(chuteStats.sections.size, 3, 'chutes land in all three forest setpieces');
+assert.ok(chuteStats.bySection.first > 300 && chuteStats.bySection.second > 300, 'both forest sections are used');
+console.log(`PASS chute: one per course over 1,000 seeds (${chuteStats.minLength}-${chuteStats.maxLength} segments, ${chuteStats.bySection.first} in the first forest / ${chuteStats.bySection.second} in the second), ` +
+  `${chuteStats.walls / 1000} wall trees and ${chuteStats.inner / 1000} inner rock/mogul per course, ${chuteStats.removed / 1000} obstacles replaced per course; ` +
+  `${chuteStats.demoted} outer-lane moguls demoted before a funnel, ${chuteStats.thinned} rows thinned after a chute; ` +
+  `slalom gates kept around it: at least ${forestStats.minGates} per forest section (${(forestStats.gateRowsKept / 2000).toFixed(1)} on average).`);
+
+// Powder, ice and the chute must not re-roll anything they do not own. Hashes recorded on `main`: segments (surface
+// and chute flags aside), sections, rival parameters, and the obstacles outside the chute (funnel plus walled stretch)
+// minus the entry moguls powder appends. Ice leaves the rows untouched: it is placed where the existing field already
+// passes its stricter lane-change cost. The chute replaces what stood in its own stretch, so the obstacle pin is of
+// everything else, as `main` had it. (Pins 1, 2 and 4 are unchanged since before powder existed; pin 3 was the hash of
+// ALL pre-powder obstacles until the chute, which removes 3-6 of them per course: it was re-recorded from `main`'s own
+// obstacle lists with exactly those stretches cut out, and the whole-course comparison over 400+ seeds is in verifyChute.)
 {
   const PINNED_MAIN: Record<number, [string, string, string, string]> = {
-    1: ['9a71d3264a2f', '7bbf6d93ca86', '0fe944455bd5', '52ed29de7f9f'],
-    42: ['2a740e57cf06', '0bee60a0a09b', 'a42125d2020e', 'eb88fd2f071f'],
-    202: ['4c4e371cddac', '26a439bc05fc', '730652ed9e83', '4c07497ce21a'],
-    333: ['a64f7e9e68d9', '124ac6b5a346', 'dd2014da7247', 'f6452d635bec'],
-    400: ['dafe6963ad53', '776a410edbda', '1ba6bfa26a54', 'ea3554fec739']
+    1: ['9a71d3264a2f', '7bbf6d93ca86', '8454d9eb0b90', '52ed29de7f9f'],
+    42: ['2a740e57cf06', '0bee60a0a09b', '2e0eb3c3ed88', 'eb88fd2f071f'],
+    202: ['4c4e371cddac', '26a439bc05fc', '1c61f7176632', '4c07497ce21a'],
+    333: ['a64f7e9e68d9', '124ac6b5a346', 'fafeb97c29c7', 'f6452d635bec'],
+    400: ['dafe6963ad53', '776a410edbda', 'e8f7e7649ff4', 'ea3554fec739']
   };
   const h = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 12);
   const actual: typeof PINNED_MAIN = {};
   for (const seed of Object.keys(PINNED_MAIN).map(Number)) {
     const t = generateTrack(seed);
     const entry = new Set(t.powder.flatMap((f) => f.moguls.map((lane) => `${f.start}:${lane}`)));
-    actual[seed] = [h(t.segments.map(({ surface: _surface, ...rest }) => rest)), h(t.sections),
-      h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)))), h(t.aiRiders)];
+    const chute = t.chute[0];
+    const cut = (o: { segIndex: number }) => o.segIndex >= chute.funnelStart && o.segIndex < chuteEnd(chute);
+    actual[seed] = [h(t.segments.map(({ surface: _surface, chute: _chute, chuteFunnel: _funnel, ...rest }) => rest)), h(t.sections),
+      h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)) && !cut(o))), h(t.aiRiders)];
   }
   assert.deepEqual(actual, PINNED_MAIN);
-  console.log('PASS powder and ice leave geometry, sections, the other obstacles and rival parameters identical to pre-powder courses.');
+  console.log('PASS powder, ice and the chute leave geometry, sections, rival parameters and every obstacle outside the chute identical to `main`.');
 }
 
 // Renderer smoke and bounded pools without a DOM/WebGL dependency. Actual
@@ -315,6 +407,20 @@ for (const theme of ['forest', 'ridge', 'bowl'] as MountainTheme[]) {
     road.render(sample.segments, 0, roadElevationAt(sample.segments, z) + CAMERA_HEIGHT, z, 0xcfe4f5);
   }
   assert.ok(drawCalls - before > 0);
+}
+{
+  // And for the tree chute: approaching the funnel, along its poles, at the first wall, deep inside and leaving. The pole pool
+  // (one pair every second funnel segment plus the gate at the first wall) must never be asked for more than it holds.
+  const chute = sample.chute[0];
+  const before = drawCalls;
+  let maxPoles = 0;
+  for (const offset of [-40, -22, -12, -10, -6, -1, 0, 1, 8, chute.length - 1, chute.length + 3]) {
+    const z = (chute.start + offset + 0.25) * SEGMENT_LENGTH;
+    road.render(sample.segments, 0, roadElevationAt(sample.segments, z) + CAMERA_HEIGHT, z, 0xcfe4f5);
+    maxPoles = Math.max(maxPoles, (road as unknown as { chutePoleCount: number }).chutePoleCount);
+  }
+  assert.ok(drawCalls - before > 0);
+  assert.ok(maxPoles >= 8 && maxPoles <= 24, `funnel poles drawn: ${maxPoles}`);
 }
 console.log(`PASS themed terrain and scenery: finite geometry, distinct silhouettes, pooled sprites <= ${maxSprites}.`);
 

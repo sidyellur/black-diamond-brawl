@@ -89,6 +89,9 @@ export class AIRider implements Collidable {
   /** Surface under the rider on the last update; a lane change started before
    *  the next update (a shove or knockback from combat) uses it. */
   private surface: Surface | undefined;
+  /** Whether a tree chute's walls are here or close ahead (`chuteAhead`): the outer lanes are
+   *  closed. Set by `update()`, like the surface. */
+  private wallsAhead = false;
   private chasingPack = false;
   private packGraceMs = 0;
   private tumbleMsRemaining = 0;
@@ -122,11 +125,14 @@ export class AIRider implements Collidable {
 
   /** `surface` is the road under THIS rider (`surfaceAtZ`). Powder caps its
    *  ground speed at the same absolute pace as the player's, catch-up included;
-   *  an airborne rider ignores it. */
-  update(deltaMs: number, obstacles: Obstacle[], player: Player, surface?: Surface): void {
+   *  an airborne rider ignores it. `wallsAhead` is true from a short run-up before a tree chute's
+   *  first wall tree to its last: the rider leaves an outer lane for an inner one and stays out of
+   *  them, ahead of any personality's lane preference. */
+  update(deltaMs: number, obstacles: Obstacle[], player: Player, surface?: Surface, wallsAhead = false): void {
     if (this.wipedOut || this.finishTimeMs !== null) { this.attack.cancel(); return; }
     const dt = Math.max(0, deltaMs);
     this.surface = surface;
+    this.wallsAhead = wallsAhead;
     this.bumpCooldownMs -= dt;
     this.updateStaggerDecay(dt);
     this.packGraceMs = Math.max(0, this.packGraceMs - dt);
@@ -162,13 +168,14 @@ export class AIRider implements Collidable {
     // outranks combat: a defensive dodge interrupts the pending strike.
     if (this.tween || this.tumbling || this.hitReacting) return;
     if (this.attackPhase !== 'idle') {
-      if (!this.airborne && this.maybeDodge(obstacles)) this.attack.interrupt();
+      if (!this.airborne && (this.leaveWallLane() || this.maybeDodge(obstacles))) this.attack.interrupt();
       return;
     }
     if (this.airborne) {
       if (this.personality === 'daredevil' && player.airborne) this.maybeAttack(player);
       return;
     }
+    if (this.leaveWallLane()) return;
     if (this.maybeDodge(obstacles)) return;
     if (this.personality === 'daredevil' && this.seekJump(obstacles)) return;
     if (this.maybeAttack(player)) return;
@@ -319,8 +326,22 @@ export class AIRider implements Collidable {
     return !obstacles.some((o) => o.lane === lane && o.z >= this.worldZ - COLLISION_Z_WINDOW &&
       o.z <= this.worldZ + distance);
   }
-  private moveTo(lane: number): void {
+  private isWallLane(lane: number): boolean { return lane === 0 || lane === LANES.length - 1; }
+
+  /** In or just before a tree chute a rider in an outer lane moves inward NOW, whatever its
+   *  personality prefers: a defender's home lane, a bully's pursuit and a daredevil's jump hunting
+   *  all rank below not riding into the wall. The inner lane may hold a rock; hitting that is
+   *  survivable and `maybeDodge` steers on from there. */
+  private leaveWallLane(): boolean {
+    if (!this.wallsAhead || !this.isWallLane(this._laneIndex)) return false;
+    this.moveTo(this._laneIndex === 0 ? 1 : LANES.length - 2, true);
+    return true;
+  }
+
+  private moveTo(lane: number, force = false): void {
     if (lane === this._laneIndex || lane < 0 || lane >= LANES.length) return;
+    // No voluntary move into a wall lane while the walls are here or coming.
+    if (this.wallsAhead && !force && this.isWallLane(lane)) return;
     this.tween = { fromLane: this._laneIndex, toLane: lane, elapsedMs: 0, durationMs: this.tweenDurationMs };
   }
 

@@ -14,6 +14,7 @@
  * Usage: npm run verify:palette
  */
 import {
+  CHUTE,
   ICE,
   MIN_GAMEPLAY_DELTA_L,
   MIN_OUTLINE_DELTA_L,
@@ -73,7 +74,16 @@ const cases: Case[] = [
   { label: 'rock body vs ice', a: ROCK.body, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L },
   { label: 'rider rim vs ice', a: rim(0xd23b3b), b: ICE.sheet, min: MIN_OUTLINE_DELTA_L },
   { label: 'ice streak vs ice', a: ICE.streak, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L },
-  { label: 'ice threshold vs ice', a: ICE.edge, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L / 2 }
+  { label: 'ice threshold vs ice', a: ICE.edge, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L / 2 },
+  // Tree chute (#39, part 3): the shaded wall lanes must read against the rideable ones, the wall trees and
+  // any rider caught in a wall lane must read against the shading, and the edge line and poles must be seen.
+  { label: 'chute wall lane vs packed snow', a: CHUTE.zone, b: SNOW.packed, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'chute wall lane vs alt snow band', a: CHUTE.zone, b: SNOW.packedAlt, min: MIN_GAMEPLAY_DELTA_L / 2 },
+  { label: 'tree foliage vs chute wall lane', a: TREE.foliage, b: CHUTE.zone, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'rider rim vs chute wall lane', a: rim(0xd23b3b), b: CHUTE.zone, min: MIN_OUTLINE_DELTA_L },
+  { label: 'chute edge line vs packed snow', a: CHUTE.line, b: SNOW.packed, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'chute edge line vs wall lane', a: CHUTE.line, b: CHUTE.zone, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'chute pole band vs pole', a: CHUTE.band, b: CHUTE.line, min: MIN_GAMEPLAY_DELTA_L }
 ];
 
 // Every rival must clear the outline bar and be separable from its neighbours.
@@ -88,6 +98,12 @@ RIVAL_SUITS.forEach((suit, i) => {
     label: `rival ${i} rim vs powder`,
     a: rim(suit),
     b: SNOW.powder,
+    min: MIN_OUTLINE_DELTA_L
+  });
+  cases.push({
+    label: `rival ${i} rim vs chute wall lane`,
+    a: rim(suit),
+    b: CHUTE.zone,
     min: MIN_OUTLINE_DELTA_L
   });
   cases.push({

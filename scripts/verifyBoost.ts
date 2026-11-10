@@ -17,6 +17,7 @@ import { setDeterministicRuntime } from '../src/entities/runtimeRng';
 import { ScoreTracker } from '../src/entities/scoring';
 import { generateTrack } from '../src/track/generator';
 import { surfaceAtZ } from '../src/track/surface';
+import { chuteAhead } from '../src/track/chute';
 
 const STEP = 1000 / 60;
 /** One fixed step of travel at MAX_SPEED, in segments: airtime is quantised to whole steps. */
@@ -307,7 +308,7 @@ function race(seed: number, useBoost: boolean) {
     wasAirborne = player.airborne;
     collisions.update(player, obstacles);
     riders.forEach((r, i) => {
-      r.update(STEP, obstacles, player, surfaceAtZ(generated.segments, r.worldZ));
+      r.update(STEP, obstacles, player, surfaceAtZ(generated.segments, r.worldZ), chuteAhead(generated.segments, r.worldZ));
       if (r.finishTimeMs === null && r.worldZ >= finishZ) r.finishTimeMs = time;
       if (r.finishTimeMs !== null) r.worldZ = finishZ;
       aiCollisions[i].update(r, obstacles);

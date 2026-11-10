@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
+import { CHUTE_FUNNEL_SEGMENTS, DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
 import { MountainTheme, themeAtSegment } from '../track/mountain';
-import { ICE, RUMBLE, SNOW, mix } from './palette';
+import { CHUTE, ICE, RUMBLE, SNOW, mix } from './palette';
 import { project, type ProjectedPoint } from './project';
 
 // All surface colours now come from the shared palette rather than being
@@ -132,6 +132,8 @@ interface SurfaceShades {
   iceStreak: number;
   iceSheen: number;
   iceEdge: number;
+  chuteZone: number;
+  chuteLine: number;
 }
 
 /**
@@ -146,10 +148,13 @@ export class RoadRenderer {
   private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS * THEMES.length }, () => ({
     snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0, terrain: 0,
     powder: 0, powderSeam: 0, powderFleck: 0, powderSpark: 0, powderEdge: 0,
-    ice: 0, iceSeam: 0, iceStreak: 0, iceSheen: 0, iceEdge: 0
+    ice: 0, iceSeam: 0, iceStreak: 0, iceSheen: 0, iceEdge: 0, chuteZone: 0, chuteLine: 0
   }));
   private readonly markers = Array.from({ length: 20 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
   private markerCount = 0;
+  /** The funnel's marker poles. A funnel is `CHUTE_FUNNEL_SEGMENTS` long with a pole pair every second segment. */
+  private readonly chutePoles = Array.from({ length: 24 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
+  private chutePoleCount = 0;
   // Projection records are consumed during this frame only. Reusing the
   // containers and slots avoids 100 tiny objects plus Map/Set each frame.
   private readonly offsetPool: DrawnSegment[] = Array.from(
@@ -182,6 +187,7 @@ export class RoadRenderer {
     this.graphics.clear();
     this.prepareShades(fogColor);
     this.markerCount = 0;
+    this.chutePoleCount = 0;
 
     const clippedSegments = this.clippedSegments;
     const drawnSegments = this.drawnSegments;
@@ -358,6 +364,7 @@ export class RoadRenderer {
       );
       if (powder) this.drawPowder(segIndex, i, near, far, colors, track[(segIndex - 1 + len) % len].surface !== 'powder');
       if (ice) this.drawIce(segIndex, i, near, far, colors, track[(segIndex - 1 + len) % len].surface !== 'ice');
+      if (segment.chute || segment.chuteFunnel) this.drawChute(track, segIndex, i, near, far, colors);
 
       // Piste markers belong to exact world segments and are rendered after
       // the terrain pass so further snow cannot paint over their raised tops.
@@ -413,6 +420,7 @@ export class RoadRenderer {
     }
 
     this.drawMarkers();
+    this.drawChutePoles();
     return { clippedSegments, drawnSegments, topScreenY, farCurveOffset };
   }
 
@@ -479,6 +487,66 @@ export class RoadRenderer {
     }
   }
 
+  /** The tree chute (#39). The two outer lanes are shaded and edged with a solid line, so the three rideable
+   *  ones read as a corridor between the wall trees; the funnel tapers that shading in over its length and
+   *  carries a red-and-white pole pair every second segment, so the narrowing reads from far up the course. */
+  private drawChute(track: Segment[], segIndex: number, i: number, near: ProjectedPoint, far: ProjectedPoint,
+    colors: SurfaceShades): void {
+    const segment = track[segIndex];
+    // Narrowing: how much of each half-width is shaded at a segment's near and far edge. Full (0.4) in the walls.
+    let cut0 = 0.4;
+    let cut1 = 0.4;
+    let k = 0;
+    if (!segment.chute) {
+      while (track[segIndex - k - 1]?.chuteFunnel) k++;
+      cut0 = 0.4 * (k / CHUTE_FUNNEL_SEGMENTS);
+      cut1 = 0.4 * ((k + 1) / CHUTE_FUNNEL_SEGMENTS);
+    }
+    for (const side of [-1, 1]) {
+      this.fillTrapezoid(
+        near.screenX + side * near.screenW, near.screenX + side * near.screenW * (1 - cut0), near.screenY,
+        far.screenX + side * far.screenW, far.screenX + side * far.screenW * (1 - cut1), far.screenY,
+        colors.chuteZone
+      );
+      // The edge line: continuous along the walls, and along the taper where the funnel closes in.
+      const nearHalf = Math.max(0.5, near.screenW * 0.009);
+      const farHalf = Math.max(0.35, far.screenW * 0.009);
+      this.fillTrapezoid(
+        near.screenX + side * near.screenW * (1 - cut0) - nearHalf, near.screenX + side * near.screenW * (1 - cut0) + nearHalf, near.screenY,
+        far.screenX + side * far.screenW * (1 - cut1) - farHalf, far.screenX + side * far.screenW * (1 - cut1) + farHalf, far.screenY,
+        colors.chuteLine
+      );
+    }
+    if (i < 70 && (k % 2 === 0 || segment.chute) && this.chutePoleCount + 2 <= this.chutePoles.length &&
+        (!segment.chute || !track[segIndex - 1]?.chute)) {
+      const height = far.scale * 560 * (SCREEN_H / 2);
+      if (height >= 3) {
+        for (const side of [-1, 1]) {
+          const pole = this.chutePoles[this.chutePoleCount++];
+          pole.x = far.screenX + side * far.screenW * (1 - cut1);
+          pole.y = far.screenY;
+          pole.height = height;
+          pole.width = Math.max(1.6, far.scale * 44 * (SCREEN_W / 2));
+          pole.alpha = 1 - i / (DRAW_DISTANCE * 1.2);
+        }
+      }
+    }
+  }
+
+  private drawChutePoles(): void {
+    for (let n = this.chutePoleCount - 1; n >= 0; n--) {
+      const pole = this.chutePoles[n];
+      if (pole.x < -16 || pole.x > SCREEN_W + 16) continue;
+      const top = pole.y - pole.height;
+      this.graphics.lineStyle(pole.width, CHUTE.line, pole.alpha);
+      this.graphics.lineBetween(pole.x, pole.y, pole.x, top);
+      // Two white bands up the pole: a barber-pole stripe, readable at a glance and in greyscale.
+      this.graphics.lineStyle(pole.width * 1.15, CHUTE.band, pole.alpha);
+      this.graphics.lineBetween(pole.x, top + pole.height * 0.14, pole.x, top + pole.height * 0.34);
+      this.graphics.lineBetween(pole.x, top + pole.height * 0.56, pole.x, top + pole.height * 0.76);
+    }
+  }
+
   private drawMarkers(): void {
     for (let i = this.markerCount - 1; i >= 0; i--) {
       const marker = this.markers[i];
@@ -529,6 +597,8 @@ export class RoadRenderer {
           colors.iceStreak = mix(mix(ICE.streak, ICE.sheet, 0.25), fogColor, Math.min(0.9, fog * 1.1));
           colors.iceSheen = mix(ICE.sheen, fogColor, fog);
           colors.iceEdge = mix(ICE.edge, fogColor, fog);
+          colors.chuteZone = mix(CHUTE.zone, fogColor, fog);
+          colors.chuteLine = mix(CHUTE.line, fogColor, Math.min(0.9, fog * 1.05));
         }
       }
     }

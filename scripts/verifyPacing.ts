@@ -14,6 +14,7 @@ import { Player } from '../src/entities/player';
 import { setDeterministicRuntime } from '../src/entities/runtimeRng';
 import { generateTrack } from '../src/track/generator';
 import { surfaceAtZ } from '../src/track/surface';
+import { chuteAhead } from '../src/track/chute';
 
 /** The pre-pacing cruise rule, with all the same dodge/collision/combat code. */
 class BaselineRider extends AIRider {
@@ -70,7 +71,7 @@ function simulate(seed: number, improved: boolean, withHazards = true) {
     if (crests.some((z) => previousZ < z && player.worldZ >= z)) player.jump(true);
     playerCollisions.update(player, obstacles);
     riders.forEach((r, i) => {
-      r.update(STEP, obstacles, player, surfaceAtZ(generated.segments, r.worldZ));
+      r.update(STEP, obstacles, player, surfaceAtZ(generated.segments, r.worldZ), chuteAhead(generated.segments, r.worldZ));
       if (r.finishTimeMs === null && r.worldZ >= finishZ) r.finishTimeMs = time;
       if (r.finishTimeMs !== null) r.worldZ = finishZ;
       collisions[i].update(r, obstacles);

@@ -262,6 +262,19 @@ export const RUMBLE = {
   warnAlt: 0x8c2f27
 } as const;
 
+/** The tree chute (#39): the shaded wall lanes either side of the three rideable ones, the
+ *  line along their edge and the funnel's marker poles. Kept clear of the inner lanes' snow so
+ *  rocks and moguls there read exactly as they do anywhere else, and light enough that a wall tree
+ *  stands out against it. */
+export const CHUTE = {
+  /** The wall lanes: packed snow shaded toward the shadow tone. */
+  zone: mix(0xeef4fb, 0x8fa8c9, 0.74),
+  /** The solid line along the corridor's edge, and the poles' red. */
+  line: RUMBLE.warn,
+  /** The pole's pale band. */
+  band: 0xffffff
+} as const;
+
 /** Obstacles. */
 export const TREE = {
   foliage: 0x2c6b47,
