@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { HIT_FLASH_MS, HIT_REACTION_MS, MAX_ENTITY_SCREEN_FRACTION, SCREEN_W, RIDER_WIDTH_FRACTION, RIDER_JUMP_HEIGHT_WORLD } from '../config';
+import { HIT_FLASH_MS, HIT_REACTION_MS, STAGGER_MAX, MAX_ENTITY_SCREEN_FRACTION, SCREEN_W, RIDER_WIDTH_FRACTION, RIDER_JUMP_HEIGHT_WORLD } from '../config';
 import { entityDepth } from '../render/depth';
 import { UI } from '../render/palette';
 import { ShadowRenderer } from '../render/ShadowRenderer';
@@ -137,16 +137,34 @@ export class AIRiderRenderer {
     const definition = PERSONALITIES[rider.personality];
     const winding = rider.attackPhase === 'windup';
     const late = winding && definition.windupMs - rider.attackElapsedMs <= EVADE_TIMING_MS;
-    const phase = winding ? (late ? 'EVADE NOW' : 'WIND-UP') : rider.attackPhase === 'strike' ? 'STRIKE' :
+    const phase = rider.knockedDown ? 'DOWN' : winding ? (late ? 'EVADE NOW' : 'WIND-UP') : rider.attackPhase === 'strike' ? 'STRIKE' :
       rider.attackPhase === 'recovery' ? 'OPEN' : rider.airborne ? 'AIR' : '';
     const name = width >= 55 ? (rider.params.name ?? definition.name) : definition.glyph;
     const subtitle = phase || (rider.params.name && width >= 55 ? definition.name : '');
-    label.setText(subtitle ? `${definition.glyph} ${name}\n${subtitle}` : `${definition.glyph} ${name}`);
-    label.setFontSize(Math.min(13, Math.max(10, width * 0.12)));
+    // Stagger pips live inside the plate (filled square = damage taken), so the
+    // meter adds no floating element. The top text line is a blank spacer the
+    // squares are drawn over; shape (filled vs hollow), not colour, carries the count.
+    const fontSize = Math.min(13, Math.max(10, width * 0.12));
+    const pipSize = Math.round(Math.min(10, Math.max(8, fontSize * 0.8)));
+    const pipGap = 3;
+    const pipsWidth = STAGGER_MAX * pipSize + (STAGGER_MAX - 1) * pipGap;
+    const spacer = '\u00a0'.repeat(Math.ceil(pipsWidth / (fontSize * 0.27)));
+    const body = width >= 55 ? `${definition.glyph} ${name}${subtitle ? `\n${subtitle}` : ''}` : definition.glyph;
+    label.setText(`${spacer}\n${body}`);
+    label.setFontSize(fontSize);
     label.setPosition(x, Math.max(48, y - width * 0.92 - 8));
-    label.setColor(late ? '#ffffff' : phase === 'OPEN' ? '#46d38a' : '#f5a623');
+    label.setColor(late ? '#ffffff' : phase === 'OPEN' ? '#46d38a' : phase === 'DOWN' ? '#ff6b5e' : '#f5a623');
     label.setDepth(entityDepth(rider.worldZ) + 0.5).setVisible(true);
-    tell.setDepth(entityDepth(rider.worldZ) + 0.4);
+    tell.setDepth(entityDepth(rider.worldZ) + 0.6);
+    const filled = rider.knockedDown ? STAGGER_MAX : rider.stagger;
+    const pipColor = rider.knockedDown ? UI.accentBad : UI.accentWarn;
+    const lineHeight = (label.height - 4) / (body.split('\n').length + 1);
+    const pipY = label.y - label.height + 2 + (lineHeight - pipSize) / 2;
+    for (let i = 0; i < STAGGER_MAX; i++) {
+      const px = x - pipsWidth / 2 + i * (pipSize + pipGap);
+      if (i < filled) tell.fillStyle(pipColor, 1).fillRect(px, pipY, pipSize, pipSize);
+      else tell.lineStyle(1.5, pipColor, 1).strokeRect(px + 0.75, pipY + 0.75, pipSize - 1.5, pipSize - 1.5);
+    }
     if (winding) {
       const barWidth = Math.max(42, Math.min(85, width * 0.85));
       const barY = label.y + 3;

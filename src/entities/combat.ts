@@ -10,6 +10,7 @@ import {
   SHOVE_SPEED_LOSS_FACTOR,
   SAME_LANE_EPSILON,
   SHOVE_Z_WINDOW,
+  STAGGER_PIPS,
   TARGET_GRACE_MS,
   TARGET_SWITCH_RATIO,
   TREE_CLAMP_SEGMENTS
@@ -204,7 +205,7 @@ export class CombatSystem {
     const isCounter = rider === this.counterTarget;
     if (this.player.wipedOut || (this.player.airborne && !isCounter) || this.player.collisionImmune) return false;
     if (rider.airborne && !isCounter) return false;
-    if (rider.wipedOut || rider.finishTimeMs !== null || rider.collisionImmune) return false;
+    if (rider.wipedOut || rider.finishTimeMs !== null || rider.knockedDown || rider.collisionImmune) return false;
     if ((this.pairImmunityMs.get(rider) ?? 0) > 0) return false;
     if (this.attackCooldownMs > 0) return false;
     return true;
@@ -231,7 +232,7 @@ export class CombatSystem {
     let best: AIRider | null = null;
     let bestScore = Infinity;
     for (const rider of this.riders) {
-      if (rider.wipedOut || rider.finishTimeMs !== null) continue;
+      if (rider.wipedOut || rider.finishTimeMs !== null || rider.knockedDown) continue;
       const score = this.targetScore(rider);
       if (score !== null && score < bestScore) {
         bestScore = score;
@@ -378,6 +379,7 @@ export class CombatSystem {
       const seen = this.seenTreeCrashes.get(rider) ?? 0;
       if (rider.treeCrashSerial > seen && rider.wasRecentlyShovedByPlayer(nowMs, KNOCKOUT_WINDOW_MS)) {
         this.events.push({ type: 'knockout', rider });
+        rider.consumeShoveCredit(); // one knockout per incident
       }
       this.seenTreeCrashes.set(rider, rider.treeCrashSerial);
     }
@@ -430,6 +432,15 @@ export class CombatSystem {
       }
       this.events.push({ type: deliberate ? 'hit' : 'brush', rider });
       rider.markShovedByPlayer(nowMs);
+      const pips = counter ? STAGGER_PIPS.COUNTER : !deliberate ? STAGGER_PIPS.BRUSH :
+        armed ? STAGGER_PIPS.ARMED_HIT : STAGGER_PIPS.HIT;
+      if (rider.addStagger(pips)) {
+        // The knockdown is the knockout for this incident: spend the shove
+        // attribution so a later tree contact cannot pay a second one.
+        this.events.push({ type: 'knockout', rider });
+        rider.consumeShoveCredit();
+        if (this.counterRider === rider) { this.counterRider = null; this.counterRemainingMs = 0; }
+      }
     } else {
       this.player.applyKnockback(targetLane, speedLossFactor, allowAirborne);
       // The player losing an exchange used to produce no signal at all — no

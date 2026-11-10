@@ -652,6 +652,10 @@ export class RaceScene extends Phaser.Scene {
     // `ScoreTracker.update()` below drains `combat.events`.
     this.frameStruckRiders.push(...this.combat.events.map((event) => event.rider));
     if (this.combat.events.length) this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 50);
+    // A knockdown is a heavier hit than a shove: longer freeze, bigger burst.
+    if (this.combat.events.some((event) => event.type === 'knockout' && event.rider.knockedDown)) {
+      this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 100);
+    }
 
     // Collision feedback, fired on state TRANSITIONS so neither the collision
     // system nor combat needs to know anything is watching.
@@ -942,7 +946,12 @@ export class RaceScene extends Phaser.Scene {
     drawnSegments: Map<number, DrawnSegment>
   ): void {
     if (struckRiders.length > 0) this.audio.play('hit');
+    const seen = new Set<AIRider>();
     for (const rider of struckRiders) {
+      // A knockdown arrives as a hit plus a knockout for the same rider; play
+      // one burst, the strong variant.
+      if (seen.has(rider)) continue;
+      seen.add(rider);
       const projected = projectEntity(rider.laneOffsetFraction, rider.worldZ, this.track, drawnSegments, {
         x: camX,
         y: camY,
@@ -953,7 +962,8 @@ export class RaceScene extends Phaser.Scene {
       this.juice.combatHit(
         projected
           ? { x: projected.screenX, y: projected.screenY - projected.screenW * PLAYER_WIDTH_FRACTION * 0.5 }
-          : null
+          : null,
+        rider.knockedDown
       );
     }
   }

@@ -56,7 +56,7 @@ check('combat events retain distinct base points, counts, labels and ordering', 
   assert.deepEqual(score.feedback, [
     { kind: 'hit', label: 'CLEAN HIT', points: POINTS.COMBAT_HIT },
     { kind: 'brush', label: 'BODY CHECK', points: POINTS.COMBAT_BRUSH },
-    { kind: 'knockout', label: 'KNOCKOUT', points: POINTS.KNOCKOUT }
+    { kind: 'knockout', label: 'KNOCKOUT · BULLY', points: POINTS.KNOCKOUT }
   ]);
   const result = score.finalize(false, 9000, 5);
   assert.equal(result.combatHitCount, 1);

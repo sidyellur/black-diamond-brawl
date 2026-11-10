@@ -218,6 +218,20 @@ export const TREE_CLAMP_SEGMENTS = 5;
 // A rival that trees within this many ms of losing a shove to the player
 // counts as the player's knockout (spec §4.6/§4.7).
 export const KNOCKOUT_WINDOW_MS = 2000;
+
+/**
+ * Rival stagger. Every landed player hit builds a rival's stagger meter; at
+ * `STAGGER_MAX` pips it is knocked down: stopped for `KNOCKDOWN_MS`, then
+ * collision-immune for `KNOCKDOWN_IMMUNITY_MS` with an empty meter. A rival
+ * goes `STAGGER_DECAY_MS` without being hit to recover one pip. A knockdown is
+ * not a tree strike and never eliminates a rival.
+ */
+export const STAGGER_MAX = 3;
+export const STAGGER_DECAY_MS = 6000;
+export const KNOCKDOWN_MS = 2500;
+export const KNOCKDOWN_IMMUNITY_MS = 1500;
+/** Pips per landed hit: a brush adds none; the pole and a counter add two. */
+export const STAGGER_PIPS = { BRUSH: 0, HIT: 1, ARMED_HIT: 2, COUNTER: 2 } as const;
 export const SHOVE_SPEED_LOSS_FACTOR = 0.2; // baseline ~20% loser speed loss
 export const ARMED_SHOVE_SPEED_LOSS_FACTOR = 0.4; // double loss on an armed win
 
