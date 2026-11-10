@@ -453,6 +453,24 @@ console.log('\n=== combat harness ===');
   check('attack cooldown lapses', combat.attackOnCooldown === false);
 }
 
+{
+  // The second attack must leave the jab exactly as it was (scripts/verifyShove.ts
+  // covers the shove itself).
+  setDeterministicRuntime(7);
+  const jab = makeWorld({ playerLane: 2, riderLane: 3, riderSpeed: MAX_SPEED * 0.5 });
+  attack(jab.combat);
+  check('the jab still commits ATTACK_SWING_MS and not the shove\'s', jab.player.swingMsRemaining === ATTACK_SWING_MS,
+    `${jab.player.swingMsRemaining}ms`);
+  check('a jab leaves the shove\'s cooldown alone', jab.combat.pushOnCooldown === false);
+  check('a jab still adds a stagger pip; the event is a hit, not a push',
+    jab.rider.stagger === 1 && jab.combat.events.length === 1 && jab.combat.events[0].type === 'hit');
+  const clamped = makeWorld({ playerLane: 2, riderLane: 3, riderSpeed: MAX_SPEED * 0.5,
+    obstacles: [{ kind: 'tree', lane: 4, z: 10_000 + SEGMENT_LENGTH * 2, segIndex: 50 }] });
+  attack(clamped.combat);
+  for (let i = 0; i < 20; i++) clamped.rider.update(16, clamped.obstacles, clamped.player);
+  check('the jab still honours the tree clamp', clamped.rider.laneIndex === 3, `lane ${clamped.rider.laneIndex}`);
+}
+
 setDeterministicRuntime(null);
 
 console.log(`\n${passed} passed, ${failed} failed.\n`);

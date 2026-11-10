@@ -137,6 +137,7 @@ export class ResultScene extends Phaser.Scene {
       { label: 'Combat hits', count: String(b.combatHitCount), points: b.combatHitPoints, color: UI.accentBad },
       { label: 'Knockouts', count: String(b.knockoutCount), points: b.knockoutPoints, color: UI.accentBad },
       { label: 'Body checks', count: String(b.brushCount), points: b.brushPoints, color: UI.inkMid },
+      { label: 'Shoves', count: String(b.pushCount ?? 0), points: b.pushPoints ?? 0, color: UI.accentBad },
       { label: 'Near misses', count: String(b.nearMissCount), points: b.nearMissPoints, color: UI.accentInfo },
       { label: 'Trick jumps', count: String(b.trickJumpCount), points: b.trickJumpPoints, color: UI.accentWarn },
       { label: 'Flow chain', count: `${b.maxChain ?? 0} BEST`, points: b.chainBonusPoints ?? 0, color: UI.accentWarn },
@@ -146,8 +147,9 @@ export class ResultScene extends Phaser.Scene {
     ];
     const details = this.add.graphics();
     rows.forEach((row, index) => {
-      const y = 155 + index * 27;
-      if (index === 6) {
+      // Ten rows: pitched to keep the last one inside the panel.
+      const y = 150 + index * 25;
+      if (index === 7) {
         details.lineStyle(1, UI.panelEdge);
         details.lineBetween(437, y - 13, 888, y - 13);
       }

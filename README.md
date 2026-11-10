@@ -21,7 +21,7 @@ See [iPhone build and device guide](docs/IPHONE.md). Physical-device signing and
 ## Five ways to ride
 
 - **Drop In:** race any generated mountain. New Mountain selects another seed; `?seed=42` repeats a course.
-- **Practice:** three replayable, guided lessons teach a timed evade/counter, a clean pass around a defender, and a trick jump beside a daredevil. Practice never changes competitive records or rewards.
+- **Practice:** four replayable, guided lessons teach a timed evade/counter, a clean pass around a defender, a trick jump beside a daredevil, and a shove into the rocks. Practice never changes competitive records or rewards.
 - **Cup Series:** three races against the same four named rivals. Standings save between rounds and an interrupted round can be resumed from base camp. Placement points are 10 / 7 / 5 / 3 / 1; a wipeout (a second tree) scores zero. Final standings award gold, silver or bronze for a podium finish.
 - **Daily Run:** everyone on the same rules version gets the same course and rivals for the UTC date. Retry today's challenge, then share its seed, date, time and score. Older shared dates are clearly labelled practice.
 - **Locker:** earn and equip four board and four jacket colorways through six challenges. Finish a race, land three tricks, land five hits, finish a whole cup, reach a podium or win gold. Equipment is cosmetic only; there is no shop or currency.
@@ -32,14 +32,15 @@ See [iPhone build and device guide](docs/IPHONE.md). Physical-device signing and
 | --- | --- |
 | `←` / `A`, `→` / `D` | Carve one lane per tap; hold to keep carving |
 | `Space` / `↑` / `W` | Jump; time a mogul for extended trick air |
-| `F` / `K` | Attack the marked rival, or take an earned counter |
+| `F` / `K` | Hit: attack the marked rival, or take an earned counter |
+| `G` / `L` | Shove: push the marked rival one lane, in a direction you choose (see below) |
 | `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air, and rocks or lost fights drain it |
 | `Esc` / `P` | Pause / resume |
 | `M` | Toggle sound |
 | `R` while paused | Retry the current race or lesson |
 | `Tab` / `Shift+Tab`, `Enter` | Choose and activate a menu button |
 
-Touch controls (including a BOOST button) appear on touch devices or with `?touch=1`. Landscape gives the largest controls.
+Touch controls (including BOOST and SHOVE buttons) appear on touch devices or with `?touch=1`. Landscape gives the largest controls.
 
 Rivals visibly **wind up before striking**. Jump or carve late in the tell to earn a short green
 **COUNTER** window, then use the ordinary Attack button. A counter can beat a faster opponent,
@@ -55,6 +56,23 @@ immunity and an empty meter, well behind the pack. A knockdown pays the 500-poin
 `KNOCKOUT · NAME`. It is not a tree strike and never eliminates a rival, and a rival that has
 finished can no longer be staggered. Shoving a rival into a tree still pays the same single
 knockout. You have no stagger meter: a lost exchange costs you a lane and speed, as before.
+
+**Two attacks, two jobs.** The Hit (`F` / `K`) is quick: 250 ms of steering lock, a 600 ms cooldown,
+speed loss and a stagger pip, worth 250 points, and the game picks the knockback direction (it
+never knocks a rival toward a tree it could avoid). The **Shove** (`G` / `L`) is slow and sure:
+400 ms lock, 900 ms cooldown, always lands on a marked rival (no speed contest, and it cannot be
+used as a counter), costs the rival 20% speed, adds no stagger pip and is worth 100 points. What
+it gives you is aim. A rival in the next lane is pushed directly away from you; a rival in your
+lane is pushed to the side you are holding (toward the centre of the road if you hold nothing);
+at the road edge the push flips inward. A shove ignores the tree clamp, so you can push a rival
+into a tree or rock on purpose. A tree pays the usual knockout if it follows within 2 seconds. With
+the ski pole a shove pushes two lanes and spends a charge, but ends at the first tree in its path.
+The target marker shows a **small arrow** beside the chevron in the direction a shove would push,
+and a **"!"** on it, with TREE/ROCK AHEAD in the hint bar, when a tree or rock sits in that lane
+within about a second of the rival's travel. An alert rival can steer out of the way once its 350 ms
+hit reaction ends, so the shove rewards timing: it reliably lands a rival in a tree within about
+five segments. The Hit and Shove have separate cooldowns, and a rival you just struck by either is
+immune to both for half a second.
 
 - **Bully:** follows your lane and hunts a fight. Bait its tell, evade and counter.
 - **Line defender:** protects its starting line. Pass on another lane or draw it into a strike.

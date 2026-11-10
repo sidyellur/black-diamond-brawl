@@ -239,8 +239,8 @@ export class Player implements Collidable {
   }
 
   /** Starts an attack swing: steering and jump are locked for its duration. */
-  startSwing(): void {
-    this.swingMsRemaining = ATTACK_SWING_MS;
+  startSwing(durationMs: number = ATTACK_SWING_MS): void {
+    this.swingMsRemaining = durationMs;
   }
 
   /** True while mid-attack — drives the swing pose. */

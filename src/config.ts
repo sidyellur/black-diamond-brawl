@@ -253,6 +253,21 @@ export const ARMED_SHOVE_SPEED_LOSS_FACTOR = 0.4; // double loss on an armed win
  */
 export const ATTACK_SWING_MS = 250;
 
+/**
+ * The directional SHOVE (player-facing name). Everything about it is `PUSH_*`
+ * in code so it can never be mixed up with the older `SHOVE_*` constants above,
+ * which belong to the jab's exchange (Z window, pair immunity, speed loss).
+ *
+ * A push is the slower, costlier second attack: it always succeeds against an
+ * eligible target, moves the rival one lane in a direction the player controls,
+ * ignores the tree clamp, and adds no stagger pip.
+ */
+export const PUSH_SWING_MS = 400; // steer + jump lock (jab: ATTACK_SWING_MS)
+export const PUSH_COOLDOWN_MS = 900; // independent of the jab's cooldown
+export const PUSH_SPEED_LOSS = 0.2; // fraction of the rival's speed lost
+/** The hazard cue and the outcome both look this far ahead of the pushed rival. */
+export const PUSH_HAZARD_LOOKAHEAD_MS = 1000;
+
 /** Global cooldown between attack presses, regardless of target. Longer than
  *  `SHOVE_IMMUNITY_MS`, so re-attacking the SAME rival is gated by this rather
  *  than by pair immunity. */
@@ -312,6 +327,8 @@ export const POINTS = {
    *  split the scoreboard could not tell intent from accident. */
   COMBAT_BRUSH: 50,
   KNOCKOUT: 500,
+  /** The directional shove (`PUSH_*`); a knockout is paid on top if it trees. */
+  PUSH: 100,
   NEAR_MISS: 100,
   TRICK_JUMP: 150,
   TRICK_JUMP_EXTRA_PER_QUARTER_SECOND: 50,

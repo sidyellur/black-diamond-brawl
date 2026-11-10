@@ -543,4 +543,66 @@ check('boost never queues a jump, steer or attack', () => {
   assert.equal(player.leanDirection, 0);
   assert.equal(input.attackJustPressed(), false);
 });
+check('shove is its own edge-triggered action: consumed once, never repeats, independent of attack', () => {
+  const { input, advance, age } = rig();
+  input.setAction('push', true, 'KeyG');
+  advance(16, false);
+  assert.equal(input.attackJustPressed(), false, 'a shove press is not an attack press');
+  assert.equal(input.pushJustPressed(), true);
+  assert.equal(input.pushJustPressed(), false);
+  for (let i = 0; i < 20; i++) {
+    input.setAction('push', true, 'KeyG');
+    advance(50, false);
+    assert.equal(input.pushJustPressed(), false);
+  }
+  input.setAction('push', false, 'KeyG');
+  input.setAction('push', true, 'KeyL');
+  advance(16, false);
+  assert.equal(input.pushJustPressed(), true, 'L is a second binding of the same action');
+  input.setAction('attack', true, 'KeyF');
+  advance(16, false);
+  assert.equal(input.pushJustPressed(), false);
+  assert.equal(input.attackJustPressed(), true);
+  input.setAction('push', false, 'KeyL');
+  input.setAction('push', true, 'KeyG');
+  input.setAction('push', false, 'KeyG');
+  age(ACTION_BUFFER_MS + 1);
+  advance(0, false);
+  assert.equal(input.pushJustPressed(), false, 'a stale shove tap expires like a stale attack');
+});
+check('the held steer direction is exposed for the same-lane shove rule', () => {
+  const { input, advance } = rig();
+  assert.equal(input.heldDirection(), 0);
+  input.setAction('left', true, 'ArrowLeft');
+  assert.equal(input.heldDirection(), -1);
+  input.setAction('right', true, 'KeyD');
+  assert.equal(input.heldDirection(), 0, 'both held cancels');
+  input.setAction('left', false, 'ArrowLeft');
+  assert.equal(input.heldDirection(), 1);
+  input.setEnabled(false);
+  assert.equal(input.heldDirection(), 0, 'nothing counts as held while disabled');
+  input.setEnabled(true);
+  input.setAction('right', false, 'KeyD');
+  advance(16, false);
+  assert.equal(input.heldDirection(), 0);
+});
+check('G and L are bound to the shove, and K is still the jab', () => {
+  const keyboard = Object.assign(new EventEmitter(), {
+    addKey: (name: string) => ({ name }), removeKey: () => undefined, removeCapture: () => undefined
+  });
+  const scene = { input: { keyboard }, events: new EventEmitter(), game: { events: new EventEmitter() } } as unknown as Phaser.Scene;
+  const input = bindPlayerInput(scene, new Player());
+  for (const code of ['KeyG', 'KeyL']) {
+    keyboard.emit('keydown', { code, repeat: false });
+    input.update(16);
+    assert.equal(input.pushJustPressed(), true, `${code} presses shove`);
+    assert.equal(input.attackJustPressed(), false);
+    keyboard.emit('keyup', { code });
+  }
+  keyboard.emit('keydown', { code: 'KeyK', repeat: false });
+  input.update(16);
+  assert.equal(input.pushJustPressed(), false);
+  assert.equal(input.attackJustPressed(), true, 'K is still the jab');
+  input.destroy();
+});
 console.log(`\n=== ${checks} control regressions passed ===\n`);

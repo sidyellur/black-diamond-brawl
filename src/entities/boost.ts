@@ -7,7 +7,7 @@ import {
 } from '../config';
 
 /** Score-feedback kinds that can feed the meter (`ScoreTracker.feedback`). */
-export type BoostFeedbackKind = 'hit' | 'brush' | 'knockout' | 'near' | 'trick';
+export type BoostFeedbackKind = 'hit' | 'brush' | 'push' | 'knockout' | 'near' | 'trick';
 
 /** The slice of player state the meter reads. Keeps this module Phaser-free. */
 export interface BoostPlayerState {
@@ -56,6 +56,7 @@ export class BoostMeter {
       if (kind === 'near') gain += BOOST_GAIN.NEAR_MISS;
       else if (kind === 'trick') gain += BOOST_GAIN.TRICK_LANDING;
       else if (kind === 'knockout') gain += BOOST_GAIN.KNOCKOUT;
+      else if (kind === 'push') gain += BOOST_GAIN.HIT; // earns like a landed jab
       else if (kind === 'hit') gain += counter ? 0 : BOOST_GAIN.HIT;
     }
     if (counter) gain += BOOST_GAIN.COUNTER;

@@ -16,6 +16,12 @@ export interface HudState {
   progress: number;
   charges: number;
   attackCooldown: number;
+  /** 0..1 remaining cooldown of the directional shove. */
+  pushCooldown?: number;
+  /** A shove would land on someone right now. */
+  push?: boolean;
+  /** Tree or rock waiting in the lane the shove would send the rival to. */
+  pushHazard?: 'tree' | 'rock' | null;
   target: boolean;
   targetAdvantage: boolean;
   boost?: { value: number; active: boolean; ready: boolean };
@@ -117,9 +123,9 @@ export class RaceHud {
 
     if (this.touch) {
       if (scene.input.manager.pointersTotal < 4) scene.input.addPointer(4 - scene.input.manager.pointersTotal);
-      const held = (x: number, label: string, action: InputAction) => {
-        const g = scene.add.rectangle(x, SCREEN_H - 43, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
-        const t = this.text(x, SCREEN_H - 43, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
+      const held = (x: number, label: string, action: InputAction, y = SCREEN_H - 43) => {
+        const g = scene.add.rectangle(x, y, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
+        const t = this.text(x, y, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
         const pointers = new Set<number>();
         const press = (p: Phaser.Input.Pointer) => {
           if (!isAppActive(scene.game)) return;
@@ -138,11 +144,16 @@ export class RaceHud {
         this.raceControls.push(g);
       };
       held(58, '‹', 'left'); held(142, '›', 'right'); held(726, 'BOOST', 'boost'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'attack');
+      // SHOVE stacks above HIT so every existing button keeps its position and
+      // the bottom row stays clear of the hint bar.
+      held(898, 'SHOVE', 'push', SCREEN_H - 43 - 76);
       this.speed.setPosition(30, SCREEN_H - 104);
       helpBg.setSize(420, 30);
     } else {
       this.text(30, SCREEN_H - 42, 'ARROWS / A D  STEER', 10, UI.panel, true);
-      this.text(SCREEN_W - 30, SCREEN_H - 42, 'SPACE / W  JUMP    F / K  HIT    SHIFT / S  BOOST', 10, UI.panel, true).setOrigin(1, 0);
+      // Two short lines keep this clear of the centred hint bar.
+      this.text(SCREEN_W - 30, SCREEN_H - 50, 'SPACE / W  JUMP    SHIFT / S  BOOST', 10, UI.panel, true).setOrigin(1, 0);
+      this.text(SCREEN_W - 30, SCREEN_H - 35, 'F / K  HIT    G / L  SHOVE', 10, UI.panel, true).setOrigin(1, 0);
     }
 
     this.pauseOverlay = scene.add.container(0, 0).setDepth(11000).setVisible(false);
@@ -154,7 +165,7 @@ export class RaceHud {
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
-    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT     HOLD BOOST' : 'A D / ← →  carve   SPACE / W  jump   F / K  fight   SHIFT / S  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
+    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT     TAP SHOVE     HOLD BOOST' : 'A D / ← →  carve  SPACE  jump  F / K  hit  G / L  shove  SHIFT  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
     this.pauseOverlay.add([shade, panel, heading, sub, controls]);
     for (const [label, y, callback] of [
       [this.touch ? 'RESUME' : 'RESUME   ESC / P', 267, actions.resume],
@@ -166,7 +177,7 @@ export class RaceHud {
       this.bindButton(b, callback);
       this.pauseOverlay.add([b, t]);
     }
-    this.pauseOverlay.add(scene.add.text(SCREEN_W / 2, 426, 'Clean hits, close calls and landings build Flow. Damage breaks it.', {
+    this.pauseOverlay.add(scene.add.text(SCREEN_W / 2, 426, 'Clean hits, shoves, close calls and landings build Flow. Damage breaks it.', {
       fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: hex(UI.inkLow)
     }).setOrigin(0.5));
     this.objects.push(this.pauseOverlay);
@@ -273,8 +284,16 @@ export class RaceHud {
     this.split.setText(s.ghostSplit ?? '');
     this.lessonBg.setVisible(!!s.practice);
     this.lesson.setText(s.practice ? `${s.practice.title}\n${s.practice.instruction}\n${s.practice.feedback}` : '');
-    this.attack.setText(s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : s.target ? (s.targetAdvantage ? `${this.touch ? 'TAP HIT' : 'F / K  HIT'} · YOU HAVE THE ADVANTAGE` : 'FASTER RIVAL · GAIN PACE OR USE A POLE') : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER');
-    this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
+    const hit = this.touch ? 'TAP HIT' : 'F / K  HIT';
+    const shove = this.touch ? 'SHOVE' : 'G / L  SHOVE';
+    const text = s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING'
+      : s.push && s.pushHazard ? `${shove} · ${s.pushHazard === 'tree' ? 'TREE' : 'ROCK'} AHEAD !`
+      : s.target && s.attackCooldown <= 0 ? (s.targetAdvantage ? `${hit} · ${shove}` : `FASTER RIVAL · ${shove} ALWAYS LANDS`)
+      : s.push ? `${shove} · HIT RECHARGING`
+      : s.attackCooldown > 0 || (s.pushCooldown ?? 0) > 0 ? (s.attackCooldown > 0 && (s.pushCooldown ?? 0) > 0 ? 'HIT + SHOVE RECHARGING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : 'SHOVE RECHARGING')
+      : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS · SHOVES PUSH 2 LANES` : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER';
+    this.attack.setText(text);
+    this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.push && s.pushHazard ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : UI.inkMid));
     this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');
     const g = this.graphics.clear();
@@ -299,6 +318,9 @@ export class RaceHud {
     if (lastChance) this.drawLastChance(g);
     if (s.attackCooldown > 0) {
       g.fillStyle(UI.accentWarn).fillRect(SCREEN_W / 2 - 84, SCREEN_H - 16, 168 * (1 - s.attackCooldown), 2);
+    }
+    if ((s.pushCooldown ?? 0) > 0) {
+      g.fillStyle(UI.accentInfo).fillRect(SCREEN_W / 2 - 84, SCREEN_H - 12, 168 * (1 - (s.pushCooldown ?? 0)), 2);
     }
   }
 }

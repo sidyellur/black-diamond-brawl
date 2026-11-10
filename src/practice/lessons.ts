@@ -2,21 +2,30 @@
  * This small objective tracker never moves riders or manufactures a success. */
 export const PRACTICE_LESSONS = [
   {
-    title: '1 / 3  ·  OUTSMART THE BULLY',
+    title: '1 / 4  ·  OUTSMART THE BULLY',
     instruction: 'Wait for WIND UP. Jump or carve as the bar fills, then press HIT to counter.',
     hint: 'A green COUNTER cue means you can beat a faster rival, even in the air.'
   },
   {
-    title: '2 / 3  ·  PASS THE LINE DEFENDER',
+    title: '2 / 4  ·  PASS THE LINE DEFENDER',
     instruction: 'The defender holds the center. Carve LEFT or RIGHT and pass on a clear line.',
     hint: 'You do not need to fight every rider. Keep your speed and give this one space.'
   },
   {
-    title: '3 / 3  ·  FOLLOW THE DAREDEVIL',
+    title: '3 / 4  ·  FOLLOW THE DAREDEVIL',
     instruction: 'Watch the daredevil take the mogul. Jump the mound in your lane, then land.',
     hint: 'JUMP just before the mound for trick air. Trees cannot be jumped.'
+  },
+  {
+    title: '4 / 4  ·  SHOVE INTO THE ROCKS',
+    instruction: 'Wait for the "!" on the arrow, then SHOVE the rival into the rock.',
+    hint: 'SHOVE (G / L) pushes the rival away from you. The arrow shows which way.'
   }
 ] as const;
+
+export const PRACTICE_LESSON_COUNT = PRACTICE_LESSONS.length;
+/** A shoved rival must reach the rock within this long for it to count. */
+export const PRACTICE_SHOVE_WINDOW_MS = 2000;
 
 export class PracticeObjectives {
   evaded = false;
@@ -24,12 +33,21 @@ export class PracticeObjectives {
   passed = false;
   jumped = false;
   landed = false;
+  shovedAtMs: number | null = null;
+  rockStruck = false;
   constructor(readonly lesson: number) {}
   combat(type: string): void {
     if (type === 'evade') this.evaded = true;
     if (type === 'counter' && this.evaded) this.countered = true;
   }
+  /** The player's directional shove landed on the rival. */
+  shoved(nowMs: number): void { this.shovedAtMs = nowMs; }
+  /** The rival hit a rock; only counts shortly after a shove. */
+  rivalHitRock(nowMs: number): void {
+    if (this.shovedAtMs !== null && nowMs - this.shovedAtMs <= PRACTICE_SHOVE_WINDOW_MS) this.rockStruck = true;
+  }
   get complete(): boolean {
-    return this.lesson === 0 ? this.countered : this.lesson === 1 ? this.passed : this.jumped && this.landed;
+    return this.lesson === 0 ? this.countered : this.lesson === 1 ? this.passed :
+      this.lesson === 2 ? this.jumped && this.landed : this.rockStruck;
   }
 }
