@@ -193,7 +193,7 @@ export class RaceHud {
       // the bottom row stays clear of the hint bar.
       held(898, 'SHOVE', 'push', SCREEN_H - 43 - 76);
       this.speed.setPosition(30, SCREEN_H - 104);
-      this.surfaceTag.setPosition(30, SCREEN_H - 78);
+      this.surfaceTag.setPosition(30, SCREEN_H - 122); // above the pace readout: the steer buttons sit below it
       helpBg.setSize(420, 30);
     } else {
       this.text(30, SCREEN_H - 42, 'ARROWS / A D  STEER', 10, UI.panel, true);
