@@ -1,6 +1,5 @@
 import {
   JUMP_REACH_EXTENDED,
-  LANE_CHANGE_SEGMENTS,
   LANES,
   PICKUP_KIND_WEIGHTS,
   PICKUP_MAX_GAP_SEGMENTS,
@@ -9,6 +8,8 @@ import {
 import { Obstacle, segmentCentreZ } from '../entities/obstacle';
 import { Pickup, PICKUP_KIND_LIST, PickupKind } from '../entities/pickup';
 import { mulberry32, Prng, randInt } from './prng';
+import type { Segment } from './segment';
+import { gapLaneChangeSegments } from './surface';
 
 const LANE_COUNT = LANES.length;
 const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
@@ -32,6 +33,9 @@ export interface PickupPlacementInput {
   crestApexes: number[];
   placeableStart: number;
   placeableEnd: number;
+  /** The course's segments, so a pickup on or after ice is judged with the ice
+   *  lane-change cost. Optional for geometry-only callers. */
+  segments?: readonly Segment[];
 }
 
 function dilate(from: ReadonlySet<number>, maxShift: number): Set<number> {
@@ -67,7 +71,7 @@ function reachableLaneSets(input: PickupPlacementInput, segs: number[]): Set<num
 
   const steer = (from: number, to: number): number => {
     const lockedInGap = locked[to + 1] - locked[from + 1];
-    return Math.floor(Math.max(0, to - from - lockedInGap) / LANE_CHANGE_SEGMENTS);
+    return Math.floor(Math.max(0, to - from - lockedInGap) / gapLaneChangeSegments(input.segments, from, to));
   };
 
   let reachable: Set<number> = new Set(ALL_LANES);

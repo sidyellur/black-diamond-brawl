@@ -118,6 +118,24 @@ pace readout. Fields are placed from their own seed-derived stream, so adding th
 no geometry, obstacle or rival: the only new obstacles are the entry moguls, and those are
 ordinary placed obstacles that pass the same solvability checks as any other row.
 
+Each ridge holds one **ice sheet**, 20 to 30 segments of glare ice in a stretch of the ridge that
+is not a take-off, apex, landing or transition (so nobody is ever airborne over ice). A lane
+change that starts on ice takes 300 ms instead of 150 ms, and the duration is fixed when the
+slide starts: a steer begun on ice finishes as a slide even if you leave the ice mid-way, and a
+steer pressed during a slide waits for it. That covers your own steering and hold-to-carve
+repeats, rivals' steering and dodging, knockbacks and the directional shove. Jumps, airtime and
+speed are untouched, and a close call on ice pays double (the boost gained stays +8). Because a
+slide is 4.5 segments at top speed, course generation charges 5 segments per lane change across
+ice instead of 3, through one shared helper (`gapLaneChangeSegments`) that placement, the pickup
+reachability replay and the solvability verifier all read; a gap that is only partly on ice is
+charged the ice cost throughout. Ridges place no trees, no tree stands on ice or within 10
+segments after it, and sheets are placed from their own seed-derived stream where the existing
+rows already pass the stricter cost, so no geometry, obstacle or rival changes (if a sheet ever
+had to go where they do not, the offending obstacles inside it are thinned, never the course
+re-rolled). Ice reads as a pale-blue glaze with long streak marks, sheen patches and a frozen
+threshold where it begins (not powder's white stipple); the HUD says **ICE · SLOW CARVE** on
+entry and **SLOW CARVE · CLOSE CALLS x2** beside the pace readout.
+
 A successful finish saves your fastest **personal ghost**. Replay the same mountain to see its
 translucent rider and signed checkpoint splits at 25%, 50% and 75%. The ghost never collides,
 affects standings or consumes gameplay randomness. Ghosts stay on your device; only the latest

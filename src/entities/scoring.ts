@@ -2,6 +2,7 @@ import {
   JUMP_AIRTIME_EXTENDED_MS,
   JUMP_AIRTIME_MS,
   MAX_SPEED,
+  ICE_NEAR_MISS_MULTIPLIER,
   NEAR_MISS_MAX_LANE_DISTANCE,
   NEAR_MISS_MIN_SPEED_FACTOR,
   PAR_TIME,
@@ -13,6 +14,7 @@ import { CombatSystem } from './combat';
 import { Obstacle } from './obstacle';
 import type { GrudgeTracker } from '../progression/grudge';
 import { Player } from './player';
+import type { Surface } from '../track/segment';
 
 /** Full score breakdown for the Result screen (design-spec §4.7). */
 export interface ScoreBreakdown {
@@ -89,6 +91,11 @@ export class ScoreTracker {
   private brushCount = 0;
   private pushCount = 0;
   private nearMissCount = 0;
+  private nearMissPointsTotal = 0;
+  /** Surface under the player this step: a near miss is judged by where the
+   *  player is as the obstacle or rival crosses, which on an obstacle is its own
+   *  segment's surface. */
+  private surface: Surface | undefined;
   private trickJumpCount = 0;
   private trickJumpPoints = 0;
   private eventPoints = 0;
@@ -128,8 +135,9 @@ export class ScoreTracker {
   get chain(): number { return this.chainCount; }
   get chainRemaining(): number { return this.chainMs / FLOW_WINDOW_MS; }
 
-  update(deltaMs = 1000 / 60): void {
+  update(deltaMs = 1000 / 60, surface?: Surface): void {
     this.feedback.length = 0;
+    this.surface = surface;
     this.chainMs = Math.max(0, this.chainMs - deltaMs);
     if (this.chainMs === 0 || !this.cleanRiding) {
       this.chainCount = 0;
@@ -262,7 +270,11 @@ export class ScoreTracker {
 
   private awardNearMiss(): void {
     this.nearMissCount++;
-    this.award('near', 'CLOSE CALL', POINTS.NEAR_MISS);
+    // Ice pays double (the boost gain for a near miss stays what it was).
+    const onIce = this.surface === 'ice';
+    const points = POINTS.NEAR_MISS * (onIce ? ICE_NEAR_MISS_MULTIPLIER : 1);
+    this.nearMissPointsTotal += points;
+    this.award('near', onIce ? 'CLOSE CALL · ICE x2' : 'CLOSE CALL', points);
   }
 
   /**
@@ -318,7 +330,7 @@ export class ScoreTracker {
       pushCount: this.pushCount,
       pushPoints: this.pushCount * POINTS.PUSH,
       nearMissCount: this.nearMissCount,
-      nearMissPoints: this.nearMissCount * POINTS.NEAR_MISS,
+      nearMissPoints: this.nearMissPointsTotal,
       trickJumpCount: this.trickJumpCount,
       trickJumpPoints: this.trickJumpPoints,
       eventTotal,

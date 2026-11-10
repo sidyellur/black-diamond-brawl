@@ -4,6 +4,7 @@ import {
   ATTACK_LANE_REACH,
   COLLISION_LANE_FRACTION,
   KNOCKOUT_WINDOW_MS,
+  LANE_TWEEN_MS,
   LANES,
   PUSH_COOLDOWN_MS,
   PUSH_HAZARD_LOOKAHEAD_MS,
@@ -339,8 +340,14 @@ export class CombatSystem {
       if (this.hasTreeDownstream(next, rider.worldZ)) break;
     }
     const reach = rider.worldZ + rider.speed * PUSH_HAZARD_LOOKAHEAD_MS / 1000;
+    // A pushed rider only enters the destination lane's collision band half way
+    // through its tween, so an obstacle just ahead is passed, not hit. On ice the
+    // tween is twice as long and the rider carries further before it arrives:
+    // the window opens where the rider actually enters the lane (at the speed it
+    // has after the push), less the half-segment collision window.
+    const arrival = rider.speed * (1 - PUSH_SPEED_LOSS) * rider.tweenDurationMs / 2000;
     const found = this.obstacles.find((o) => (o.kind === 'tree' || o.kind === 'rock') && o.lane === lane &&
-      o.z >= rider.worldZ - SEGMENT_LENGTH * 0.5 && o.z <= reach);
+      o.z >= rider.worldZ + arrival - SEGMENT_LENGTH * 0.5 && o.z <= reach);
     const hazard = found ? (found.kind === 'tree' ? 'tree' : 'rock') : null;
     return { direction, lane, shift, hazard };
   }
@@ -495,8 +502,14 @@ export class CombatSystem {
       const missed = !inZReach || !onTargetLine || !sameAltitude;
       if (missed) {
         const actionAgeAtStrike = this.player.maneuverAgeMs - strike.ageMs;
+        // A steer clears the target line half way through its tween, so a slide
+        // begun on ice has to start half its extra length earlier than one on
+        // piste. The window's far end moves by the same amount, which keeps the
+        // window the same width instead of squeezing it (`maneuverDurationMs`
+        // is `LANE_TWEEN_MS` for a jump, so jumps are unchanged).
+        const evadeWindowMs = EVADE_TIMING_MS + (this.player.maneuverDurationMs - LANE_TWEEN_MS) / 2;
         const deliberateEvade = this.player.maneuverSerial > rider.attackManeuverSerial &&
-          actionAgeAtStrike >= 0 && actionAgeAtStrike <= EVADE_TIMING_MS &&
+          actionAgeAtStrike >= 0 && actionAgeAtStrike <= evadeWindowMs &&
           Math.abs(this.player.maneuverFromFraction - strike.targetFraction) <= COLLISION_LANE_FRACTION;
         const steerEvade = this.player.maneuverKind === 'steer' && !onTargetLine;
         const jumpEvade = this.player.maneuverKind === 'jump' && this.player.airborne && !strike.airborne;

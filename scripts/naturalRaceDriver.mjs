@@ -55,11 +55,15 @@ export function naturalRaceDriver(options = {}) {
     const nearest = (lane) => scene.obstacles.filter(o => o.lane === lane && o.z >= player.worldZ - 100)
       .reduce((best, obstacle) => !best || obstacle.z < best.z ? obstacle : best, null);
     const current = nearest(player.laneIndex);
-    if (!current || current.z - player.worldZ > 1400) return;
+    // A lane change started on ice takes twice as long (300 ms against 150 ms), so
+    // the driver commits that much earlier and wants the same extra clearance in
+    // the lane it slides into: 3 units per ms of extra tween at MAX_SPEED.
+    const slideUnits = Math.max(0, (player.tweenDurationMs ?? 150) - 150) * 3;
+    if (!current || current.z - player.worldZ > 1400 + slideUnits) return;
     const candidates = [player.laneIndex - 1, player.laneIndex + 1].filter(lane => lane >= 0 && lane < 5)
       .map(lane => ({ lane, clearance: (nearest(lane)?.z ?? Infinity) - player.worldZ }))
       .sort((a, b) => b.clearance - a.clearance);
-    if (candidates[0]?.clearance > 1000) {
+    if (candidates[0]?.clearance > 1000 + slideUnits) {
       const previousSerial = player.maneuverSerial;
       player.requestLaneShift(candidates[0].lane > player.laneIndex ? 1 : -1);
       if (player.maneuverSerial !== previousSerial) trace.shifts++;

@@ -7,7 +7,6 @@ import {
   JUMP_AIRTIME_MS,
   KNOCKDOWN_IMMUNITY_MS,
   KNOCKDOWN_MS,
-  LANE_TWEEN_MS,
   LANES,
   MAX_SPEED,
   MOGUL_SPEED_FACTOR,
@@ -27,7 +26,7 @@ import {
 } from '../config';
 import { mulberry32, type Prng } from '../track/prng';
 import type { Surface } from '../track/segment';
-import { surfaceSpeedFactor } from '../track/surface';
+import { laneTweenMs, surfaceSpeedFactor } from '../track/surface';
 import { Collidable } from './collision';
 import { Obstacle } from './obstacle';
 import { deriveRiderSeed, PERSONALITIES, type RivalPersonality } from './personality';
@@ -39,7 +38,7 @@ export const PACK_CHASE_START_Z = SEGMENT_LENGTH * 6;
 export const PACK_CHASE_END_Z = SHOVE_Z_WINDOW + SEGMENT_LENGTH * 0.25;
 export const PACK_SETBACK_GRACE_MS = 4000;
 
-interface LaneTween { fromLane: number; toLane: number; elapsedMs: number }
+interface LaneTween { fromLane: number; toLane: number; elapsedMs: number; durationMs: number }
 
 export interface AIRiderParams {
   cruiseSpeedFactor: number;
@@ -87,6 +86,9 @@ export class AIRider implements Collidable {
   attackManeuverSerial = 0;
   private _laneIndex: number;
   private tween: LaneTween | null = null;
+  /** Surface under the rider on the last update; a lane change started before
+   *  the next update (a shove or knockback from combat) uses it. */
+  private surface: Surface | undefined;
   private chasingPack = false;
   private packGraceMs = 0;
   private tumbleMsRemaining = 0;
@@ -124,6 +126,7 @@ export class AIRider implements Collidable {
   update(deltaMs: number, obstacles: Obstacle[], player: Player, surface?: Surface): void {
     if (this.wipedOut || this.finishTimeMs !== null) { this.attack.cancel(); return; }
     const dt = Math.max(0, deltaMs);
+    this.surface = surface;
     this.bumpCooldownMs -= dt;
     this.updateStaggerDecay(dt);
     this.packGraceMs = Math.max(0, this.packGraceMs - dt);
@@ -196,7 +199,7 @@ export class AIRider implements Collidable {
   get laneIndex(): number { return this._laneIndex; }
   get laneOffsetFraction(): number {
     if (!this.tween) return LANES[this._laneIndex];
-    const t = smoothstep(Math.min(1, this.tween.elapsedMs / LANE_TWEEN_MS));
+    const t = smoothstep(Math.min(1, this.tween.elapsedMs / this.tween.durationMs));
     return LANES[this.tween.fromLane] + (LANES[this.tween.toLane] - LANES[this.tween.fromLane]) * t;
   }
   get collisionImmune(): boolean { return this.tumbleMsRemaining > 0 || this.immunityMsRemaining > 0; }
@@ -318,7 +321,12 @@ export class AIRider implements Collidable {
   }
   private moveTo(lane: number): void {
     if (lane === this._laneIndex || lane < 0 || lane >= LANES.length) return;
-    this.tween = { fromLane: this._laneIndex, toLane: lane, elapsedMs: 0 };
+    this.tween = { fromLane: this._laneIndex, toLane: lane, elapsedMs: 0, durationMs: this.tweenDurationMs };
+  }
+
+  /** How long a lane change started now takes: ice slows it, airborne ignores it. */
+  get tweenDurationMs(): number {
+    return laneTweenMs(this.airborne ? undefined : this.surface);
   }
 
   private maybeDodge(obstacles: Obstacle[]): boolean {
@@ -372,7 +380,7 @@ export class AIRider implements Collidable {
 
   private seekJump(obstacles: Obstacle[]): boolean {
     const reach = this.params.reactionDistanceSegments * SEGMENT_LENGTH;
-    const target = obstacles.filter((o) => o.kind !== 'tree' && o.z > this.worldZ + this.speed * LANE_TWEEN_MS / 1000 + COLLISION_Z_WINDOW &&
+    const target = obstacles.filter((o) => o.kind !== 'tree' && o.z > this.worldZ + this.speed * this.tweenDurationMs / 1000 + COLLISION_Z_WINDOW &&
       o.z <= this.worldZ + reach && Math.abs(o.lane - this._laneIndex) === 1 && this.jumpLaneSafe(o.lane, o, obstacles))
       .sort((a, b) => a.z - b.z)[0];
     if (!target) return false;
@@ -392,7 +400,7 @@ export class AIRider implements Collidable {
     if (speedLossFactor > 0) this.preserveSetback();
     this.speed *= 1 - speedLossFactor;
     this.tween = targetLaneIndex === this._laneIndex ? null :
-      { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0 };
+      { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0, durationMs: this.tweenDurationMs };
   }
   markShovedByPlayer(nowMs: number): void { this.shovedByPlayerAtMs = nowMs; }
   /** Spends the shove attribution once a knockout has been paid for it. */
@@ -403,7 +411,7 @@ export class AIRider implements Collidable {
   private updateLaneTween(deltaMs: number): void {
     if (!this.tween) return;
     this.tween.elapsedMs += deltaMs;
-    if (this.tween.elapsedMs < LANE_TWEEN_MS) return;
+    if (this.tween.elapsedMs < this.tween.durationMs) return;
     this._laneIndex = this.tween.toLane;
     this.tween = null;
   }

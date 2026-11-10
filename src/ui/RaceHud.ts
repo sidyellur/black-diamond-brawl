@@ -5,7 +5,7 @@ import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
 import { isAppActive } from '../input/appLifecycle';
 import type { Surface } from '../track/segment';
-import { SURFACE_LABELS, surfaceSpeedFactor } from '../track/surface';
+import { SURFACE_LABELS, surfaceTagDetail } from '../track/surface';
 
 const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 
@@ -376,9 +376,7 @@ export class RaceHud {
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);
     // A surface that caps pace says so in words next to the readout it changes.
-    this.surfaceTag.setText(s.surface
-      ? `${SURFACE_LABELS[s.surface]} · ${s.airborne ? 'AIRBORNE · NO DRAG' : `PACE CAPPED ${Math.round(surfaceSpeedFactor(s.surface) * 100)}%`}`
-      : '');
+    this.surfaceTag.setText(s.surface ? `${SURFACE_LABELS[s.surface]} · ${surfaceTagDetail(s.surface, s.airborne)}` : '');
     this.progress.setText(`${s.modeLabel ?? 'MOUNTAIN RUN'}   ${Math.min(100, Math.floor(s.progress * 100))}%`);
     this.section.setText(s.sectionName ?? '');
     this.split.setText(s.ghostSplit ?? '');

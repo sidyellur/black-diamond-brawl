@@ -1,6 +1,5 @@
 import {
   JUMP_REACH_EXTENDED,
-  LANE_CHANGE_SEGMENTS,
   LANES,
   POWDER_ENTRY_MOGULS_MAX,
   POWDER_ENTRY_MOGULS_MIN,
@@ -10,10 +9,10 @@ import {
 import { Obstacle, segmentCentreZ } from '../entities/obstacle';
 import type { MountainSection } from './mountain';
 import { mulberry32, Prng, randInt } from './prng';
+import { rowsPassable } from './rows';
 import type { Segment } from './segment';
 
 const LANE_COUNT = LANES.length;
-const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
 
 /** Mixed into the course seed so powder draws from its own stream. */
 const POWDER_STREAM_SALT = 0x6a09e667;
@@ -51,43 +50,6 @@ export interface PowderInput {
   sections: readonly MountainSection[];
   crestApexes: readonly number[];
   placeableStart: number;
-}
-
-function dilate(from: ReadonlySet<number>, maxShift: number): Set<number> {
-  const out = new Set<number>();
-  for (const lane of from) {
-    for (let l = Math.max(0, lane - maxShift); l <= Math.min(LANE_COUNT - 1, lane + maxShift); l++) out.add(l);
-  }
-  return out;
-}
-
-/**
- * The placement guarantee, re-checked over a finished obstacle list: every row
- * leaves a clear lane that is reachable from the previous row's clear lanes by
- * the same lane-change model `placeObstacles` builds the field with, crest
- * steering locks included. The entry moguls are ordinary obstacles, so they
- * have to pass exactly this test; if a candidate would break it, it is not used.
- */
-function rowsPassable(obstacles: readonly Obstacle[], crestApexes: readonly number[], placeableStart: number): boolean {
-  const rows = new Map<number, Set<number>>();
-  for (const o of obstacles) {
-    if (!rows.has(o.segIndex)) rows.set(o.segIndex, new Set());
-    rows.get(o.segIndex)!.add(o.lane);
-  }
-  const rowSegs = [...rows.keys()].sort((a, b) => a - b);
-  const locked = new Set<number>();
-  for (const apex of crestApexes) for (let s = Math.max(0, apex); s <= apex + JUMP_REACH_EXTENDED; s++) locked.add(s);
-  let reachable: Set<number> = new Set(ALL_LANES);
-  let prev = placeableStart;
-  for (const seg of rowSegs) {
-    let steerable = 0;
-    for (let s = prev + 1; s <= seg; s++) if (!locked.has(s)) steerable++;
-    const arrival = dilate(reachable, Math.floor(steerable / LANE_CHANGE_SEGMENTS));
-    reachable = new Set([...arrival].filter((l) => !rows.get(seg)!.has(l)));
-    if (reachable.size === 0) return false;
-    prev = seg;
-  }
-  return true;
 }
 
 /** The mogul rule from `placeObstacles`: nothing that ends a run (a tree) in a
@@ -173,7 +135,7 @@ export function placePowder(input: PowderInput, obstacles: Obstacle[], stream: P
           const entry: Obstacle[] = lanes.map((lane) => ({ kind: 'mogul', lane, segIndex: start, z: segmentCentreZ(start) }));
           // Stable sort: every existing obstacle keeps its place in the list.
           const next = [...current, ...entry].sort((a, b) => a.segIndex - b.segIndex);
-          if (!rowsPassable(next, input.crestApexes, input.placeableStart)) continue;
+          if (!rowsPassable(next, input.crestApexes, input.placeableStart, input.segments)) continue;
           current = next;
           for (let s = start; s < start + length; s++) input.segments[s].surface = 'powder';
           fields.push({ sectionIndex, start, length, moguls: [...lanes] });
