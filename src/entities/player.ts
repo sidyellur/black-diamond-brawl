@@ -25,7 +25,7 @@ import {
 } from '../config';
 import { Collidable } from './collision';
 import { roadElevationAt, Segment, type Surface } from '../track/segment';
-import { surfaceSpeedFactor } from '../track/surface';
+import { laneTweenMs, surfaceSpeedFactor } from '../track/surface';
 
 const CENTER_LANE_INDEX = Math.floor(LANES.length / 2);
 /** Late landing/recovery forgiveness; never queues an entire jump/tumble. */
@@ -40,6 +40,9 @@ interface LaneTween {
   fromLane: number;
   toLane: number;
   elapsedMs: number;
+  /** Fixed when the tween starts (`laneTweenMs` of the surface it started on)
+   *  and kept until it ends, so a slide begun on ice finishes as one. */
+  durationMs: number;
 }
 
 /**
@@ -66,6 +69,9 @@ export class Player implements Collidable {
    *  while airborne). Rivals read it so catch-up judges the player against the
    *  pace the surface allows, not against full speed. */
   speedCapFactor = 1;
+  /** Surface under the rider on the last update. A lane change that starts
+   *  before the next update uses it; at most one 60 Hz step stale. */
+  private surface: Surface | undefined;
 
   private _laneIndex = CENTER_LANE_INDEX;
   private tween: LaneTween | null = null;
@@ -95,6 +101,9 @@ export class Player implements Collidable {
   maneuverAgeMs = Infinity;
   maneuverKind: 'steer' | 'jump' | null = null;
   maneuverFromFraction = LANES[CENTER_LANE_INDEX];
+  /** Tween duration of the most recent steer (`LANE_TWEEN_MS` for a jump), so
+   *  timed-evade detection can allow the longer slide on ice. */
+  maneuverDurationMs = LANE_TWEEN_MS;
 
   airborne = false;
   private jumpElapsedMs = 0;
@@ -143,7 +152,9 @@ export class Player implements Collidable {
    *
    * `surface` is what the road is under the player (`surfaceAtZ`), passed in so
    * the entity never holds the track. Powder scales the ground top speed and
-   * the boost top speed alike; an airborne rider ignores it.
+   * the boost top speed alike; ice lengthens every lane change that STARTS on
+   * it (steer, held repeat, buffered steer, knockback). An airborne rider
+   * ignores both.
    */
   update(deltaMs: number, boosting = false, surface?: Surface): void {
     if (this.wipedOut) {
@@ -151,6 +162,7 @@ export class Player implements Collidable {
     }
 
     this.maneuverAgeMs += deltaMs;
+    this.surface = surface;
     const deltaSeconds = deltaMs / 1000;
 
     // Auto-acceleration toward the top speed (§4.1) — no brake/tuck control in v1.
@@ -200,7 +212,12 @@ export class Player implements Collidable {
       // Preserve the full short attack commitment; air/tumble presses expire
       // unless recovery is imminent. A held steer can refresh this naturally.
       this.bufferedDirection = direction;
-      this.bufferedDirectionMs = Math.max(LANE_INPUT_BUFFER_MS, this.swingMsRemaining + 50);
+      // A steer pressed mid-slide must outlive the slide: on ice the tween (300 ms) is
+      // longer than the plain buffer, so the spare the plain buffer leaves over a
+      // 150 ms tween (10 ms) is kept over whatever tween is running. Unchanged on piste.
+      const tweenLeftMs = this.tween ? this.tween.durationMs - this.tween.elapsedMs : 0;
+      this.bufferedDirectionMs = Math.max(LANE_INPUT_BUFFER_MS, this.swingMsRemaining + 50,
+        tweenLeftMs + (LANE_INPUT_BUFFER_MS - LANE_TWEEN_MS));
       return;
     }
     this.clearInputBuffer();
@@ -427,7 +444,13 @@ export class Player implements Collidable {
       this.tween = null; // clamped: no lane change, speed loss only
       return;
     }
-    this.tween = { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0 };
+    this.tween = { fromLane: this._laneIndex, toLane: targetLaneIndex, elapsedMs: 0, durationMs: this.tweenDurationMs };
+  }
+
+  /** How long a lane change started now would take: the surface under the
+   *  rider, unless airborne (an air knockback is not on the ground). */
+  get tweenDurationMs(): number {
+    return laneTweenMs(this.airborne ? undefined : this.surface);
   }
 
   /** Current lane-offset fraction of road half-width (one of LANES, or
@@ -436,7 +459,7 @@ export class Player implements Collidable {
     if (!this.tween) {
       return LANES[this._laneIndex];
     }
-    const t = smoothstep(Math.min(1, this.tween.elapsedMs / LANE_TWEEN_MS));
+    const t = smoothstep(Math.min(1, this.tween.elapsedMs / this.tween.durationMs));
     const from = LANES[this.tween.fromLane];
     const to = LANES[this.tween.toLane];
     return from + (to - from) * t;
@@ -482,11 +505,13 @@ export class Player implements Collidable {
     if (target === this._laneIndex) {
       return; // already at the road edge; nothing to do
     }
-    this.recordManeuver('steer');
-    this.tween = { fromLane: this._laneIndex, toLane: target, elapsedMs: 0 };
+    const durationMs = this.tweenDurationMs;
+    this.recordManeuver('steer', durationMs);
+    this.tween = { fromLane: this._laneIndex, toLane: target, elapsedMs: 0, durationMs };
   }
 
-  private recordManeuver(kind: 'steer' | 'jump'): void {
+  private recordManeuver(kind: 'steer' | 'jump', durationMs = LANE_TWEEN_MS): void {
+    this.maneuverDurationMs = durationMs;
     this.maneuverSerial++;
     this.maneuverAgeMs = 0;
     this.maneuverKind = kind;
@@ -498,7 +523,7 @@ export class Player implements Collidable {
       return;
     }
     this.tween.elapsedMs += deltaMs;
-    if (this.tween.elapsedMs < LANE_TWEEN_MS) {
+    if (this.tween.elapsedMs < this.tween.durationMs) {
       return;
     }
 

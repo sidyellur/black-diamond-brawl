@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { DRAW_DISTANCE, SCREEN_H, SCREEN_W, SEGMENT_LENGTH } from '../config';
 import { Segment } from '../track/segment';
 import { MountainTheme, themeAtSegment } from '../track/mountain';
-import { RUMBLE, SNOW, mix } from './palette';
+import { ICE, RUMBLE, SNOW, mix } from './palette';
 import { project, type ProjectedPoint } from './project';
 
 // All surface colours now come from the shared palette rather than being
@@ -44,6 +44,14 @@ const POWDER_STIPPLE_SEGMENTS = 44;
 /** Flecks per segment by draw slot: the nearest slots cover most of the screen
  *  and need the most; far ones are thin slivers. */
 const POWDER_FLECKS_BY_SLOT: readonly [number, number][] = [[3, 70], [8, 46], [18, 30], [32, 18], [44, 10]];
+
+/** Ice is read through long longitudinal scratches and glossy sheen patches,
+ *  the opposite of powder's short stippled dashes. The scratches sit on fixed
+ *  world-anchored lines across the road, present or absent per segment, so they
+ *  run on as dashes of random length and scroll with the road instead of
+ *  swimming. Capped like the corduroy: past this they are sub-pixel shimmer. */
+const ICE_DETAIL_SEGMENTS = 42;
+const ICE_STREAK_LINES = 9;
 
 /** Cheap deterministic hash to [0, 1), render-only (never feeds the simulation). */
 function hash01(a: number, b: number): number {
@@ -119,6 +127,11 @@ interface SurfaceShades {
   powderFleck: number;
   powderSpark: number;
   powderEdge: number;
+  ice: number;
+  iceSeam: number;
+  iceStreak: number;
+  iceSheen: number;
+  iceEdge: number;
 }
 
 /**
@@ -132,7 +145,8 @@ export class RoadRenderer {
   private lastFogColor = -1;
   private readonly shades: SurfaceShades[] = Array.from({ length: DRAW_DISTANCE * SURFACE_BANDS * THEMES.length }, () => ({
     snow: 0, offPiste: 0, bankLit: 0, bankShadow: 0, seam: 0, corduroy: 0, terrain: 0,
-    powder: 0, powderSeam: 0, powderFleck: 0, powderSpark: 0, powderEdge: 0
+    powder: 0, powderSeam: 0, powderFleck: 0, powderSpark: 0, powderEdge: 0,
+    ice: 0, iceSeam: 0, iceStreak: 0, iceSheen: 0, iceEdge: 0
   }));
   private readonly markers = Array.from({ length: 20 }, () => ({ x: 0, y: 0, height: 0, width: 0, alpha: 0 }));
   private markerCount = 0;
@@ -336,12 +350,14 @@ export class RoadRenderer {
       }
 
       const powder = segment.surface === 'powder';
+      const ice = segment.surface === 'ice';
       this.fillTrapezoid(
         near.screenX - near.screenW, near.screenX + near.screenW, near.screenY,
         far.screenX - far.screenW, far.screenX + far.screenW, far.screenY,
-        powder ? colors.powder : colors.snow
+        powder ? colors.powder : ice ? colors.ice : colors.snow
       );
       if (powder) this.drawPowder(segIndex, i, near, far, colors, track[(segIndex - 1 + len) % len].surface !== 'powder');
+      if (ice) this.drawIce(segIndex, i, near, far, colors, track[(segIndex - 1 + len) % len].surface !== 'ice');
 
       // Piste markers belong to exact world segments and are rendered after
       // the terrain pass so further snow cannot paint over their raised tops.
@@ -363,7 +379,7 @@ export class RoadRenderer {
       // actual lane boundaries (not the centres), giving a clear dodge/jump
       // corridor without painted road markings or competing with hazards.
       if (i < 36) {
-        const seamColor = powder ? colors.powderSeam : colors.seam;
+        const seamColor = powder ? colors.powderSeam : ice ? colors.iceSeam : colors.seam;
         for (let lane = 1; lane < 5; lane++) {
           const edge = lane * 0.4 - 1;
           const nearHalf = Math.max(0.35, near.screenW * 0.0019);
@@ -383,7 +399,7 @@ export class RoadRenderer {
       // pixel and turn into shimmer, and drawing them the whole way would add
       // ~800 fill paths a frame on top of the existing ~300 for no visible
       // gain. This is a LOD, not a shortcut.
-      if (!powder && i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
+      if (!powder && !ice && i < CORDUROY_SEGMENTS && segIndex % 2 === 0) {
         const groove = colors.corduroy;
         for (let g = 1; g < CORDUROY_LINES; g++) {
           const t = g / CORDUROY_LINES - 0.5;
@@ -433,6 +449,36 @@ export class RoadRenderer {
     }
   }
 
+  /** The glare-ice look: a frozen blue threshold where the sheet begins, then
+   *  glossy sheen patches and long scratch marks that run with the road. Lane
+   *  seams stay, picked out in the same cold blue, so the lanes remain legible. */
+  private drawIce(segIndex: number, i: number, near: ProjectedPoint, far: ProjectedPoint,
+    colors: SurfaceShades, threshold: boolean): void {
+    const lerpAt = (a: number, b: number, t: number): number => a + (b - a) * t;
+    const strip = (u0: number, u1: number, v0: number, v1: number, color: number): void => {
+      const nx = lerpAt(near.screenX, far.screenX, v0), fx = lerpAt(near.screenX, far.screenX, v1);
+      const nw = lerpAt(near.screenW, far.screenW, v0), fw = lerpAt(near.screenW, far.screenW, v1);
+      this.fillTrapezoid(nx + u0 * nw, nx + u1 * nw, lerpAt(near.screenY, far.screenY, v0),
+        fx + u0 * fw, fx + u1 * fw, lerpAt(near.screenY, far.screenY, v1), color);
+    };
+    if (threshold) strip(-1, 1, 0, 0.42, colors.iceEdge);
+    if (i >= ICE_DETAIL_SEGMENTS) return;
+    // Glossy patches: a sheen band over part of the width on every third segment.
+    if (segIndex % 3 === 0) {
+      const u0 = hash01(segIndex, 5) * 1.1 - 1;
+      strip(u0, u0 + 0.5 + hash01(segIndex, 6) * 0.5, 0.12, 0.34, colors.iceSheen);
+    }
+    // Scratch marks on fixed lines across the road, light and dark alternating.
+    for (let line = 0; line < ICE_STREAK_LINES; line++) {
+      if (hash01(segIndex + 4421, line) < 0.46) continue;
+      const u = -0.93 + (line + hash01(line, 9)) * (1.86 / ICE_STREAK_LINES);
+      const half = Math.max(0.004, 0.011 * (0.6 + hash01(line, 3) * 0.8));
+      const v0 = hash01(segIndex + 17, line) * 0.3;
+      strip(u - half, u + half, v0, Math.min(1, v0 + 0.55 + hash01(segIndex + 29, line) * 0.45),
+        line % 2 === 0 ? colors.iceStreak : colors.iceSheen);
+    }
+  }
+
   private drawMarkers(): void {
     for (let i = this.markerCount - 1; i >= 0; i--) {
       const marker = this.markers[i];
@@ -478,6 +524,11 @@ export class RoadRenderer {
           colors.powderFleck = mix(SNOW.powderFleck, fogColor, Math.min(0.9, fog * 1.1));
           colors.powderSpark = mix(0xffffff, fogColor, fog);
           colors.powderEdge = mix(mix(SNOW.powder, SNOW.powderFleck, 0.62), fogColor, fog);
+          colors.ice = mix(mix(ICE.sheet, ICE.sheetAlt, variation), fogColor, fog);
+          colors.iceSeam = mix(colors.ice, ICE.streak, 0.3 * Math.max(0, 1 - i / 42));
+          colors.iceStreak = mix(mix(ICE.streak, ICE.sheet, 0.25), fogColor, Math.min(0.9, fog * 1.1));
+          colors.iceSheen = mix(ICE.sheen, fogColor, fog);
+          colors.iceEdge = mix(ICE.edge, fogColor, fog);
         }
       }
     }

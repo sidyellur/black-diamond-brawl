@@ -198,8 +198,6 @@ export const SNOW = {
   offPisteAlt: 0xa8c0dc,
   /** Shadowed snow — under trees, in troughs, behind moguls. */
   shadow: 0x8fa8c9,
-  /** Wind-scoured ice. */
-  ice: 0xc9dcf0,
   /** Deep powder: brighter and cooler than groomed piste, read mostly through
    *  its stipple. Kept at or above `packed` in lightness so every hazard and
    *  sprite that clears the packed-snow gate clears this one too. */
@@ -207,6 +205,25 @@ export const SNOW = {
   powderAlt: 0xe9f1fb,
   /** The blue-grey flecks and drift shadows stippled across a powder field. */
   powderFleck: 0xa9c1e1
+} as const;
+
+/**
+ * Ice sheets (#39). A pale-blue glaze that is bluer and a touch darker than
+ * groomed piste and clearly not powder's bright white: read through long
+ * longitudinal streaks and glossy sheen patches, not value alone. Every
+ * hazard that sits on it clears `MIN_GAMEPLAY_DELTA_L` (see verifyPalette), and
+ * the sheet still separates from the darker ridge off-piste around it.
+ */
+export const ICE = {
+  /** The glaze, with a slightly deeper alternate band for the speed cue. */
+  sheet: 0xd2ecff,
+  sheetAlt: 0xcdeaff,
+  /** Specular patches and the pale streaks between the dark ones. */
+  sheen: 0xf6fcff,
+  /** The long scratch marks left by blades on glare ice. */
+  streak: 0x78aedd,
+  /** The frozen threshold where a sheet begins. */
+  edge: 0xa9d3f2
 } as const;
 
 /** Sky and atmosphere. The fog colour is sampled from these at runtime rather

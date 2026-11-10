@@ -14,6 +14,7 @@
  * Usage: npm run verify:palette
  */
 import {
+  ICE,
   MIN_GAMEPLAY_DELTA_L,
   MIN_OUTLINE_DELTA_L,
   MOGUL,
@@ -23,6 +24,7 @@ import {
   SNOW,
   TREE,
   deltaL,
+  mix,
   rim
 } from '../src/render/palette';
 
@@ -32,6 +34,9 @@ interface Case {
   b: number;
   min: number;
 }
+
+/** The lightest ridge off-piste the road renderer draws (see `RoadRenderer.prepareShades`). */
+const RIDGE_OFF_PISTE = mix(SNOW.offPiste, SNOW.shadow, 0.32);
 
 const cases: Case[] = [
   // The hazard that was invisible before v2.
@@ -57,7 +62,18 @@ const cases: Case[] = [
   { label: 'rock body vs powder', a: ROCK.body, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L },
   { label: 'rider rim vs powder', a: rim(0xd23b3b), b: SNOW.powder, min: MIN_OUTLINE_DELTA_L },
   // The stipple has to be seen, or the field looks like ordinary snow.
-  { label: 'powder fleck vs powder', a: SNOW.powderFleck, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L }
+  { label: 'powder fleck vs powder', a: SNOW.powderFleck, b: SNOW.powder, min: MIN_GAMEPLAY_DELTA_L },
+  // Ice sheets (#39), in ridge sections only: the sheet must read against the
+  // darker ridge off-piste around it, hazards must read on it, and its streaks
+  // and threshold must be seen or it looks like ordinary snow.
+  { label: 'ice vs ridge off-piste', a: ICE.sheet, b: RIDGE_OFF_PISTE, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'ice alt vs ridge off-piste', a: ICE.sheetAlt, b: RIDGE_OFF_PISTE, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'mogul lee vs ice', a: MOGUL.lee, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'mogul lee vs ice alt band', a: MOGUL.lee, b: ICE.sheetAlt, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'rock body vs ice', a: ROCK.body, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'rider rim vs ice', a: rim(0xd23b3b), b: ICE.sheet, min: MIN_OUTLINE_DELTA_L },
+  { label: 'ice streak vs ice', a: ICE.streak, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L },
+  { label: 'ice threshold vs ice', a: ICE.edge, b: ICE.sheet, min: MIN_GAMEPLAY_DELTA_L / 2 }
 ];
 
 // Every rival must clear the outline bar and be separable from its neighbours.
@@ -72,6 +88,12 @@ RIVAL_SUITS.forEach((suit, i) => {
     label: `rival ${i} rim vs powder`,
     a: rim(suit),
     b: SNOW.powder,
+    min: MIN_OUTLINE_DELTA_L
+  });
+  cases.push({
+    label: `rival ${i} rim vs ice`,
+    a: rim(suit),
+    b: ICE.sheet,
     min: MIN_OUTLINE_DELTA_L
   });
 });

@@ -5,6 +5,7 @@ import { Pickup } from '../entities/pickup';
 import { spawnAIRiders } from './aiSpawn';
 import { MOUNTAIN_GENERATOR_VERSION, MOUNTAIN_SETPIECES, MountainSection, MountainTheme } from './mountain';
 import { placeObstacles } from './placement';
+import { iceStream, placeIce, type IceSheet } from './ice';
 import { placePowder, powderStream, type PowderField } from './powder';
 import { pickupStream, placePickups, skipLegacyPickupDraws } from './pickupPlacement';
 import { mulberry32, Prng, randInt } from './prng';
@@ -165,12 +166,14 @@ export interface GeneratedTrack {
   pickups: Pickup[];
   /** Powder stretches, one per bowl section; their segments carry `surface: 'powder'`. */
   powder: PowderField[];
+  /** Ice sheets, one per ridge section; their segments carry `surface: 'ice'`. */
+  ice: IceSheet[];
 }
 
-/** One seed, strictly ordered passes, no runtime randomness. Pickups and powder
- *  draw from their own derived streams, not the shared generator (see
- *  `pickupStream`, `powderStream`), so neither re-rolls geometry, obstacles or
- *  rivals. */
+/** One seed, strictly ordered passes, no runtime randomness. Pickups, powder
+ *  and ice draw from their own derived streams, not the shared generator (see
+ *  `pickupStream`, `powderStream`, `iceStream`), so none re-rolls geometry,
+ *  obstacles or rivals. */
 export function generateTrack(seed: number): GeneratedTrack {
   const prng = mulberry32(seed);
   const geometry = buildGeometry(prng);
@@ -178,13 +181,16 @@ export function generateTrack(seed: number): GeneratedTrack {
   // Pickups draw from their own seed-derived stream; the shared generator
   // still advances exactly as before so rival parameters are unchanged.
   skipLegacyPickupDraws(placed, geometry.placeableStart, geometry.placeableEnd, prng);
-  // Powder fields are decided after the shared generator is finished with, from
+  // Ice sheets come first because they can thin ridge rows, and the powder and
+  // pickup passes then see that final field. Powder fields are decided after the shared generator is finished with, from
   // their own stream. Their entry moguls are the only obstacles it adds, and
   // pickups are placed last so they see the final obstacle field.
-  const { obstacles, fields: powder } = placePowder(geometry, placed, powderStream(seed));
+  const { obstacles: afterIce, sheets: ice } = placeIce(geometry, placed, iceStream(seed));
+  const { obstacles, fields: powder } = placePowder(geometry, afterIce, powderStream(seed));
   const pickups = placePickups({ obstacles, crestApexes: geometry.crestApexes,
-    placeableStart: geometry.placeableStart, placeableEnd: geometry.placeableEnd }, pickupStream(seed));
+    placeableStart: geometry.placeableStart, placeableEnd: geometry.placeableEnd,
+    segments: geometry.segments }, pickupStream(seed));
   const aiRiders = spawnAIRiders(prng);
   return { generatorVersion: MOUNTAIN_GENERATOR_VERSION, sections: geometry.sections,
-    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups, powder };
+    segments: geometry.segments, obstacles, crestApexes: geometry.crestApexes, aiRiders, pickups, powder, ice };
 }

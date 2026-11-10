@@ -3,7 +3,6 @@ import {
   COURSE_LENGTH_SEGMENTS,
   JUMP_REACH_EXTENDED,
   ROCK_LOCK_SEGMENTS,
-  LANE_CHANGE_SEGMENTS,
   LANES,
   OBSTACLE_ROWS_PER_100_END,
   OBSTACLE_ROWS_PER_100_START
@@ -12,6 +11,7 @@ import { Obstacle, ObstacleKind, segmentCentreZ } from '../entities/obstacle';
 import { Prng, randInt } from './prng';
 import type { Segment } from './segment';
 import type { MountainTheme } from './mountain';
+import { gapLaneChangeSegments } from './surface';
 
 const LANE_COUNT = LANES.length;
 const ALL_LANES: number[] = Array.from({ length: LANE_COUNT }, (_, i) => i);
@@ -190,7 +190,10 @@ export function placeObstacles(input: PlacementInput, prng: Prng): Obstacle[] {
     // lanes. Count locked segments in (prevRowSeg, seg] and subtract them.
     const lockedInGap = lockedPrefix[seg + 1] - lockedPrefix[prevRowSeg + 1];
     const steerableGap = Math.max(0, gapSeg - lockedInGap);
-    const maxShift = Math.floor(steerableGap / LANE_CHANGE_SEGMENTS);
+    // Lane-change cost comes from the shared helper (3 segments, or 5 across
+    // any ice). Ice is marked after this pass, so on a fresh course it is the
+    // ordinary 3; the ice pass re-checks every row with the dearer cost.
+    const maxShift = Math.floor(steerableGap / gapLaneChangeSegments(input.segments, prevRowSeg, seg));
     const arrival = dilate(reachable, maxShift);
 
     // A guaranteed-clear lane, chosen from the lanes actually reachable here.

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import {
-  BLIND_LANDING_SEGMENTS, CAMERA_HEIGHT, COURSE_LENGTH_SEGMENTS, DRAW_DISTANCE, JUMP_REACH_EXTENDED, LANES,
+  BLIND_LANDING_SEGMENTS, CAMERA_HEIGHT, COURSE_LENGTH_SEGMENTS, DRAW_DISTANCE, ICE_EDGE_MARGIN_SEGMENTS, ICE_MAX_SEGMENTS,
+  ICE_MIN_SEGMENTS, ICE_TREE_FREE_SEGMENTS, JUMP_REACH_EXTENDED, LANES,
   POWDER_ENTRY_MOGULS_MIN, POWDER_MAX_SEGMENTS, POWDER_MIN_SEGMENTS, SEGMENT_LENGTH
 } from '../src/config';
 import { generateTrack } from '../src/track/generator';
@@ -19,6 +20,8 @@ const layouts = new Set<string>();
 const totals = { forests: 0, ridges: 0, bowls: 0, crests: 0, combatSegments: 0, obstacles: 0 };
 const powderStats = { fields: 0, minLength: Infinity, maxLength: 0, threeMogulFields: 0, hillFields: 0, curveFields: 0,
   minTreeDistanceAfterEntry: Infinity };
+const iceStats = { sheets: 0, minLength: Infinity, maxLength: 0, thinnedSheets: 0, thinnedObstacles: 0, minForestGap: Infinity,
+  minCrestGap: Infinity, withRows: 0 };
 for (let seed = 0; seed < 1000; seed++) {
   const track = generateTrack(seed);
   assert.equal(track.generatorVersion, MOUNTAIN_GENERATOR_VERSION);
@@ -119,9 +122,10 @@ for (let seed = 0; seed < 1000; seed++) {
   // ---- powder fields (#39) ------------------------------------------------
   // Only the six stage bowls carry powder: not the warm-up, forests, ridges or the finish runout.
   const surfaced = track.segments.filter((segment) => segment.surface !== undefined);
-  assert.ok(surfaced.every((segment) => segment.surface === 'powder'), 'only powder is generated so far');
+  assert.ok(surfaced.every((segment) => segment.surface === 'powder' || segment.surface === 'ice'), 'only powder and ice are generated so far');
   assert.equal(track.powder.length, 2, `${seed}: one field in each of the two bowl sections`);
-  assert.equal(surfaced.length, track.powder.reduce((n, f) => n + f.length, 0), 'no powder outside the recorded fields');
+  assert.equal(surfaced.filter((segment) => segment.surface === 'powder').length, track.powder.reduce((n, f) => n + f.length, 0),
+    'no powder outside the recorded fields');
   for (const field of track.powder) {
     const section = track.sections[field.sectionIndex];
     assert.equal(section.theme, 'bowl');
@@ -156,6 +160,45 @@ for (let seed = 0; seed < 1000; seed++) {
     const arenaStart = track.segments.slice(section.startSegment, section.endSegment).findIndex((s) => s.safeZone === 'combat') + section.startSegment;
     if (field.start < arenaStart) powderStats.hillFields++; else powderStats.curveFields++;
   }
+  // ---- ice sheets (#39, part 2) -------------------------------------------
+  // One sheet in each of the two ridge sections and nowhere else: not the warm-up, forests, bowls or runout.
+  assert.equal(track.ice.length, 2, `${seed}: one sheet in each of the two ridge sections`);
+  assert.equal(surfaced.filter((segment) => segment.surface === 'ice').length, track.ice.reduce((n, sheet) => n + sheet.length, 0),
+    'no ice outside the recorded sheets');
+  assert.deepEqual(track.ice.map((sheet) => track.sections[sheet.sectionIndex].theme), ['ridge', 'ridge']);
+  assert.equal(new Set(track.ice.map((sheet) => sheet.sectionIndex)).size, 2, 'exactly one sheet per ridge section');
+  for (const sheet of track.ice) {
+    const section = track.sections[sheet.sectionIndex];
+    const end = sheet.start + sheet.length;
+    assert.ok(sheet.length >= ICE_MIN_SEGMENTS && sheet.length <= ICE_MAX_SEGMENTS, `${seed}: ice length ${sheet.length}`);
+    assert.ok(sheet.start >= section.startSegment && end <= section.endSegment, 'sheet stays inside its ridge');
+    for (let index = sheet.start; index < end; index++) {
+      assert.equal(track.segments[index].surface, 'ice');
+      assert.equal(track.segments[index].safeZone, undefined, 'never over a transition, take-off, apex or landing');
+      assert.equal(surfaceAtZ(track.segments, index * SEGMENT_LENGTH + 1), 'ice');
+    }
+    assert.equal(surfaceAtZ(track.segments, (sheet.start - 1) * SEGMENT_LENGTH + 1), undefined, 'ordinary piste before the sheet');
+    assert.equal(surfaceAtZ(track.segments, end * SEGMENT_LENGTH + 1), undefined, 'ordinary piste after the sheet');
+    // Ice never meets a jump: nobody lands on it, takes off from it or is locked in the air over it.
+    for (const apex of track.crestApexes) {
+      const gap = apex > end ? apex - 9 - end : sheet.start - (apex + BLIND_LANDING_SEGMENTS) - 1;
+      assert.ok(apex - 9 >= end || apex + BLIND_LANDING_SEGMENTS < sheet.start, `${seed}: ice overlaps the jump at ${apex}`);
+      iceStats.minCrestGap = Math.min(iceStats.minCrestGap, gap);
+    }
+    // Tree-free margin: no tree on the ice or within ICE_TREE_FREE_SEGMENTS after it, and no forest begins that close.
+    assert.ok(!track.obstacles.some((o) => o.kind === 'tree' && o.segIndex >= sheet.start && o.segIndex < end + ICE_TREE_FREE_SEGMENTS),
+      `${seed}: tree on or within ${ICE_TREE_FREE_SEGMENTS} segments after ice`);
+    const nextForest = track.sections.find((candidate) => candidate.theme === 'forest' && candidate.startSegment >= end);
+    assert.ok(!nextForest || nextForest.startSegment - end >= ICE_TREE_FREE_SEGMENTS, `${seed}: forest begins too soon after ice`);
+    if (nextForest) iceStats.minForestGap = Math.min(iceStats.minForestGap, nextForest.startSegment - end);
+    assert.ok(!track.segments.slice(sheet.start, end + ICE_TREE_FREE_SEGMENTS).some((segment) => segment.theme === 'forest'));
+    assert.ok(sheet.start - ICE_EDGE_MARGIN_SEGMENTS >= section.startSegment);
+    iceStats.sheets++;
+    iceStats.minLength = Math.min(iceStats.minLength, sheet.length);
+    iceStats.maxLength = Math.max(iceStats.maxLength, sheet.length);
+    if (sheet.thinned > 0) { iceStats.thinnedSheets++; iceStats.thinnedObstacles += sheet.thinned; }
+    if (track.obstacles.some((o) => o.segIndex >= sheet.start && o.segIndex < end)) iceStats.withRows++;
+  }
   layouts.add(JSON.stringify(track.sections));
   totals.crests += track.crestApexes.length;
   totals.obstacles += track.obstacles.length;
@@ -175,8 +218,16 @@ console.log(`PASS powder: ${powderStats.fields} fields over 1,000 seeds (two per
   `${powderStats.hillFields} on the entry hill / ${powderStats.curveFields} on the exit curve, ${powderStats.threeMogulFields} with three entry moguls; ` +
   `nearest tree after any entry mogul: ${powderStats.minTreeDistanceAfterEntry} segments (reach ${JUMP_REACH_EXTENDED}).`);
 
-// Powder must not re-roll anything it does not own. Hashes recorded on `main` before powder existed:
+assert.equal(iceStats.sheets, 2000);
+assert.ok(iceStats.minLength === ICE_MIN_SEGMENTS && iceStats.maxLength === ICE_MAX_SEGMENTS, 'full ice length range is exercised');
+assert.ok(iceStats.minForestGap >= ICE_TREE_FREE_SEGMENTS);
+console.log(`PASS ice: ${iceStats.sheets} sheets over 1,000 seeds (two per mountain, one per ridge), ${iceStats.minLength}-${iceStats.maxLength} segments, ` +
+  `${iceStats.withRows} hold at least one obstacle row; nearest forest after any sheet: ${iceStats.minForestGap} segments (margin ${ICE_TREE_FREE_SEGMENTS}); ` +
+  `nearest jump zone: ${iceStats.minCrestGap} segments; ${iceStats.thinnedSheets} sheets needed obstacles thinned (${iceStats.thinnedObstacles} obstacles).`);
+
+// Powder and ice must not re-roll anything they do not own. Hashes recorded on `main` before powder existed:
 // segments (surface aside), sections, obstacles (minus the entry moguls powder appends) and rival parameters.
+// Ice leaves them all untouched: it is placed where the existing rows already pass its stricter lane-change cost.
 {
   const PINNED_MAIN: Record<number, [string, string, string, string]> = {
     1: ['9a71d3264a2f', '7bbf6d93ca86', '0fe944455bd5', '52ed29de7f9f'],
@@ -194,7 +245,7 @@ console.log(`PASS powder: ${powderStats.fields} fields over 1,000 seeds (two per
       h(t.obstacles.filter((o) => !(o.kind === 'mogul' && entry.has(`${o.segIndex}:${o.lane}`)))), h(t.aiRiders)];
   }
   assert.deepEqual(actual, PINNED_MAIN);
-  console.log('PASS powder leaves geometry, sections, the other obstacles and rival parameters identical to pre-powder courses.');
+  console.log('PASS powder and ice leave geometry, sections, the other obstacles and rival parameters identical to pre-powder courses.');
 }
 
 // Renderer smoke and bounded pools without a DOM/WebGL dependency. Actual
@@ -251,6 +302,16 @@ for (const theme of ['forest', 'ridge', 'bowl'] as MountainTheme[]) {
   const before = drawCalls;
   for (const offset of [-30, -10, -1, 0, 5, 12]) {
     const z = (field.start + offset + 0.25) * SEGMENT_LENGTH;
+    road.render(sample.segments, 0, roadElevationAt(sample.segments, z) + CAMERA_HEIGHT, z, 0xcfe4f5);
+  }
+  assert.ok(drawCalls - before > 0);
+}
+{
+  // The same for an ice sheet: approach, entry threshold, deep inside and leaving it all draw finite geometry.
+  const sheet = sample.ice[0];
+  const before = drawCalls;
+  for (const offset of [-30, -10, -1, 0, 5, 15, sheet.length - 1, sheet.length + 3]) {
+    const z = (sheet.start + offset + 0.25) * SEGMENT_LENGTH;
     road.render(sample.segments, 0, roadElevationAt(sample.segments, z) + CAMERA_HEIGHT, z, 0xcfe4f5);
   }
   assert.ok(drawCalls - before > 0);

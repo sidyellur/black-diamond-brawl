@@ -26,6 +26,8 @@ import { setDeterministicRuntime } from '../src/entities/runtimeRng';
 import { ScoreTracker } from '../src/entities/scoring';
 import { COURSE_VERSION } from '../src/progression/rules';
 import { generateTrack } from '../src/track/generator';
+import { pickupStream, placePickups } from '../src/track/pickupPlacement';
+import { gapLaneChangeSegments } from '../src/track/surface';
 
 const STEP = 1000 / 60;
 let passed = 0;
@@ -65,7 +67,8 @@ test('kind distribution roughly matches the weights', () => {
   assert.ok(courses.every((c) => new Set(c.pickups.map((p) => p.kind)).size >= 2));
 });
 
-/** Independent reachability: tree-only blocking (rocks/moguls are crossable), crest steering locks honoured. */
+/** Independent reachability: tree-only blocking (rocks/moguls are crossable), crest steering locks honoured, and
+ *  the lane-change cost of the shared helper, so a pickup on or after ice is judged at the ice cost (#39). */
 function treeFreeReachable(course: ReturnType<typeof generateTrack>): (seg: number) => Set<number> {
   const locked = new Set<number>();
   for (const apex of course.crestApexes) for (let s = apex; s <= apex + JUMP_REACH_EXTENDED; s++) locked.add(s);
@@ -78,7 +81,7 @@ function treeFreeReachable(course: ReturnType<typeof generateTrack>): (seg: numb
   const shift = (set: Set<number>, from: number, to: number): Set<number> => {
     let steerable = 0;
     for (let s = from + 1; s <= to; s++) if (!locked.has(s)) steerable++;
-    const reach = Math.floor(steerable / LANE_CHANGE_SEGMENTS);
+    const reach = Math.floor(steerable / gapLaneChangeSegments(course.segments, from, to));
     const out = new Set<number>();
     for (const l of set) for (let d = -reach; d <= reach; d++) if (l + d >= 0 && l + d < LANES.length) out.add(l + d);
     return out;
@@ -109,6 +112,25 @@ test('every pickup is collectable without crossing a tree, and sits on a clear l
     }
   }
   console.log(`    ${checked} pickups checked`);
+});
+
+test('pickups on or after ice are reachable at the ice lane-change cost, and the ice cost is what changed them', () => {
+  // Reachability above already uses the shared helper. Here: how many pickups sit where the cost is the ice one,
+  // and how many courses a pickup lane differs from the ordinary-cost placement (placement is the same code with
+  // the surfaces cleared, so it shows exactly what the ice cost altered).
+  let onIceGap = 0; let courseDiffs = 0;
+  for (const [i, course] of courses.entries()) {
+    const plain = placePickups({ obstacles: course.obstacles, crestApexes: course.crestApexes,
+      placeableStart: 100, placeableEnd: course.segments.findIndex((s) => s.safeZone === 'runout') }, pickupStream(i + 1));
+    const rows = [...new Set(course.obstacles.map((o) => o.segIndex))].sort((a, b) => a - b);
+    for (const p of course.pickups) {
+      const before = rows.filter((r) => r < p.segIndex).at(-1) ?? 100;
+      if (gapLaneChangeSegments(course.segments, before, p.segIndex) !== LANE_CHANGE_SEGMENTS) onIceGap++;
+    }
+    if (JSON.stringify(plain.map((p) => [p.segIndex, p.lane, p.kind])) !== JSON.stringify(course.pickups.map((p) => [p.segIndex, p.lane, p.kind]))) courseDiffs++;
+  }
+  console.log(`    ${onIceGap} pickups sit in a gap that touches ice; ${courseDiffs} of ${SEEDS} courses place a pickup differently than with the ordinary cost`);
+  assert.ok(onIceGap > 0, 'the ice cost is exercised by real pickups');
 });
 
 test('pickups sit inside the placeable stretch with the configured spacing', () => {

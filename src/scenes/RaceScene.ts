@@ -725,7 +725,7 @@ export class RaceScene extends Phaser.Scene {
 
     // Scoring reads this frame's settled combat/collision/pickup state —
     // must run after all of the above.
-    this.scoreTracker.update(delta);
+    this.scoreTracker.update(delta, this.playerSurface);
     const feedback = this.scoreTracker.feedback;
     this.boost.addFeedback(feedback.flatMap(e => e.kind === 'settled' ? [] : [e.kind]), counterThisFrame);
     this.boost.observe(this.player);

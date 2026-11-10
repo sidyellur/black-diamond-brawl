@@ -120,6 +120,25 @@ export const POWDER_MAX_SEGMENTS = 25;
 export const POWDER_ENTRY_MOGULS_MIN = 2;
 export const POWDER_ENTRY_MOGULS_MAX = 3;
 
+// Ice sheets (#39): one full-width stretch in each ridge section. A lane change
+// that STARTS on ice takes `ICE_LANE_TWEEN_MS` instead of `LANE_TWEEN_MS` (jumps
+// are unaffected) and a near miss on ice pays `ICE_NEAR_MISS_MULTIPLIER` times.
+export const ICE_LANE_TWEEN_MS = 300;
+export const ICE_NEAR_MISS_MULTIPLIER = 2;
+export const ICE_MIN_SEGMENTS = 20;
+export const ICE_MAX_SEGMENTS = 30;
+/** Segments of ordinary piste kept either side of a sheet inside its open run. */
+export const ICE_EDGE_MARGIN_SEGMENTS = 2;
+/** No tree sits on ice or this many segments after it, and no forest section
+ *  begins within this many segments of a sheet's end. */
+export const ICE_TREE_FREE_SEGMENTS = 10;
+/** Lane-change distance the placement model charges on ice: the whole slide at
+ *  `MAX_SPEED` (300 ms = 900 units = 4.5 segments), rounded up. The ordinary
+ *  `LANE_CHANGE_SEGMENTS` is the same sum for `LANE_TWEEN_MS`. Placement, the
+ *  pickup reachability replay and the solvability verifier all read it through
+ *  `gapLaneChangeSegments` in `track/surface.ts`. */
+export const ICE_LANE_CHANGE_SEGMENTS = Math.ceil((ICE_LANE_TWEEN_MS / 1000) * MAX_SPEED / SEGMENT_LENGTH);
+
 // Obstacle placement / density (design-spec §4.2). Obstacle *rows* per 100
 // segments ramp from START at t=0 to END at t=1 as the difficulty grows.
 export const OBSTACLE_ROWS_PER_100_START = 4;
@@ -225,6 +244,11 @@ export const SHOVE_IMMUNITY_MS = 500;
  * escape* — so trees between 400 u and roughly 1000 u in the destination lane
  * were unavoidable kills, which is precisely what §4.6 promises cannot
  * happen. 5 segments (1000 u) covers the escape plus realistic reaction time.
+ *
+ * On ice the same sum is 300 ms + half of 300 ms = ~1350 u, longer than the
+ * clamp looks. That is safe because no tree stands on ice or within
+ * `ICE_TREE_FREE_SEGMENTS` after it (`scripts/verifyIce.ts` measures the
+ * distance), so the clamp has nothing to find there.
  *
  * `scripts/verifyCombat.ts` asserts this stays above the computed escape
  * distance, so shrinking it fails the build rather than silently

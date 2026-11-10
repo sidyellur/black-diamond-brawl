@@ -15,19 +15,26 @@
  *      accounting for the crest lock (the constructive safety guarantee);
  *   3. no obstacle of any kind in a crest blind-landing window, and no tree in
  *      a mogul's downstream jump-reach window (same lane);
- *   4. same-seed determinism — generating twice yields a byte-identical field.
+ *   4. same-seed determinism — generating twice yields a byte-identical field;
+ *   5. ice (#39): a lane change across ice costs ICE_LANE_CHANGE_SEGMENTS, read
+ *      from the one shared helper `gapLaneChangeSegments` (the generator uses the
+ *      same one, so they cannot disagree; a gap partly on ice is charged the ice
+ *      cost throughout), and no tree stands on ice or within ICE_TREE_FREE_SEGMENTS
+ *      segments after it.
  *
  * Exits non-zero with a clear message if ANY seed fails.
  */
 import {
   BLIND_LANDING_SEGMENTS,
   JUMP_REACH_EXTENDED,
+  ICE_TREE_FREE_SEGMENTS,
   ROCK_LOCK_SEGMENTS,
   LANE_CHANGE_SEGMENTS,
   LANES
 } from '../src/config';
 import { Obstacle } from '../src/entities/obstacle';
 import { generateTrack } from '../src/track/generator';
+import { gapLaneChangeSegments } from '../src/track/surface';
 
 const LANE_COUNT = LANES.length;
 const CENTER_LANE = Math.floor(LANE_COUNT / 2);
@@ -75,6 +82,11 @@ interface SeedResult {
   minReachable: number;
   rowCount: number;
   powderEntryRows?: number;
+  /** Rows whose lane-change gap touches ice and so were walked at the ice cost. */
+  iceCostRows?: number;
+  /** Of those, rows where the ice cost left a smaller reachable set than the ordinary cost would have. */
+  iceBindingRows?: number;
+  iceSegments?: number;
 }
 
 function verifySeed(seed: number): SeedResult {
@@ -122,8 +134,12 @@ function verifySeed(seed: number): SeedResult {
   // Reachability walk from the true initial state: player at CENTER lane,
   // segment 0, with the warm-up straight before the first row.
   let reachable = new Set<number>([CENTER_LANE]);
+  // The same walk at the ordinary cost, only to show where the ice cost bites.
+  let ordinaryReachable = new Set<number>([CENTER_LANE]);
   let prevSeg = 0;
   let minReachable = LANE_COUNT;
+  let iceCostRows = 0;
+  let iceBindingRows = 0;
 
   for (const row of rows) {
     if (row.blocked.size >= LANE_COUNT) {
@@ -133,8 +149,14 @@ function verifySeed(seed: number): SeedResult {
     const gap = row.seg - prevSeg;
     const lockedInGap = countLocked(prevSeg, row.seg);
     const steerable = Math.max(0, gap - lockedInGap);
-    const maxShift = Math.floor(steerable / LANE_CHANGE_SEGMENTS);
+    // A rider can start a lane change anywhere in [prevSeg, row.seg); any ice there charges the whole gap
+    // the ice cost. The helper is the single definition shared with placement.
+    const cost = gapLaneChangeSegments(track.segments, prevSeg, row.seg);
+    const maxShift = Math.floor(steerable / cost);
     const arrival = dilate(reachable, maxShift);
+    const ordinaryArrival = dilate(ordinaryReachable, Math.floor(steerable / LANE_CHANGE_SEGMENTS));
+    ordinaryReachable = new Set([...ordinaryArrival].filter((l) => !row.blocked.has(l)));
+    if (cost !== LANE_CHANGE_SEGMENTS) iceCostRows++;
 
     const clearReachable = new Set<number>();
     for (let l = 0; l < LANE_COUNT; l++) {
@@ -153,8 +175,22 @@ function verifySeed(seed: number): SeedResult {
     }
 
     minReachable = Math.min(minReachable, clearReachable.size);
+    if (cost !== LANE_CHANGE_SEGMENTS && clearReachable.size < ordinaryReachable.size) iceBindingRows++;
     reachable = clearReachable;
     prevSeg = row.seg;
+  }
+
+  // Ice: found from the segments themselves, not from the generator's list. No tree on it or in the margin after it.
+  let iceSegments = 0;
+  for (let index = 0; index < track.segments.length; index++) {
+    if (track.segments[index].surface !== 'ice') continue;
+    iceSegments++;
+    const last = track.segments[index + 1]?.surface !== 'ice';
+    for (const o of track.obstacles) {
+      if (o.kind === 'tree' && (o.segIndex === index || (last && o.segIndex > index && o.segIndex <= index + ICE_TREE_FREE_SEGMENTS))) {
+        return { ok: false, reason: `tree at seg ${o.segIndex} lane ${o.lane} on or within ${ICE_TREE_FREE_SEGMENTS} segments after ice (seg ${index})`, minReachable, rowCount: rows.length };
+      }
+    }
   }
 
   // Crest blind-landing windows: no obstacle of ANY kind in [apex, apex+BLIND].
@@ -197,7 +233,7 @@ function verifySeed(seed: number): SeedResult {
     }
   }
 
-  return { ok: true, minReachable, rowCount: rows.length, powderEntryRows };
+  return { ok: true, minReachable, rowCount: rows.length, powderEntryRows, iceCostRows, iceBindingRows, iceSegments };
 }
 
 function main(): void {
@@ -205,12 +241,18 @@ function main(): void {
   let globalMinReachable = LANE_COUNT;
   let totalRows = 0;
   let totalEntryRows = 0;
+  let totalIceCostRows = 0;
+  let totalIceBinding = 0;
+  let totalIceSegments = 0;
   let firstFailure: { seed: number; reason: string } | null = null;
 
   for (let seed = SEED_START; seed < SEED_START + SEED_COUNT; seed++) {
     const r = verifySeed(seed);
     totalRows += r.rowCount;
     totalEntryRows += r.powderEntryRows ?? 0;
+    totalIceCostRows += r.iceCostRows ?? 0;
+    totalIceBinding += r.iceBindingRows ?? 0;
+    totalIceSegments += r.iceSegments ?? 0;
     globalMinReachable = Math.min(globalMinReachable, r.minReachable);
     if (!r.ok) {
       failures++;
@@ -237,8 +279,9 @@ function main(): void {
   console.log(
     `SOLVABILITY OK: ${SEED_COUNT}/${SEED_COUNT} seeds passed (seeds ${SEED_START}..${lastSeed}).\n` +
       `  total obstacle rows checked: ${totalRows} (including ${totalEntryRows} powder entry-mogul rows, walked like any other row)\n` +
+      `  rows walked at the ICE lane-change cost (gap touches ice): ${totalIceCostRows} over ${totalIceSegments} ice segments; ice cost left a smaller reachable set than the ordinary cost on ${totalIceBinding} of them\n` +
       `  global minimum reachable clear-lane count: ${globalMinReachable} (1 = guarantee is binding, not trivially satisfied)\n` +
-      `  checks per seed: >=1 clear lane/row, reachable clear lane/row (crest-lock aware), crest blind zones clear, mogul jump-reach tree-free, rock no-steer tree-free, same-seed determinism`
+      `  checks per seed: >=1 clear lane/row, reachable clear lane/row (crest-lock and ice-cost aware), tree-free on and after ice, crest blind zones clear, mogul jump-reach tree-free, rock no-steer tree-free, same-seed determinism`
   );
 }
 
