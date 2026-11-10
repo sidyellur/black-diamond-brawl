@@ -23,6 +23,7 @@
     "verify:shove": "node --import tsx scripts/verifyShove.ts",
     "verify:pickups": "node --import tsx scripts/verifyPickups.ts",
     "verify:grudges": "node --import tsx scripts/verifyGrudges.ts",
+    "verify:powder": "node --import tsx scripts/verifyPowder.ts",
     "verify:pacing": "node --import tsx scripts/verifyPacing.ts",
     "ios:sync": "npm run build && cap sync ios",
     "ios:open": "npm run ios:sync && cap open ios",

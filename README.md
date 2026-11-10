@@ -106,6 +106,18 @@ exposed ridge launches with clear landing zones, and broad bowls with space to f
 Warm-up, transitions and finish runout remain protected. Course geometry, setpieces,
 obstacles, pickups and rival decision streams reproduce for a seed.
 
+Terrain rides differently, not just looks different. Each bowl holds one **powder field**,
+15 to 25 segments of deep powder in the entry hill or the exit curve (never the combat arena).
+On the ground, top speed is capped at 80% of normal, and the boost cap shrinks by the same ratio;
+dropping in above the cap bleeds speed off over about half a second rather than snapping.
+Airborne riders ignore powder, and every field opens with moguls in two or three lanes on its
+first segment, so a well-timed trick jump (18 segments of reach) clears most of it. Rivals are
+capped the same way. Powder reads as a bright, wind-rippled surface with blue-grey flecks and softer
+lane lines, and the HUD says **POWDER · JUMP IT** on entry and **PACE CAPPED 80%** beside the
+pace readout. Fields are placed from their own seed-derived stream, so adding them re-rolled
+no geometry, obstacle or rival: the only new obstacles are the entry moguls, and those are
+ordinary placed obstacles that pass the same solvability checks as any other row.
+
 A successful finish saves your fastest **personal ghost**. Replay the same mountain to see its
 translucent rider and signed checkpoint splits at 25%, 50% and 75%. The ghost never collides,
 affects standings or consumes gameplay randomness. Ghosts stay on your device; only the latest

@@ -12,6 +12,7 @@ import {
   MAX_SPEED,
   MOGUL_SPEED_FACTOR,
   MOGUL_STUMBLE_MS,
+  OVERSPEED_DECAY_PER_SECOND,
   PLAYER_ACCEL,
   ROCK_IMMUNITY_MS,
   ROCK_SPEED_FACTOR,
@@ -25,6 +26,8 @@ import {
   TREE_STRIKES_TO_WIPEOUT
 } from '../config';
 import { mulberry32, type Prng } from '../track/prng';
+import type { Surface } from '../track/segment';
+import { surfaceSpeedFactor } from '../track/surface';
 import { Collidable } from './collision';
 import { Obstacle } from './obstacle';
 import { deriveRiderSeed, PERSONALITIES, type RivalPersonality } from './personality';
@@ -115,7 +118,10 @@ export class AIRider implements Collidable {
   get attackTargetFraction(): number { return this.attack.targetFraction; }
   get attackElapsedMs(): number { return this.attack.elapsedMs; }
 
-  update(deltaMs: number, obstacles: Obstacle[], player: Player): void {
+  /** `surface` is the road under THIS rider (`surfaceAtZ`). Powder caps its
+   *  ground speed at the same absolute pace as the player's, catch-up included;
+   *  an airborne rider ignores it. */
+  update(deltaMs: number, obstacles: Obstacle[], player: Player, surface?: Surface): void {
     if (this.wipedOut || this.finishTimeMs !== null) { this.attack.cancel(); return; }
     const dt = Math.max(0, deltaMs);
     this.bumpCooldownMs -= dt;
@@ -124,7 +130,17 @@ export class AIRider implements Collidable {
     if (this.heavyCrashMsRemaining > 0 || this.knockdownMsRemaining > 0) {
       this.speed = 0; // down hard: no sliding or acceleration until the tumble ends
     } else {
-      this.speed = Math.min(this.cruiseSpeedFor(player, dt), this.speed + PLAYER_ACCEL * dt / 1000);
+      const cruise = this.cruiseSpeedFor(player, dt);
+      // Only a slowing surface caps a rival: on piste its cruise (up to 105%,
+      // catch-up included) is untouched, exactly as before powder existed.
+      const factor = surfaceSpeedFactor(surface);
+      const cap = this.airborne || factor >= 1 ? Infinity : MAX_SPEED * factor;
+      if (this.speed > cap) {
+        // Entering powder above its cap: bleed off smoothly, never snap.
+        this.speed = Math.max(Math.min(cruise, cap), this.speed - OVERSPEED_DECAY_PER_SECOND * dt / 1000);
+      } else {
+        this.speed = Math.min(cruise, cap, this.speed + PLAYER_ACCEL * dt / 1000);
+      }
     }
     this.worldZ += this.speed * dt / 1000;
     this.tumbleMsRemaining = Math.max(0, this.tumbleMsRemaining - dt);
@@ -161,7 +177,7 @@ export class AIRider implements Collidable {
     const nativeSpeed = MAX_SPEED * this.params.cruiseSpeedFactor;
     const gap = player.worldZ - this.worldZ;
     if (this.packGraceMs > 0 || this.collisionImmune || this.stumbling || this.hitReacting ||
-        player.wipedOut || player.speed < MAX_SPEED * 0.9) {
+        player.wipedOut || player.speed < MAX_SPEED * player.speedCapFactor * 0.9) {
       this.chasingPack = false;
       return nativeSpeed;
     }

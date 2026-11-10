@@ -33,6 +33,8 @@ import { FixedRaceClock, RaceOptions, createQuickRace, retryRace, normalizeRaceO
 import { menuButton, menuText, menuKeys } from '../frontend/menu';
 import { PRACTICE_LESSON_COUNT, PRACTICE_LESSONS, PracticeObjectives } from '../practice/lessons';
 import { MountainSection, sectionAtZ } from '../track/mountain';
+import type { Surface } from '../track/segment';
+import { surfaceAtZ, surfaceEntryCue } from '../track/surface';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
 import { ShadowRenderer } from '../render/ShadowRenderer';
@@ -144,6 +146,8 @@ export class RaceScene extends Phaser.Scene {
   private frameStruckRiders: AIRider[] = [];
   private reducedMotion = false;
   private boost!: BoostMeter;
+  /** Surface under the player on the last simulated step, for the entry cue and HUD tag. */
+  private playerSurface: Surface | undefined;
   private options!: RaceOptions;
   private mountainSections: MountainSection[] = [];
   private practiceLesson = 0;
@@ -196,6 +200,7 @@ export class RaceScene extends Phaser.Scene {
     this.prevTreeCrashes = 0;
     this.prevStumbling = false;
     this.prevAirborne = false;
+    this.playerSurface = undefined;
 
     // Sits behind the generated sky; only ever visible in the bleed margin a
     // camera shake can expose, so it matches the horizon rather than the old
@@ -509,7 +514,7 @@ export class RaceScene extends Phaser.Scene {
   private configurePractice(): void {
     // Explicit training fixture: real controllers/physics/combat on a forgiving
     // flat run. It never enters career, ghost, daily or cup record paths.
-    for (const segment of this.track) { segment.curve = 0; segment.y = 0; }
+    for (const segment of this.track) { segment.curve = 0; segment.y = 0; segment.surface = undefined; }
     this.obstacles.splice(0);
     this.pickups.splice(0);
     this.crestApexZs = [];
@@ -631,7 +636,11 @@ export class RaceScene extends Phaser.Scene {
     }
 
     const prevZ = this.player.worldZ;
-    this.player.update(delta, this.boost.active);
+    const surface = surfaceAtZ(this.track, this.player.worldZ);
+    this.player.update(delta, this.boost.active, surface);
+    const cue = surfaceEntryCue(this.playerSurface, surface);
+    this.playerSurface = surface;
+    if (cue) this.hud.showSurfaceCue(cue);
 
     // Crest auto-launch (§4.3): crossing a jumpable crest's apex fires an
     // extended trick jump with NO jump press — the crest acts as a ramp. No
@@ -655,7 +664,7 @@ export class RaceScene extends Phaser.Scene {
     // collisions are checked, never rider-vs-rider.
     for (let i = 0; i < this.aiRiders.length; i++) {
       const rider = this.aiRiders[i];
-      rider.update(delta, this.obstacles, this.player);
+      rider.update(delta, this.obstacles, this.player, surfaceAtZ(this.track, rider.worldZ));
       if (this.finishSegment && rider.finishTimeMs === null && rider.worldZ >= this.finishSegment.z) {
         rider.finishTimeMs = time;
       }
@@ -802,6 +811,7 @@ export class RaceScene extends Phaser.Scene {
     const courseLength = (this.finishSegment?.z ?? COURSE_LENGTH_SEGMENTS * SEGMENT_LENGTH) - PLAYER_START_Z;
     this.hud.update({
       sectionName: this.practiceObjective ? 'TRAINING SLOPE' : sectionAtZ(this.mountainSections, this.player.worldZ)?.name,
+      surface: this.playerSurface,
       modeLabel: this.options.mode === 'daily' ? `DAILY ${this.options.dailyDate} UTC` : this.options.mode === 'cup' ? `CUP · RACE ${(this.options.roundIndex ?? 0) + 1} / 3` : this.practiceObjective ? 'PRACTICE' : this.options.dailyDate ? `${this.options.dailyDate} · PRACTICE` : 'MOUNTAIN RUN',
       incomingAttack: this.combat.incomingAttack ? 'WIND UP' : undefined,
       counterReady: this.combat.counterReady,

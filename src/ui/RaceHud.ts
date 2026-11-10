@@ -4,6 +4,8 @@ import { UI } from '../render/palette';
 import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
 import { isAppActive } from '../input/appLifecycle';
+import type { Surface } from '../track/segment';
+import { SURFACE_LABELS, surfaceSpeedFactor } from '../track/surface';
 
 const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
 
@@ -38,6 +40,8 @@ export interface HudState {
   chain: number;
   chainRemaining: number;
   sectionName?: string;
+  /** Riding surface under the player; drives the persistent tag under the pace readout. */
+  surface?: Surface;
   modeLabel?: string;
   ghostSplit?: string;
   incomingAttack?: string;
@@ -74,11 +78,13 @@ export class RaceHud {
   private readonly clock: Phaser.GameObjects.Text;
   private readonly score: Phaser.GameObjects.Text;
   private readonly speed: Phaser.GameObjects.Text;
+  private readonly surfaceTag: Phaser.GameObjects.Text;
   private readonly attack: Phaser.GameObjects.Text;
   private readonly progress: Phaser.GameObjects.Text;
   private readonly status: Phaser.GameObjects.Text;
   private readonly chain: Phaser.GameObjects.Text;
   private readonly message: Phaser.GameObjects.Text;
+  private readonly surfaceCue: Phaser.GameObjects.Text;
   private readonly pauseOverlay: Phaser.GameObjects.Container;
   private readonly countdown: Phaser.GameObjects.Text;
   private readonly taunt: Phaser.GameObjects.Container;
@@ -98,6 +104,7 @@ export class RaceHud {
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private messageMs = 0;
+  private surfaceCueMs = 0;
   private readonly raceControls: Phaser.GameObjects.GameObject[] = [];
   private readonly releaseTouchControls: Array<() => void> = [];
   private readonly cancelButtons: Array<() => void> = [];
@@ -125,6 +132,7 @@ export class RaceHud {
     this.graphics = scene.add.graphics().setDepth(10001);
     this.objects.push(this.graphics);
     this.speed = this.text(30, SCREEN_H - 86, '', 22, UI.panel, true);
+    this.surfaceTag = this.text(30, SCREEN_H - 60, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
     this.attack = this.text(SCREEN_W / 2, SCREEN_H - 31, '', 14, UI.inkHigh, true).setOrigin(0.5);
     const helpBg = scene.add.rectangle(SCREEN_W / 2, SCREEN_H - 30, 464, 30, UI.panel, 0.88).setDepth(9999);
     this.objects.push(helpBg);
@@ -134,6 +142,10 @@ export class RaceHud {
     this.shieldText = this.text(HELD_X + 136, HELD_Y + 7, 'SHIELD', 12, UI.inkHigh, true);
     this.message = this.text(SCREEN_W / 2, 151, '', 21, UI.accentWarn, true).setOrigin(0.5);
     this.message.setStroke(hex(UI.panel), 5);
+    // The surface-entry cue has its own line under the message, so a close call
+    // or a pickup right at the entry cannot overwrite it.
+    this.surfaceCue = this.text(SCREEN_W / 2, 184, '', 19, UI.accentInfo, true).setOrigin(0.5).setAlpha(0);
+    this.surfaceCue.setStroke(hex(UI.panel), 5);
     this.countdown = this.text(SCREEN_W / 2, SCREEN_H * 0.42, '', 72, UI.inkHigh, true).setOrigin(0.5).setStroke(hex(UI.panel), 8);
     // Start-line taunt: below the countdown digit and above the hint bar, so it
     // never touches the "3-2-1", the hint line or the control hints.
@@ -181,6 +193,7 @@ export class RaceHud {
       // the bottom row stays clear of the hint bar.
       held(898, 'SHOVE', 'push', SCREEN_H - 43 - 76);
       this.speed.setPosition(30, SCREEN_H - 104);
+      this.surfaceTag.setPosition(30, SCREEN_H - 78);
       helpBg.setSize(420, 30);
     } else {
       this.text(30, SCREEN_H - 42, 'ARROWS / A D  STEER', 10, UI.panel, true);
@@ -255,9 +268,18 @@ export class RaceHud {
     this.messageMs = 1500;
   }
 
+  /** Entry cue for a new riding surface (e.g. "POWDER · JUMP IT"), shown a little
+   *  longer than an ordinary message because it is advice about the next few seconds. */
+  showSurfaceCue(text: string): void {
+    this.surfaceCue.setText(text);
+    this.surfaceCueMs = 2400;
+  }
+
   tick(delta: number): void {
     this.messageMs = Math.max(0, this.messageMs - delta);
     this.message.setAlpha(Math.min(1, this.messageMs / 350));
+    this.surfaceCueMs = Math.max(0, this.surfaceCueMs - delta);
+    this.surfaceCue.setAlpha(Math.min(1, this.surfaceCueMs / 400));
   }
 
   setPaused(paused: boolean): void {
@@ -353,6 +375,10 @@ export class RaceHud {
     this.clock.setText(formatTime(s.elapsedMs / 1000));
     this.score.setText(Math.round(s.score).toLocaleString('en-US'));
     this.speed.setText(`${Math.round(s.speed * 100)}%  PACE`);
+    // A surface that caps pace says so in words next to the readout it changes.
+    this.surfaceTag.setText(s.surface
+      ? `${SURFACE_LABELS[s.surface]} · ${s.airborne ? 'AIRBORNE · NO DRAG' : `PACE CAPPED ${Math.round(surfaceSpeedFactor(s.surface) * 100)}%`}`
+      : '');
     this.progress.setText(`${s.modeLabel ?? 'MOUNTAIN RUN'}   ${Math.min(100, Math.floor(s.progress * 100))}%`);
     this.section.setText(s.sectionName ?? '');
     this.split.setText(s.ghostSplit ?? '');

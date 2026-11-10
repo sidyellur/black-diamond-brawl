@@ -74,6 +74,7 @@ interface SeedResult {
   reason?: string;
   minReachable: number;
   rowCount: number;
+  powderEntryRows?: number;
 }
 
 function verifySeed(seed: number): SeedResult {
@@ -104,6 +105,19 @@ function verifySeed(seed: number): SeedResult {
     }
     return n;
   };
+
+  // Powder (#39) needs no change to the lane-change model: it only slows riders. Its one rule is that the
+  // entry moguls are ordinary placed obstacles. This verifier never reads the powder list to skip them: it
+  // finds them in the obstacle rows it walks below, and here only confirms they are really in that field.
+  let powderEntryRows = 0;
+  for (const field of track.powder) {
+    const row = rows.find((r) => r.seg === field.start);
+    const moguls = row?.obstacles.filter((o) => o.kind === 'mogul').map((o) => o.lane).sort() ?? [];
+    if (!row || moguls.length < 2 || JSON.stringify(moguls) !== JSON.stringify([...field.moguls].sort())) {
+      return { ok: false, reason: `powder entry at seg ${field.start} is not a row of >=2 placed moguls in the obstacle field`, minReachable: 0, rowCount: rows.length };
+    }
+    powderEntryRows++;
+  }
 
   // Reachability walk from the true initial state: player at CENTER lane,
   // segment 0, with the warm-up straight before the first row.
@@ -183,18 +197,20 @@ function verifySeed(seed: number): SeedResult {
     }
   }
 
-  return { ok: true, minReachable, rowCount: rows.length };
+  return { ok: true, minReachable, rowCount: rows.length, powderEntryRows };
 }
 
 function main(): void {
   let failures = 0;
   let globalMinReachable = LANE_COUNT;
   let totalRows = 0;
+  let totalEntryRows = 0;
   let firstFailure: { seed: number; reason: string } | null = null;
 
   for (let seed = SEED_START; seed < SEED_START + SEED_COUNT; seed++) {
     const r = verifySeed(seed);
     totalRows += r.rowCount;
+    totalEntryRows += r.powderEntryRows ?? 0;
     globalMinReachable = Math.min(globalMinReachable, r.minReachable);
     if (!r.ok) {
       failures++;
@@ -220,7 +236,7 @@ function main(): void {
   // eslint-disable-next-line no-console
   console.log(
     `SOLVABILITY OK: ${SEED_COUNT}/${SEED_COUNT} seeds passed (seeds ${SEED_START}..${lastSeed}).\n` +
-      `  total obstacle rows checked: ${totalRows}\n` +
+      `  total obstacle rows checked: ${totalRows} (including ${totalEntryRows} powder entry-mogul rows, walked like any other row)\n` +
       `  global minimum reachable clear-lane count: ${globalMinReachable} (1 = guarantee is binding, not trivially satisfied)\n` +
       `  checks per seed: >=1 clear lane/row, reachable clear lane/row (crest-lock aware), crest blind zones clear, mogul jump-reach tree-free, rock no-steer tree-free, same-seed determinism`
   );

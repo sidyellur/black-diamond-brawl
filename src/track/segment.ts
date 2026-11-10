@@ -1,6 +1,11 @@
 import { SEGMENT_LENGTH } from '../config';
 import type { MountainSafeZone, MountainSetpiece, MountainTheme } from './mountain';
 
+/** What the road is made of, where it differs from groomed snow (#39). Absent
+ *  means ordinary piste. `'ice'` is reserved for the ridge terrain that follows
+ *  powder; the generator only produces `'powder'` today. */
+export type Surface = 'powder' | 'ice';
+
 // A single slice of road (design-spec §3.1).
 export interface Segment {
   /** Position of this segment in the track array. */
@@ -27,6 +32,8 @@ export interface Segment {
   safeZone?: MountainSafeZone;
   /** Intended alternating forest gate lane, verified by the placement DP. */
   slalomLane?: number;
+  /** Riding surface under this segment; absent on ordinary piste. */
+  surface?: Surface;
 }
 
 /**
