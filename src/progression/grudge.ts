@@ -153,7 +153,7 @@ export const TAUNTS: Record<RivalPersonality, Record<TauntContext, readonly stri
     'grudge-2': [
       'You got lucky last time. Not twice.',
       'I have been waiting all day for this.',
-      'This lane is mine and so are you.',
+      'This lane is mine. So is this race.',
       'Hope you wrote your goodbyes. Going in.'
     ],
     'player-owes': [
