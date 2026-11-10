@@ -21,6 +21,9 @@ export interface ScoreBreakdown {
   knockoutPoints: number;
   brushCount: number;
   brushPoints: number;
+  /** Directional shoves (G / L): 100 each, plus any knockout they cause. */
+  pushCount: number;
+  pushPoints: number;
   nearMissCount: number;
   nearMissPoints: number;
   trickJumpCount: number;
@@ -65,7 +68,7 @@ const POSITION_BONUS_BY_PLACE: Record<number, number> = {
 export interface ScoreEvent {
   label: string;
   points: number;
-  kind: 'hit' | 'brush' | 'knockout' | 'near' | 'trick';
+  kind: 'hit' | 'brush' | 'push' | 'knockout' | 'near' | 'trick';
 }
 
 const FLOW_WINDOW_MS = 4200;
@@ -79,6 +82,7 @@ export class ScoreTracker {
   private combatHitCount = 0;
   private knockoutCount = 0;
   private brushCount = 0;
+  private pushCount = 0;
   private nearMissCount = 0;
   private trickJumpCount = 0;
   private trickJumpPoints = 0;
@@ -134,7 +138,7 @@ export class ScoreTracker {
   }
 
   /**
-   * Deliberate attack = 250, passive body check = 50, knockout = 500 ON TOP
+   * Deliberate attack = 250, directional shove = 100, passive body check = 50, knockout = 500 ON TOP
    * of whichever caused it (§4.7). All three arrive as separate events from
    * `CombatSystem`, so summing them is all that is needed.
    *
@@ -147,6 +151,9 @@ export class ScoreTracker {
       if (event.type === 'hit') {
         this.combatHitCount++;
         this.award('hit', 'CLEAN HIT', POINTS.COMBAT_HIT);
+      } else if (event.type === 'push') {
+        this.pushCount++;
+        this.award('push', 'SHOVE', POINTS.PUSH);
       } else if (event.type === 'brush') {
         this.brushCount++;
         this.award('brush', 'BODY CHECK', POINTS.COMBAT_BRUSH);
@@ -289,6 +296,8 @@ export class ScoreTracker {
       knockoutPoints: this.knockoutCount * POINTS.KNOCKOUT,
       brushCount: this.brushCount,
       brushPoints: this.brushCount * POINTS.COMBAT_BRUSH,
+      pushCount: this.pushCount,
+      pushPoints: this.pushCount * POINTS.PUSH,
       nearMissCount: this.nearMissCount,
       nearMissPoints: this.nearMissCount * POINTS.NEAR_MISS,
       trickJumpCount: this.trickJumpCount,

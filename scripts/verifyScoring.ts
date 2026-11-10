@@ -43,7 +43,7 @@ function rig(obstacles: Obstacle[] = [], riders: AIRider[] = []) {
   return { player, collisions, combat, score, emit };
 }
 function categoryTotal(score: ScoreBreakdown): number {
-  return score.combatHitPoints + score.brushPoints + score.knockoutPoints +
+  return score.combatHitPoints + score.brushPoints + score.pushPoints + score.knockoutPoints +
     score.nearMissPoints + score.trickJumpPoints + score.chainBonusPoints;
 }
 
@@ -365,6 +365,22 @@ check('real passive contact remains a fifth-value brush and spends no pole charg
   assert.equal(POINTS.COMBAT_BRUSH, POINTS.COMBAT_HIT / 5);
   assert.equal(score.feedback[0].kind, 'brush');
   assert.equal(player.swinging, false);
+});
+check('a directional shove scores 100 as its own category, chains Flow like a hit, and keeps the sums exact', () => {
+  const { score, emit } = rig();
+  emit('push');
+  assert.deepEqual(score.feedback, [{ kind: 'push', label: 'SHOVE', points: POINTS.PUSH }]);
+  assert.equal(POINTS.PUSH, 100);
+  assert.equal(score.chain, 1, 'a shove starts Flow');
+  emit('hit'); emit('push'); emit('push'); emit('push');
+  assert.equal(score.chain, 5);
+  const result = score.finalize(false, 9000, 5);
+  assert.equal(result.pushCount, 4);
+  assert.equal(result.pushPoints, 400);
+  assert.equal(result.combatHitCount, 1);
+  assert.equal(result.brushCount, 0);
+  assert.equal(result.eventTotal, categoryTotal(result), 'the breakdown rows sum to the event total');
+  assert.ok(result.chainBonusPoints > 0, 'the fifth event pays a Flow bonus');
 });
 console.log(`\n=== ${passed} scoring checks passed; ${failed} failed ===\n`);
 if (failed) process.exitCode = 1;

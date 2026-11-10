@@ -62,6 +62,8 @@ export class AIRider implements Collidable {
   treeStrikes = 0;
   /** Increments on every tree contact, so combat can credit a first-strike crash. */
   treeCrashSerial = 0;
+  /** Increments on every rock contact; the practice shove lesson reads it. */
+  rockHitSerial = 0;
   private heavyCrashMsRemaining = 0;
   /** Stagger pips taken from the player's hits (0..STAGGER_MAX - 1 while up). */
   stagger = 0;
@@ -240,6 +242,7 @@ export class AIRider implements Collidable {
   }
 
   hitRock(): void {
+    this.rockHitSerial++;
     this.preserveSetback();
     this.speed *= ROCK_SPEED_FACTOR;
     this.tumbleMsRemaining = ROCK_TUMBLE_MS;

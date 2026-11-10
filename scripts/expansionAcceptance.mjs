@@ -19,7 +19,7 @@ const ready = () => page.waitForFunction(() => { const s = window.__game.scene.g
 const shot = name => page.screenshot({ path: `.verify/expansion-${name}.png` });
 const tap = async (x,y) => { const b = await page.locator('canvas').boundingBox(); await page.mouse.click(b.x+x*b.width/960,b.y+y*b.height/540); };
 try {
-  phase = 'three real-input practice lessons';
+  phase = 'four real-input practice lessons';
   await page.goto(`${base}/?seed=42`, { waitUntil: 'networkidle' }); await scene('TitleScene');
   await page.keyboard.press('KeyP'); await scene('RaceScene'); await shot('practice-countdown'); await ready();
   check('bully lesson teaches the real roster identity SLATE', await page.evaluate(() => window.__game.scene.getScene('RaceScene').aiRiders[0].params.name==='SLATE'));
@@ -47,8 +47,20 @@ try {
   check('daredevil lesson teaches the real roster identity EMBER', await page.evaluate(() => window.__game.scene.getScene('RaceScene').aiRiders[0].params.name==='EMBER'));
   await page.waitForFunction(() => { const s = window.__game.scene.getScene('RaceScene'); const dz = s.practiceMogulZ-s.player.worldZ; return dz <= 350 && dz > 80; });
   await page.keyboard.press('Space');
-  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').practiceComplete);
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').practiceLesson === 3);
   check('real jump and landing finish the daredevil lesson', true);
+  await ready();
+  check('shove lesson is the fourth of four and has a passive rival beside one rock', await page.evaluate(() => {
+    const s = window.__game.scene.getScene('RaceScene');
+    return s.practiceLesson === 3 && s.aiRiders.length === 1 && s.aiRiders[0].params.aggression === 0 &&
+      s.obstacles.length === 1 && s.obstacles[0].kind === 'rock' && s.obstacles[0].lane === 0 && s.aiRiders[0].laneIndex === 1;
+  }));
+  // Wait for the "!" cue (a rock in the lane a shove would send the rival to), then press the real key.
+  await page.waitForFunction(() => { const s = window.__game.scene.getScene('RaceScene'); const t = s.combat.pushTarget; return t && s.combat.pushPlan(t, 0).hazard === 'rock'; });
+  await shot('practice-shove-cue');
+  await page.keyboard.press('KeyG');
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').practiceComplete);
+  check('a real SHOVE key press into the rock finishes the shove lesson', true);
   await shot('practice-complete');
   check('practice completion is idempotent even at batched frame rates', await page.evaluate(() => {
     const s=window.__game.scene.getScene('RaceScene'); s.finishPractice(); s.update(0,50);

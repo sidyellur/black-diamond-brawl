@@ -16,7 +16,7 @@ import {
 import { AIRider } from '../entities/aiRider';
 import { AIRiderRenderer } from '../entities/aiRiderRenderer';
 import { CollisionSystem, isMogulLaunchAvailable } from '../entities/collision';
-import { CombatSystem } from '../entities/combat';
+import { CombatSystem, type PushPlan } from '../entities/combat';
 import { bindPlayerInput, PlayerInput } from '../entities/input';
 import { Obstacle } from '../entities/obstacle';
 import { ObstacleRenderer } from '../entities/obstacleRenderer';
@@ -30,7 +30,7 @@ import { FixedRaceClock, RaceOptions, createQuickRace, retryRace, normalizeRaceO
   recordRun, awardRun, completeCupRound, GhostRecorder, GhostRecording, loadGhost, saveGhost,
   sampleGhost, CheckpointTracker, checkpointWorldZs } from '../progression';
 import { menuButton, menuText, menuKeys } from '../frontend/menu';
-import { PRACTICE_LESSONS, PracticeObjectives } from '../practice/lessons';
+import { PRACTICE_LESSON_COUNT, PRACTICE_LESSONS, PracticeObjectives } from '../practice/lessons';
 import { MountainSection, sectionAtZ } from '../track/mountain';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
@@ -140,6 +140,7 @@ export class RaceScene extends Phaser.Scene {
   private practiceAdvanceAt = 0;
   private practiceMogulZ = 0;
   private practiceLaunched = false;
+  private practiceRockHits = 0;
   private counterCount = 0;
   private practiceComplete = false;
   private ghost: GhostRecording | null = null;
@@ -190,11 +191,12 @@ export class RaceScene extends Phaser.Scene {
 
     this.seed = data?.seed ?? resolveSeed();
     this.options = normalizeRaceOptions(data?.mode && data.runId ? data as RaceOptions : { ...createQuickRace(this.seed), ...data, seed: this.seed });
-    this.practiceLesson = Math.max(0, Math.min(2, data?.practiceLesson ?? 0));
+    this.practiceLesson = Math.max(0, Math.min(PRACTICE_LESSON_COUNT - 1, data?.practiceLesson ?? 0));
     this.practiceObjective = this.options.mode === 'practice' && !this.options.dailyDate ? new PracticeObjectives(this.practiceLesson) : null;
     this.practiceFeedback = data?.practiceFeedback ?? PRACTICE_LESSONS[this.practiceLesson].hint;
     this.practiceAdvanceAt = 0;
     this.practiceLaunched = false;
+    this.practiceRockHits = 0;
     this.counterCount = 0;
     this.practiceComplete = false;
     const generated = generateTrack(this.seed);
@@ -489,19 +491,27 @@ export class RaceScene extends Phaser.Scene {
     this.obstacles.splice(0);
     this.pickups.splice(0);
     this.crestApexZs = [];
-    const personality = (['bully', 'line-defender', 'daredevil'] as const)[this.practiceLesson];
+    const personality = (['bully', 'line-defender', 'daredevil', 'bully'] as const)[this.practiceLesson];
     // Teach the same named personalities the player will meet in every race.
-    const rosterIndex = [1, 0, 3][this.practiceLesson];
+    const rosterIndex = [1, 0, 3, 2][this.practiceLesson];
     const rider = new AIRider({ ...this.aiRiders[rosterIndex].params, personality, behaviorSeed: 700 + this.practiceLesson,
       startLane: this.practiceLesson === 1 ? 2 : 1,
+      // The shove lesson's rival is passive and does not react to the rock, so
+      // the lesson tests where you push it, not whether it dodges.
+      ...(this.practiceLesson === 3 ? { reactionDistanceSegments: 1 } : {}),
       startZOffset: PLAYER_START_Z + (this.practiceLesson === 1 ? 600 : this.practiceLesson === 2 ? 700 : 90),
-      aggression: this.practiceLesson === 0 ? 0 : 0.9,
+      aggression: this.practiceLesson === 0 || this.practiceLesson === 3 ? 0 : 0.9,
       cruiseSpeedFactor: this.practiceLesson === 1 ? 0.92 : 1 });
     this.aiRiders.splice(0, this.aiRiders.length, rider);
     this.aiCollisions = [new CollisionSystem()];
     this.player.speed = MAX_SPEED;
     rider.speed = MAX_SPEED * rider.params.cruiseSpeedFactor;
     this.practiceMogulZ = PLAYER_START_Z + 5400;
+    if (this.practiceLesson === 3) {
+      // One rock in the lane beside the rival, on the side away from the player.
+      const rockZ = PLAYER_START_Z + 10500;
+      this.obstacles.push({ kind: 'rock', lane: 0, z: rockZ, segIndex: Math.floor(rockZ / SEGMENT_LENGTH) });
+    }
     if (this.practiceLesson === 2) {
       this.obstacles.push({ kind: 'mogul', lane: 2, z: this.practiceMogulZ, segIndex: Math.floor(this.practiceMogulZ / SEGMENT_LENGTH) },
         { kind: 'mogul', lane: 1, z: this.practiceMogulZ - 200, segIndex: Math.floor((this.practiceMogulZ - 200) / SEGMENT_LENGTH) });
@@ -520,14 +530,20 @@ export class RaceScene extends Phaser.Scene {
       if (this.player.airborne && this.player.extendedJump && this.player.worldZ >= this.practiceMogulZ - 800) objective.jumped = true;
       if (objective.jumped && !this.player.airborne && this.player.worldZ > this.practiceMogulZ && !this.player.stumbling) objective.landed = true;
     }
+    if (this.practiceLesson === 3) {
+      if (this.combat.events.some((event) => event.type === 'push')) objective.shoved(this.elapsedRaceMs);
+      if (rider.rockHitSerial > this.practiceRockHits) objective.rivalHitRock(this.elapsedRaceMs);
+      this.practiceRockHits = rider.rockHitSerial;
+    }
     if (objective.complete && this.practiceAdvanceAt === 0) {
-      this.practiceFeedback = this.practiceLesson === 0 ? 'COUNTER LANDED! You turned their attack against them.' : this.practiceLesson === 1 ? 'CLEAN PASS! You kept your speed and avoided the fight.' : 'TRICK LANDED! You are ready for the circuit.';
+      this.practiceFeedback = ['COUNTER LANDED! You turned their attack against them.', 'CLEAN PASS! You kept your speed and avoided the fight.',
+        'TRICK LANDED! One more lesson to go.', 'SHOVED INTO THE ROCK! You are ready for the circuit.'][this.practiceLesson];
       this.practiceAdvanceAt = this.elapsedRaceMs + 1400;
       this.hud.showMessage('LESSON COMPLETE', UI.accentGood);
       this.audio.play('score');
     }
     if (this.practiceAdvanceAt && this.elapsedRaceMs >= this.practiceAdvanceAt) {
-      if (this.practiceLesson < 2) {
+      if (this.practiceLesson < PRACTICE_LESSON_COUNT - 1) {
         this.raceOver = true;
         this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson + 1 });
       } else this.finishPractice();
@@ -537,7 +553,7 @@ export class RaceScene extends Phaser.Scene {
     if (!objective.complete && (this.elapsedRaceMs > 8500 || this.player.treeStrikes > 0)) {
       this.raceOver = true;
       this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson,
-        practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : 'Try again: stay in the center and JUMP just before the mound.' });
+        practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : this.practiceLesson === 2 ? 'Try again: stay in the center and JUMP just before the mound.' : 'Try again: ride beside the rival and press SHOVE when the "!" appears.' });
       return true;
     }
     return false;
@@ -554,7 +570,7 @@ export class RaceScene extends Phaser.Scene {
     const before = new Set(this.children.list);
     this.add.rectangle(480, 270, 960, 540, UI.panel, 0.96).setDepth(12000);
     menuText(this, 480, 137, 'READY FOR THE CIRCUIT', 34, UI.accentGood, true).setOrigin(0.5).setDepth(12001);
-    menuText(this, 480, 212, 'Read the bully. Pass the defender. Fly with the daredevil.', 18, UI.inkHigh, true).setOrigin(0.5).setDepth(12001);
+    menuText(this, 480, 212, 'Read the bully. Pass the defender. Fly with the daredevil. Shove them into the rocks.', 18, UI.inkHigh, true).setOrigin(0.5).setDepth(12001);
     menuText(this, 480, 254, 'Practice complete · No scores or records were changed.', 14, UI.inkMid).setOrigin(0.5).setDepth(12001);
     const replay = () => this.scene.restart({ ...this.options, practiceLesson: 0 });
     const lodge = () => this.scene.start('TitleScene');
@@ -585,6 +601,9 @@ export class RaceScene extends Phaser.Scene {
       !this.player.wipedOut && !this.player.tumbling && !this.player.airborne);
     if (this.playerInput.attackJustPressed()) {
       this.combat.attemptAttack(time);
+    }
+    if (this.playerInput.pushJustPressed()) {
+      this.combat.attemptPush(time, this.playerInput.heldDirection());
     }
 
     const prevZ = this.player.worldZ;
@@ -671,7 +690,7 @@ export class RaceScene extends Phaser.Scene {
     this.boost.addFeedback(feedback.map(e => e.kind), counterThisFrame);
     this.boost.observe(this.player);
     if (feedback.length > 0) {
-      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit') ?? feedback[feedback.length - 1];
+      const primary = feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit' || e.kind === 'push') ?? feedback[feedback.length - 1];
       const total = feedback.reduce((sum, e) => sum + e.points, 0);
       this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
       if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
@@ -763,6 +782,9 @@ export class RaceScene extends Phaser.Scene {
       progress: Phaser.Math.Clamp((this.player.worldZ - PLAYER_START_Z) / courseLength, 0, 1),
       charges: this.player.weaponCharges,
       attackCooldown: this.combat.attackCooldownFraction,
+      pushCooldown: this.combat.pushCooldownFraction,
+      push: this.combat.pushTarget !== null,
+      pushHazard: this.pushPreview()?.hazard ?? null,
       target: this.combat.target !== null,
       targetAdvantage: this.player.armed || this.player.speed >= (this.combat.target?.speed ?? Infinity),
       boost: { value: this.boost.value, active: this.boost.active, ready: this.boost.ready },
@@ -894,7 +916,8 @@ export class RaceScene extends Phaser.Scene {
     drawnSegments: Map<number, DrawnSegment>
   ): void {
     this.targetMarker.clear();
-    const target = this.combat.target;
+    const push = this.pushPreview();
+    const target = this.combat.target ?? (push ? this.combat.pushTarget : null);
     if (!target) {
       return;
     }
@@ -922,6 +945,49 @@ export class RaceScene extends Phaser.Scene {
     this.targetMarker.lineTo(x + w * 0.34, y);
     this.targetMarker.closePath();
     this.targetMarker.fillPath();
+    if (push && this.combat.pushTarget === target) this.drawPushArrow(x, y, w, push);
+  }
+
+  /** What a shove would do to the current push target, with the held steer key. */
+  private pushPreview(): (PushPlan & { rider: AIRider }) | null {
+    const rider = this.combat.pushTarget;
+    return rider ? { ...this.combat.pushPlan(rider, this.playerInput.heldDirection()), rider } : null;
+  }
+
+  /**
+   * The shove cue beside the chevron: an arrow pointing the way a shove would
+   * push, with a bold "!" bar inside a plate when a tree or rock is waiting in
+   * the destination lane. The "!" is a shape, so the cue never depends on colour.
+   */
+  private drawPushArrow(x: number, y: number, w: number, plan: PushPlan): void {
+    const g = this.targetMarker;
+    const dir = plan.direction;
+    const size = Math.max(10, w * 0.36);
+    const cx = x + dir * (w * 0.62 + size * 0.5);
+    // Beside the rider's board, a little above the chevron, so the cockpit panels
+    // along the bottom edge are less likely to cover it.
+    const cy = y - w * 0.3;
+    const hazard = plan.hazard !== null;
+    g.fillStyle(UI.panel, 0.9);
+    g.fillRoundedRect(cx - size * 0.95, cy - size * 0.62, size * 1.9, size * 1.24, size * 0.2);
+    g.fillStyle(hazard ? UI.accentBad : UI.inkHigh, 1);
+    g.beginPath();
+    g.moveTo(cx + dir * size * 0.75, cy);
+    g.lineTo(cx + dir * size * 0.15, cy - size * 0.45);
+    g.lineTo(cx + dir * size * 0.15, cy - size * 0.17);
+    g.lineTo(cx - dir * size * 0.5, cy - size * 0.17);
+    g.lineTo(cx - dir * size * 0.5, cy + size * 0.17);
+    g.lineTo(cx + dir * size * 0.15, cy + size * 0.17);
+    g.lineTo(cx + dir * size * 0.15, cy + size * 0.45);
+    g.closePath();
+    g.fillPath();
+    if (hazard) {
+      // A "!" mark above the arrow: bar plus dot, on the plate.
+      const bx = cx - dir * size * 0.78;
+      g.fillStyle(UI.accentWarn, 1);
+      g.fillRect(bx - size * 0.07, cy - size * 0.5, size * 0.14, size * 0.6);
+      g.fillRect(bx - size * 0.07, cy + size * 0.2, size * 0.14, size * 0.14);
+    }
   }
 
   /**

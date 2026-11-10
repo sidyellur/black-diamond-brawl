@@ -5,6 +5,10 @@ import {
   COLLISION_LANE_FRACTION,
   KNOCKOUT_WINDOW_MS,
   LANES,
+  PUSH_COOLDOWN_MS,
+  PUSH_HAZARD_LOOKAHEAD_MS,
+  PUSH_SPEED_LOSS,
+  PUSH_SWING_MS,
   SEGMENT_LENGTH,
   SHOVE_IMMUNITY_MS,
   SHOVE_SPEED_LOSS_FACTOR,
@@ -36,7 +40,20 @@ const LANE_COUNT = LANES.length;
  * trees within `KNOCKOUT_WINDOW_MS` of the loss, and is paid on top of
  * whichever of the two caused it.
  */
-export type CombatEvent = { type: 'hit' | 'brush' | 'knockout'; rider: AIRider };
+export type CombatEvent = { type: 'hit' | 'brush' | 'knockout' | 'push'; rider: AIRider };
+/** Where a directional shove would send a rival, and whether a tree or rock is
+ *  waiting there. The HUD cue and `attemptPush` both read this one value, so
+ *  the "!" can never disagree with what the push then does. */
+export interface PushPlan {
+  /** -1 left, 1 right: the direction the rival actually travels (after the road-edge flip). */
+  direction: -1 | 1;
+  /** Lane the rival ends in. */
+  lane: number;
+  /** Lanes moved (1, or 2 for an armed push that was not stopped by a tree). */
+  shift: number;
+  /** A tree or rock in the destination lane within `PUSH_HAZARD_LOOKAHEAD_MS` of travel. */
+  hazard: 'tree' | 'rock' | null;
+}
 /** Separate feedback stream: legacy scoring still receives one ordinary hit,
  * never duplicate counter points. The scene drains this after HUD/audio. */
 export type SkillCombatEvent = {
@@ -85,6 +102,10 @@ export class CombatSystem {
   /** Global attack cooldown, independent of target. Longer than pair
    *  immunity, so re-attacking the SAME rival is gated by this. */
   private attackCooldownMs = 0;
+  /** The directional shove's own cooldown. Separate from the jab's, so a
+   *  jab is never locked out by a shove (or the reverse); pair immunity still
+   *  stops both landing on the same rival back-to-back. */
+  private pushCooldownMs = 0;
 
   /** Current attack target, and how long it has been out of range. Held on
    *  the system (recreated per race) so restart-reset is free. */
@@ -120,6 +141,7 @@ export class CombatSystem {
    */
   update(deltaMs: number, nowMs: number): void {
     this.attackCooldownMs = Math.max(0, this.attackCooldownMs - deltaMs);
+    this.pushCooldownMs = Math.max(0, this.pushCooldownMs - deltaMs);
     for (const [rider, ms] of this.pairImmunityMs) {
       const next = ms - deltaMs;
       if (next <= 0) {
@@ -155,6 +177,14 @@ export class CombatSystem {
     return this.attackCooldownMs > 0;
   }
 
+  get pushOnCooldown(): boolean {
+    return this.pushCooldownMs > 0;
+  }
+
+  get pushCooldownFraction(): number {
+    return Math.max(0, Math.min(1, this.pushCooldownMs / PUSH_COOLDOWN_MS));
+  }
+
   /** 0..1 remaining cooldown, for the HUD. */
   get attackCooldownFraction(): number {
     return Math.max(0, Math.min(1, this.attackCooldownMs / ATTACK_COOLDOWN_MS));
@@ -179,10 +209,10 @@ export class CombatSystem {
   /** Score for target selection: 0 at touching, 1 at the edge of reach.
    *  Lateral and longitudinal distance are normalised to their own ranges
    *  first, so the two units are comparable. */
-  private targetScore(rider: AIRider): number | null {
+  private targetScore(rider: AIRider, ordinaryReach = false): number | null {
     const dFrac = Math.abs(rider.laneOffsetFraction - this.player.laneOffsetFraction);
     const dz = Math.abs(rider.worldZ - this.player.worldZ);
-    const isCounter = rider === this.counterTarget;
+    const isCounter = !ordinaryReach && rider === this.counterTarget;
     const lateralReach = isCounter ? COUNTER_LANE_REACH : ATTACK_LANE_REACH;
     const zReach = SHOVE_Z_WINDOW * (isCounter ? COUNTER_Z_REACH_FACTOR : 1);
     if (dFrac > lateralReach || dz > zReach) {
@@ -201,19 +231,85 @@ export class CombatSystem {
    * the press genuinely will not land, and holding the marker through that
    * would break the one promise it makes.
    */
-  private isEligible(rider: AIRider): boolean {
-    const isCounter = rider === this.counterTarget;
+  private isEligible(rider: AIRider, cooldownMs = this.attackCooldownMs, forPush = false): boolean {
+    const isCounter = !forPush && rider === this.counterTarget;
     if (this.player.wipedOut || (this.player.airborne && !isCounter) || this.player.collisionImmune) return false;
     if (rider.airborne && !isCounter) return false;
     if (rider.wipedOut || rider.finishTimeMs !== null || rider.knockedDown || rider.collisionImmune) return false;
     if ((this.pairImmunityMs.get(rider) ?? 0) > 0) return false;
-    if (this.attackCooldownMs > 0) return false;
+    if (cooldownMs > 0) return false;
     return true;
   }
 
   /** Both halves: in reach AND allowed. */
   private isAttackable(rider: AIRider): boolean {
     return this.isEligible(rider) && this.targetScore(rider) !== null;
+  }
+
+  /**
+   * The rival a directional shove would push, or null. Same tracked target as
+   * the jab, but it never takes the counter rider (a shove is not a counter and
+   * must not spend the counter window), uses ordinary reach and altitude rules,
+   * and is gated by the shove's own cooldown.
+   */
+  get pushTarget(): AIRider | null {
+    const rider = this.currentTarget;
+    if (!rider || rider === this.counterTarget) return null;
+    if (!this.isEligible(rider, this.pushCooldownMs, true) || this.targetScore(rider, true) === null) return null;
+    return rider;
+  }
+
+  /** Where a shove at `rider` would send it, given the steer key held. */
+  pushPlan(rider: AIRider, heldDirection: -1 | 0 | 1 = 0): PushPlan {
+    const fromLane = rider.laneIndex;
+    const lateral = LANES[fromLane] - this.player.laneOffsetFraction;
+    let direction: -1 | 1;
+    if (Math.abs(lateral) > SAME_LANE_EPSILON) direction = lateral > 0 ? 1 : -1; // away from the player
+    else if (heldDirection !== 0) direction = heldDirection; // same lane: the side being held
+    else direction = this.knockbackDirection(true, fromLane); // nothing held: toward road centre
+    // At the road edge the push flips inward rather than doing nothing.
+    const first = fromLane + direction;
+    if (first < 0 || first >= LANE_COUNT) direction = direction === 1 ? -1 : 1;
+    const maxShift = this.player.armed ? 2 : 1;
+    let lane = fromLane;
+    let shift = 0;
+    for (let step = 1; step <= maxShift; step++) {
+      const next = fromLane + direction * step;
+      if (next < 0 || next >= LANE_COUNT) break;
+      lane = next;
+      shift = step;
+      // The push is never refused by a tree, but it ends AT one: an armed
+      // push cannot carry the rival through a tree lane to a clear one.
+      if (this.hasTreeDownstream(next, rider.worldZ)) break;
+    }
+    const reach = rider.worldZ + rider.speed * PUSH_HAZARD_LOOKAHEAD_MS / 1000;
+    const found = this.obstacles.find((o) => (o.kind === 'tree' || o.kind === 'rock') && o.lane === lane &&
+      o.z >= rider.worldZ - SEGMENT_LENGTH * 0.5 && o.z <= reach);
+    const hazard = found ? (found.kind === 'tree' ? 'tree' : 'rock') : null;
+    return { direction, lane, shift, hazard };
+  }
+
+  /**
+   * The player pressed SHOVE.
+   *
+   * Returns true if a shove started. Like the jab, a press with no eligible
+   * target is refused for free. Unlike the jab it never compares speeds, cannot
+   * be a counter, ignores the tree clamp, and adds no stagger pip: its cost is
+   * the 400 ms steering lock and 900 ms cooldown.
+   */
+  attemptPush(nowMs: number, heldDirection: -1 | 0 | 1 = 0): boolean {
+    const rider = this.pushTarget;
+    if (!rider) return false;
+    const plan = this.pushPlan(rider, heldDirection);
+    this.pushCooldownMs = PUSH_COOLDOWN_MS;
+    this.player.startSwing(PUSH_SWING_MS);
+    if (this.player.armed) this.player.consumeWeaponCharge();
+    rider.applyKnockback(plan.lane, PUSH_SPEED_LOSS);
+    rider.notifyHit();
+    rider.markShovedByPlayer(nowMs);
+    this.events.push({ type: 'push', rider });
+    this.pairImmunityMs.set(rider, SHOVE_IMMUNITY_MS);
+    return true;
   }
 
   /**

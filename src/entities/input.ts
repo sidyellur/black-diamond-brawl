@@ -3,7 +3,7 @@ import { Player } from './player';
 import { oncePerKeyEvent } from '../input/keyboardEvents';
 import { APP_ACTIVE, APP_INACTIVE, isAppActive } from '../input/appLifecycle';
 
-export type PlayerAction = 'left' | 'right' | 'jump' | 'attack' | 'boost';
+export type PlayerAction = 'left' | 'right' | 'jump' | 'attack' | 'push' | 'boost';
 /** Concise alias for UI bindings. */
 export type InputAction = PlayerAction;
 
@@ -23,6 +23,11 @@ export interface PlayerInput {
   // or the total time spent paused/in hit-stop. Omit for the normal 160ms budget.
   update(deltaMs: number, frameElapsedMs?: number): void;
   attackJustPressed(): boolean;
+  /** The directional SHOVE (G / L): edge-triggered exactly like the jab. */
+  pushJustPressed(): boolean;
+  /** Steer direction currently held (-1 left, 1 right, 0 none or both). A
+   * same-lane shove pushes toward it. */
+  heldDirection(): -1 | 0 | 1;
   /** Boost is level-triggered: true only while a live, focused source holds it. */
   boostHeld(): boolean;
   /** Disabling clears pending actions and requires held controls to be released. */
@@ -47,6 +52,8 @@ export class PlayerInputController implements PlayerInput {
   private jumpObserved = false;
   private attackPressedAt: number | null = null;
   private attackReady = false;
+  private pushPressedAt: number | null = null;
+  private pushReady = false;
   private repeatDirection: -1 | 0 | 1 = 0;
   private repeatInMs = STEER_REPEAT_DELAY_MS;
 
@@ -80,12 +87,15 @@ export class PlayerInputController implements PlayerInput {
       this.jumpObserved = false;
     } else if (action === 'attack') {
       this.attackPressedAt = at;
+    } else if (action === 'push') {
+      this.pushPressedAt = at;
     }
     // 'boost' is read from the held sources each frame; there is no edge to record.
   }
 
   update(deltaMs: number, frameElapsedMs = deltaMs): void {
     this.attackReady = false;
+    this.pushReady = false;
     if (!this.enabled || !this.focused || this.destroyed || this.player.wipedOut) return;
     const now = this.now();
     const delta = Math.max(0, Number.isFinite(deltaMs) ? deltaMs : 0);
@@ -143,6 +153,23 @@ export class PlayerInputController implements PlayerInput {
       this.attackReady = now - this.attackPressedAt <= freshAgeLimit;
       this.attackPressedAt = null;
     }
+    if (this.pushPressedAt !== null) {
+      this.pushReady = now - this.pushPressedAt <= freshAgeLimit;
+      this.pushPressedAt = null;
+    }
+  }
+
+  pushJustPressed(): boolean {
+    const pressed = this.enabled && this.focused && !this.destroyed && this.pushReady;
+    this.pushReady = false;
+    return pressed;
+  }
+
+  heldDirection(): -1 | 0 | 1 {
+    if (!this.enabled || !this.focused || this.destroyed) return 0;
+    const left = this.isDown('left');
+    const right = this.isDown('right');
+    return left === right ? 0 : left ? -1 : 1;
   }
 
   attackJustPressed(): boolean {
@@ -182,6 +209,8 @@ export class PlayerInputController implements PlayerInput {
     this.jumpObserved = false;
     this.attackPressedAt = null;
     this.attackReady = false;
+    this.pushPressedAt = null;
+    this.pushReady = false;
     this.repeatDirection = 0;
     this.repeatInMs = STEER_REPEAT_DELAY_MS;
     this.player.clearInputBuffer();
@@ -205,9 +234,10 @@ export class PlayerInputController implements PlayerInput {
 const KEY_ACTIONS: Readonly<Record<string, PlayerAction>> = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
   Space: 'jump', ArrowUp: 'jump', KeyW: 'jump', KeyF: 'attack', KeyK: 'attack',
+  KeyG: 'push', KeyL: 'push',
   ShiftLeft: 'boost', ShiftRight: 'boost', KeyS: 'boost', ArrowDown: 'boost'
 };
-const KEY_NAMES = ['LEFT', 'A', 'RIGHT', 'D', 'SPACE', 'UP', 'W', 'F', 'K', 'SHIFT', 'S', 'DOWN'];
+const KEY_NAMES = ['LEFT', 'A', 'RIGHT', 'D', 'SPACE', 'UP', 'W', 'F', 'K', 'G', 'L', 'SHIFT', 'S', 'DOWN'];
 
 export function bindPlayerInput(
   scene: Phaser.Scene,
@@ -279,6 +309,8 @@ export function bindPlayerInput(
   return {
     update: (delta, frameElapsed) => controller.update(delta, frameElapsed),
     attackJustPressed: () => controller.attackJustPressed(),
+    pushJustPressed: () => controller.pushJustPressed(),
+    heldDirection: () => controller.heldDirection(),
     boostHeld: () => controller.boostHeld(),
     setEnabled: (enabled) => controller.setEnabled(enabled),
     reset: () => controller.reset(),
