@@ -1,0 +1,52 @@
+name: Publish game to GitHub Pages
+
+# Publishes the browser build of main at
+# https://sidyellur.github.io/black-diamond-brawl/
+# Requires Settings → Pages → Source set to "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build for the Pages sub-path
+        # The site is served from /black-diamond-brawl/, so asset URLs need
+        # that prefix. The iPhone app and local builds keep the default base.
+        run: npx tsc && npx vite build --base=/black-diamond-brawl/ --sourcemap false
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
