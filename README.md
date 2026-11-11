@@ -12,7 +12,7 @@ npm run dev        # open the printed localhost URL
 ```
 
 For a production build, run `npm run build` then `npm run preview`.
-No public hosting is configured in this repository. No account, backend, purchases or asset downloads are needed to play.
+**Play in a browser or on a phone:** https://sidyellur.github.io/black-diamond-brawl/ (published from `main` by the Pages workflow). On an iPhone, open the link in Safari, turn the phone to landscape, and use Share → Add to Home Screen for a full-screen icon. No account, backend, purchases or asset downloads are needed to play.
 
 On a Mac with Xcode 26+, run `npm run ios:open`, choose an iPhone simulator and run the app.
 The app bundles the same game for offline use, supports iOS 15+, and saves progress with native Preferences.
