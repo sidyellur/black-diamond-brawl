@@ -149,9 +149,8 @@ export class TitleScene extends Phaser.Scene {
     const controls = touch ? [
       { x: 24, key: 'TAP / HOLD  ← →', label: 'CARVE', hint: 'Tap a lane · hold to carve' },
       { x: 172, key: 'TAP  JUMP', label: 'JUMP', hint: 'Time moguls for trick air' },
-      { x: 320, key: 'TAP  HIT', label: 'ATTACK', hint: 'Hit the amber-marked rival' },
-      { x: 468, key: 'TAP  SHOVE', label: 'SHOVE', hint: 'Push a rival into trouble' },
-      { x: 616, key: 'HOLD  BOOST', label: 'BOOST', hint: 'Earn it with risky riding' },
+      { x: 320, key: 'TAP  HIT', label: 'ATTACK', hint: 'Hit rivals, shove at trees' },
+      { x: 468, key: 'HOLD  BOOST', label: 'BOOST', hint: 'Earn it with risky riding' },
       { x: 790, key: 'TAP  PAUSE', label: 'PAUSE', hint: 'Take a breather' }
     ] : [
       { x: 24, key: '← →  /  A D', label: 'CARVE', hint: 'Tap a lane · hold to carve' },

@@ -3,6 +3,7 @@ import { BOOST_MAX, BOOST_MIN_TO_START, SCREEN_H, SCREEN_W } from '../config';
 import { UI } from '../render/palette';
 import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
+import { STRIKE_LABELS, type StrikeKind } from '../entities/combat';
 import { isAppActive } from '../input/appLifecycle';
 import type { Surface } from '../track/segment';
 import { SURFACE_LABELS, surfaceTagDetail } from '../track/surface';
@@ -30,6 +31,8 @@ export interface HudState {
   push?: boolean;
   /** Tree or rock waiting in the lane the shove would send the rival to. */
   pushHazard?: 'tree' | 'rock' | null;
+  /** What the single touch button would do on a press (`CombatSystem.strikeIntent`). */
+  strike?: StrikeKind;
   target: boolean;
   targetAdvantage: boolean;
   boost?: { value: number; active: boolean; ready: boolean };
@@ -46,7 +49,7 @@ export interface HudState {
   ghostSplit?: string;
   incomingAttack?: string;
   counterReady?: boolean;
-  practice?: { title: string; instruction: string; feedback: string };
+  practice?: { title: string; instruction: string; touchInstruction?: string; feedback: string };
   rivals: { progress: number; color: number; out: boolean }[];
 }
 
@@ -69,6 +72,16 @@ const LAST_CHANCE_W = 270;
 
 // Countdown digit is centred at 0.42 * SCREEN_H and ~72px tall; the hint bar sits at the bottom.
 const TAUNT_Y = 318;
+
+/** Same rule the HUD uses for its touch layout, for scenes that word text for it. */
+export function isTouchLayout(scene: Phaser.Scene): boolean {
+  return scene.sys.game.device.input.touch || new URLSearchParams(location.search).has('touch');
+}
+
+/** Touch buttons are 72x66 and keep that whole area tappable; the drawn face is a
+ *  translucent rounded outline so the slope shows through. */
+const TOUCH_W = 72;
+const TOUCH_H = 66;
 
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
@@ -103,6 +116,10 @@ export class RaceHud {
   private readonly shieldText: Phaser.GameObjects.Text;
   private readonly muteLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
+  private readonly helpBg: Phaser.GameObjects.Rectangle;
+  private strikeLabel: Phaser.GameObjects.Text | null = null;
+  private strikeKind: StrikeKind = 'none';
+  private drawStrike: (() => void) | null = null;
   private messageMs = 0;
   private surfaceCueMs = 0;
   private readonly raceControls: Phaser.GameObjects.GameObject[] = [];
@@ -117,7 +134,7 @@ export class RaceHud {
     mute: () => boolean;
     control: (action: InputAction, down: boolean, source: string) => void;
   }) {
-    this.touch = scene.sys.game.device.input.touch || new URLSearchParams(location.search).has('touch');
+    this.touch = isTouchLayout(scene);
     const bg = scene.add.graphics().setDepth(10000);
     bg.fillStyle(UI.panel, 0.9).fillRoundedRect(16, 14, 188, 78, 10);
     bg.fillStyle(UI.panel, 0.9).fillRoundedRect(218, 14, 518, 58, 10);
@@ -135,6 +152,7 @@ export class RaceHud {
     this.surfaceTag = this.text(30, SCREEN_H - 60, '', 12, UI.panel, true).setStroke('#f3f8ff', 3);
     this.attack = this.text(SCREEN_W / 2, SCREEN_H - 31, '', 14, UI.inkHigh, true).setOrigin(0.5);
     const helpBg = scene.add.rectangle(SCREEN_W / 2, SCREEN_H - 30, 464, 30, UI.panel, 0.88).setDepth(9999);
+    this.helpBg = helpBg;
     this.objects.push(helpBg);
     this.status = this.text(SCREEN_W / 2, 91, '', 13, UI.panel, true).setOrigin(0.5);
     this.chain = this.text(925, 133, '', 17, UI.panel, true).setOrigin(1, 0);
@@ -169,29 +187,49 @@ export class RaceHud {
     if (this.touch) {
       if (scene.input.manager.pointersTotal < 4) scene.input.addPointer(4 - scene.input.manager.pointersTotal);
       const held = (x: number, label: string, action: InputAction, y = SCREEN_H - 43) => {
-        const g = scene.add.rectangle(x, y, 72, 66, UI.panel, 0.8).setStrokeStyle(2, UI.inkMid, 0.7).setDepth(10002).setInteractive();
-        const t = this.text(x, y, label, action === 'left' || action === 'right' ? 30 : 13, UI.inkHigh, true).setOrigin(0.5).setDepth(10003);
+        // The input target is an invisible rectangle (it keeps the full tap area);
+        // the face is a translucent rounded outline drawn over it.
+        const g = scene.add.rectangle(x, y, TOUCH_W, TOUCH_H, UI.panel, 0).setDepth(10002).setInteractive();
+        const face = scene.add.graphics().setDepth(10002);
+        const steer = action === 'left' || action === 'right';
+        const t = this.text(x, y, label, steer ? 26 : 12, UI.inkHigh, false).setOrigin(0.5).setDepth(10003).setAlpha(0.92);
+        t.setStroke(hex(UI.panel), steer ? 4 : 3);
         const pointers = new Set<number>();
+        const draw = () => {
+          const down = pointers.size > 0;
+          const shove = action === 'strike' && this.strikeKind === 'shove';
+          const left = x - TOUCH_W / 2, top = y - TOUCH_H / 2;
+          face.clear();
+          // Resting: a faint dark wash with a thin light outline, ringed by a hairline dark edge so it
+          // still reads on bright snow and ice. Pressed: a stronger wash and a bold outline.
+          // SHOVE: a near-solid plate with a heavy red outline, plus the word and "!".
+          face.fillStyle(UI.panel, shove ? 0.86 : down ? 0.6 : 0.16);
+          face.fillRoundedRect(left, top, TOUCH_W, TOUCH_H, 14);
+          face.lineStyle(1.5, UI.panel, 0.5).strokeRoundedRect(left - 1.5, top - 1.5, TOUCH_W + 3, TOUCH_H + 3, 15);
+          face.lineStyle(shove ? 4 : down ? 3 : 1.5, shove ? UI.accentBad : UI.inkHigh, shove || down ? 1 : 0.7).strokeRoundedRect(left, top, TOUCH_W, TOUCH_H, 14);
+          t.setAlpha(down || shove ? 1 : 0.92).setFontStyle(shove ? 'bold' : 'normal');
+        };
+        draw();
         const press = (p: Phaser.Input.Pointer) => {
           if (!isAppActive(scene.game)) return;
-          pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); g.setFillStyle(UI.panelEdge, 0.95);
+          pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); draw();
         };
         const release = (p: Phaser.Input.Pointer) => {
           pointers.delete(p.id); actions.control(action, false, `touch:${p.id}`);
-          if (pointers.size === 0) g.setFillStyle(UI.panel, 0.8);
+          if (pointers.size === 0) draw();
         };
         this.releaseTouchControls.push(() => {
           for (const id of pointers) actions.control(action, false, `touch:${id}`);
-          pointers.clear(); g.setFillStyle(UI.panel, 0.8);
+          pointers.clear(); draw();
         });
         g.on('pointerdown', press).on('pointerup', release).on('pointerout', release);
-        this.objects.push(g, t);
+        this.objects.push(g, face, t);
         this.raceControls.push(g);
+        if (action === 'strike') { this.strikeLabel = t; this.drawStrike = draw; }
       };
-      held(58, '‹', 'left'); held(142, '›', 'right'); held(726, 'BOOST', 'boost'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'attack');
-      // SHOVE stacks above HIT so every existing button keeps its position and
-      // the bottom row stays clear of the hint bar.
-      held(898, 'SHOVE', 'push', SCREEN_H - 43 - 76);
+      // One attack button: `strike` hits, shoves into a hazard or throws, whichever
+      // `CombatSystem.strikeIntent` says, and the label follows the same answer.
+      held(58, '‹', 'left'); held(142, '›', 'right'); held(726, 'BOOST', 'boost'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'strike');
       this.speed.setPosition(30, SCREEN_H - 104);
       this.surfaceTag.setPosition(30, SCREEN_H - 122); // above the pace readout: the steer buttons sit below it
       helpBg.setSize(420, 30);
@@ -211,7 +249,7 @@ export class RaceHud {
     const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
-    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT     TAP SHOVE     HOLD BOOST' : 'A D / ← →  carve  SPACE  jump  F / K  hit  G / L  shove  SHIFT  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
+    const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT (shoves at trees)     HOLD BOOST' : 'A D / ← →  carve  SPACE  jump  F / K  hit  G / L  shove  SHIFT  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
     this.pauseOverlay.add([shade, panel, heading, sub, controls]);
     for (const [label, y, callback] of [
       [this.touch ? 'RESUME' : 'RESUME   ESC / P', 267, actions.resume],
@@ -381,18 +419,26 @@ export class RaceHud {
     this.section.setText(s.sectionName ?? '');
     this.split.setText(s.ghostSplit ?? '');
     this.lessonBg.setVisible(!!s.practice);
-    this.lesson.setText(s.practice ? `${s.practice.title}\n${s.practice.instruction}\n${s.practice.feedback}` : '');
+    this.lesson.setText(s.practice ? `${s.practice.title}\n${this.touch && s.practice.touchInstruction ? s.practice.touchInstruction : s.practice.instruction}\n${s.practice.feedback}` : '');
+    // The strike button's face follows the same intent the press executes.
+    if (this.strikeLabel) {
+      const kind = s.strike ?? 'none';
+      if (kind !== this.strikeKind) { this.strikeKind = kind; this.strikeLabel.setText(STRIKE_LABELS[kind]); this.drawStrike?.(); }
+    }
+    // The bar only carries cues the player must act on; with nothing to act on it is hidden.
     const hit = this.touch ? 'TAP HIT' : 'F / K  HIT';
-    const shove = this.touch ? 'SHOVE' : 'G / L  SHOVE';
-    const text = s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? 'AIRBORNE · STICK THE LANDING'
+    const shove = this.touch ? 'TAP SHOVE' : 'G / L  SHOVE';
+    const text = s.counterReady ? `${this.touch ? 'TAP HIT' : 'F / K'}  COUNTER NOW!` : s.incomingAttack ? `${s.incomingAttack} · JUMP OR CARVE NOW` : s.recovering ? 'RECOVERING · GET READY TO CARVE' : s.airborne ? ''
       : s.push && s.pushHazard ? `${shove} · ${s.pushHazard === 'tree' ? 'TREE' : 'ROCK'} AHEAD !`
-      : s.target && s.attackCooldown <= 0 ? (s.targetAdvantage ? `${hit} · ${shove}` : `FASTER RIVAL · ${shove} ALWAYS LANDS`)
-      : s.push ? `${shove} · HIT RECHARGING`
-      : s.attackCooldown > 0 || (s.pushCooldown ?? 0) > 0 ? (s.attackCooldown > 0 && (s.pushCooldown ?? 0) > 0 ? 'HIT + SHOVE RECHARGING' : s.attackCooldown > 0 ? 'HIT RECHARGING' : 'SHOVE RECHARGING')
-      : s.throwTarget && s.attackCooldown <= 0 ? `${this.touch ? 'TAP HIT' : 'F / K'} · THROW SNOWBALL`
+      : s.target && s.attackCooldown <= 0 ? (this.touch ? (s.targetAdvantage ? 'TAP HIT' : 'FASTER RIVAL · HIT WILL LOSE') : s.targetAdvantage ? `${hit} · ${shove}` : `FASTER RIVAL · ${shove} ALWAYS LANDS`)
+      // A shove with no hazard is a keyboard-only action (the touch button never fires it).
+      : s.push && !this.touch ? `${shove} · HIT RECHARGING`
+      : s.throwTarget && s.attackCooldown <= 0 ? `${this.touch ? 'TAP THROW' : 'F / K'} · THROW SNOWBALL`
       : s.charges > 0 ? `POLE ARMED · ${s.charges} HITS · SHOVES PUSH 2 LANES`
-      : s.snowball ? 'SNOWBALL READY · LINE UP A RIVAL AHEAD' : s.position === 1 ? 'LEADING · KEEP YOUR LINE CLEAN' : 'CHASE THE PACK · WATCH FOR THE AMBER MARKER';
+      : '';
     this.attack.setText(text);
+    this.attack.setVisible(text !== '');
+    this.helpBg.setVisible(text !== '');
     this.attack.setColor(hex(s.counterReady ? UI.accentGood : s.incomingAttack ? UI.accentBad : s.push && s.pushHazard ? UI.accentBad : s.target ? (s.targetAdvantage ? UI.accentWarn : UI.accentBad) : s.throwTarget ? UI.accentInfo : UI.inkMid));
     this.status.setText(s.practice ? 'PRACTICE · NO RECORDS OR CUP POINTS' : s.elapsedMs < 6500 ? 'HOLD TO CARVE  ·  JUMP ROCKS  ·  DODGE TREES  ·  HIT RIVALS' : s.progress > 0.9 ? 'FINAL STRETCH · BRING IT HOME' : '');
     this.chain.setText(s.chain >= 2 ? `${s.chain} EVENT FLOW` : '');

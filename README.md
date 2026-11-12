@@ -28,7 +28,7 @@ There are five modes: Drop In (a quick race), Practice, a three-race Cup where r
 | Carve left / right | `←` `→` or `A` `D` | `‹` `›` |
 | Jump | `Space`, `↑` or `W` | JUMP |
 | Attack | `F` or `K` | HIT |
-| Shove | `G` or `L` | SHOVE |
+| Shove | `G` or `L` | HIT, when a rival is beside a tree or rock (the button reads SHOVE) |
 | Boost | `Shift`, `S` or `↓` | BOOST |
 | Pause | `Esc` or `P` | PAUSE |
 

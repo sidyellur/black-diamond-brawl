@@ -40,7 +40,7 @@ import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { RIVAL_SUITS, UI } from '../render/palette';
-import { RaceHud } from '../ui/RaceHud';
+import { isTouchLayout, RaceHud } from '../ui/RaceHud';
 import { SceneryRenderer } from '../render/SceneryRenderer';
 import { getRaceAudio, RaceAudio } from '../audio/RaceAudio';
 import { projectEntity, softClampWidth } from '../render/projectEntity';
@@ -215,7 +215,8 @@ export class RaceScene extends Phaser.Scene {
     this.options = normalizeRaceOptions(data?.mode && data.runId ? data as RaceOptions : { ...createQuickRace(this.seed), ...data, seed: this.seed });
     this.practiceLesson = Math.max(0, Math.min(PRACTICE_LESSON_COUNT - 1, data?.practiceLesson ?? 0));
     this.practiceObjective = this.options.mode === 'practice' && !this.options.dailyDate ? new PracticeObjectives(this.practiceLesson) : null;
-    this.practiceFeedback = data?.practiceFeedback ?? PRACTICE_LESSONS[this.practiceLesson].hint;
+    this.practiceFeedback = data?.practiceFeedback ??
+      (isTouchLayout(this) ? PRACTICE_LESSONS[this.practiceLesson].touchHint : undefined) ?? PRACTICE_LESSONS[this.practiceLesson].hint;
     this.practiceAdvanceAt = 0;
     this.practiceLaunched = false;
     this.practiceRockHits = 0;
@@ -584,7 +585,7 @@ export class RaceScene extends Phaser.Scene {
     if (!objective.complete && (this.elapsedRaceMs > 8500 || this.player.treeStrikes > 0)) {
       this.raceOver = true;
       this.scene.restart({ ...this.options, practiceLesson: this.practiceLesson,
-        practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : this.practiceLesson === 2 ? 'Try again: stay in the center and JUMP just before the mound.' : 'Try again: ride beside the rival and press SHOVE when the "!" appears.' });
+        practiceFeedback: this.practiceLesson === 0 ? 'Try again: evade late in the wind-up, then HIT when COUNTER appears.' : this.practiceLesson === 1 ? 'Try again: carve away from the center, then hold your clear lane.' : this.practiceLesson === 2 ? 'Try again: stay in the center and JUMP just before the mound.' : isTouchLayout(this) ? PRACTICE_LESSONS[3].touchRetry : 'Try again: ride beside the rival and press SHOVE when the "!" appears.' });
       return true;
     }
     return false;
@@ -637,6 +638,10 @@ export class RaceScene extends Phaser.Scene {
     }
     if (this.playerInput.pushJustPressed()) {
       this.combat.attemptPush(time, this.playerInput.heldDirection());
+    }
+    // The single touch button: `strikeIntent` is the same answer its label shows.
+    if (this.playerInput.strikeJustPressed()) {
+      this.combat.attemptStrike(time, this.playerInput.heldDirection());
     }
 
     const prevZ = this.player.worldZ;
@@ -839,6 +844,7 @@ export class RaceScene extends Phaser.Scene {
       pushCooldown: this.combat.pushCooldownFraction,
       push: this.combat.pushTarget !== null,
       pushHazard: this.pushPreview()?.hazard ?? null,
+      strike: this.combat.strikeIntent(this.playerInput.heldDirection()),
       target: this.combat.target !== null,
       targetAdvantage: this.player.armed || this.player.speed >= (this.combat.target?.speed ?? Infinity),
       boost: { value: this.boost.value, active: this.boost.active, ready: this.boost.ready },

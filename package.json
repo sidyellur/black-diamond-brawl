@@ -21,6 +21,7 @@
     "verify:trees": "node --import tsx scripts/verifyTreeStrikes.ts",
     "verify:stagger": "node --import tsx scripts/verifyStagger.ts",
     "verify:shove": "node --import tsx scripts/verifyShove.ts",
+    "verify:strike": "node --import tsx scripts/verifyStrike.ts",
     "verify:pickups": "node --import tsx scripts/verifyPickups.ts",
     "verify:grudges": "node --import tsx scripts/verifyGrudges.ts",
     "verify:powder": "node --import tsx scripts/verifyPowder.ts",

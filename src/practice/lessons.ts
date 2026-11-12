@@ -1,6 +1,11 @@
 /** The practice course uses the same player, rival and combat models as a race.
  * This small objective tracker never moves riders or manufactures a success. */
-export const PRACTICE_LESSONS = [
+export interface PracticeLesson {
+  title: string; instruction: string; hint: string;
+  /** Touch wording, where the single HIT button changes what the lesson says. */
+  touchInstruction?: string; touchHint?: string; touchRetry?: string;
+}
+export const PRACTICE_LESSONS: ReadonlyArray<PracticeLesson> = [
   {
     title: '1 / 4  ·  OUTSMART THE BULLY',
     instruction: 'Wait for WIND UP. Jump or carve as the bar fills, then press HIT to counter.',
@@ -19,9 +24,13 @@ export const PRACTICE_LESSONS = [
   {
     title: '4 / 4  ·  SHOVE INTO THE ROCKS',
     instruction: 'Wait for the "!" on the arrow, then SHOVE the rival into the rock.',
-    hint: 'SHOVE (G / L) pushes the rival away from you. The arrow shows which way.'
+    hint: 'SHOVE (G / L) pushes the rival away from you. The arrow shows which way.',
+    // Touch has one attack button: it reads SHOVE while a rock waits beside the rival.
+    touchInstruction: 'Wait for the "!" on the arrow: the HIT button turns into SHOVE. Tap it to shove the rival into the rock.',
+    touchHint: 'The button reads SHOVE when a rock is waiting. The arrow shows which way the rival goes.',
+    touchRetry: 'Try again: ride beside the rival and tap the button when it reads SHOVE.'
   }
-] as const;
+];
 
 export const PRACTICE_LESSON_COUNT = PRACTICE_LESSONS.length;
 /** A shoved rival must reach the rock within this long for it to count. */

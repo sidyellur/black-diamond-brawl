@@ -605,4 +605,82 @@ check('G and L are bound to the shove, and K is still the jab', () => {
   assert.equal(input.attackJustPressed(), true, 'K is still the jab');
   input.destroy();
 });
+check('strike is its own edge-triggered touch action, independent of attack and shove', () => {
+  const { input, advance, age } = rig();
+  input.setAction('strike', true, 'touch:1');
+  advance(16, false);
+  assert.equal(input.attackJustPressed(), false, 'a strike press is not an attack press');
+  assert.equal(input.pushJustPressed(), false, 'a strike press is not a shove press');
+  assert.equal(input.strikeJustPressed(), true);
+  assert.equal(input.strikeJustPressed(), false, 'consumed once');
+  for (let i = 0; i < 20; i++) {
+    input.setAction('strike', true, 'touch:1');
+    advance(50, false);
+    assert.equal(input.strikeJustPressed(), false, 'holding never repeats');
+  }
+  input.setAction('strike', false, 'touch:1');
+  input.setAction('attack', true, 'KeyF');
+  input.setAction('push', true, 'KeyG');
+  advance(16, false);
+  assert.equal(input.strikeJustPressed(), false, 'keys never produce a strike');
+  assert.equal(input.attackJustPressed(), true);
+  assert.equal(input.pushJustPressed(), true);
+  input.setAction('strike', true, 'touch:2');
+  input.setAction('strike', false, 'touch:2');
+  age(ACTION_BUFFER_MS + 1);
+  advance(0, false);
+  assert.equal(input.strikeJustPressed(), false, 'a stale strike tap expires like a stale attack');
+});
+check('pause, blur, CANCEL_INPUT (reset) and disabling clear a pending or held strike', () => {
+  const pending = rig();
+  pending.input.setAction('strike', true, 'touch:1');
+  pending.input.reset(); // what the scene runs on CANCEL_INPUT and on resume
+  pending.advance(16, false);
+  assert.equal(pending.input.strikeJustPressed(), false, 'reset forgets a press not yet polled');
+  pending.input.setAction('strike', false, 'touch:1');
+  pending.input.setAction('strike', true, 'touch:1');
+  pending.advance(16, false);
+  assert.equal(pending.input.strikeJustPressed(), true, 'a fresh tap after the reset works');
+  const held = rig();
+  held.input.setAction('strike', true, 'touch:3');
+  held.input.setEnabled(false);
+  held.input.setEnabled(true);
+  held.advance(16, false);
+  assert.equal(held.input.strikeJustPressed(), false, 'a strike held across pause is not a new press on resume');
+  const blurred = rig();
+  blurred.input.setAction('strike', true, 'touch:4');
+  blurred.input.setFocused(false);
+  blurred.input.setFocused(true);
+  blurred.advance(16, false);
+  assert.equal(blurred.input.strikeJustPressed(), false, 'blur drops a pending strike');
+  const disabled = rig();
+  disabled.input.setEnabled(false);
+  disabled.input.setAction('strike', true, 'touch:5');
+  disabled.input.setEnabled(true);
+  disabled.advance(16, false);
+  assert.equal(disabled.input.strikeJustPressed(), false, 'a strike pressed while paused is not queued');
+  const gone = rig();
+  gone.input.setAction('strike', true, 'touch:6');
+  gone.input.destroy();
+  assert.equal(gone.input.strikeJustPressed(), false);
+});
+check('keyboard is unchanged: F/K stay the jab, G/L stay the shove, none ever raises a strike', () => {
+  const keyboard = Object.assign(new EventEmitter(), {
+    addKey: (name: string) => ({ name }), removeKey: () => undefined, removeCapture: () => undefined
+  });
+  const scene = { input: { keyboard }, events: new EventEmitter(), game: { events: new EventEmitter() } } as unknown as Phaser.Scene;
+  const input = bindPlayerInput(scene, new Player());
+  for (const code of ['KeyF', 'KeyK', 'KeyG', 'KeyL']) {
+    keyboard.emit('keydown', { code, repeat: false });
+    input.update(16);
+    assert.equal(input.strikeJustPressed(), false, `${code} is not a strike`);
+    assert.equal(input.attackJustPressed(), code === 'KeyF' || code === 'KeyK', `${code} attack`);
+    assert.equal(input.pushJustPressed(), code === 'KeyG' || code === 'KeyL', `${code} shove`);
+    keyboard.emit('keyup', { code });
+  }
+  input.setAction('strike', true, 'touch:1');
+  input.update(16);
+  assert.equal(input.strikeJustPressed(), true, 'the bound input exposes the touch strike');
+  input.destroy();
+});
 console.log(`\n=== ${checks} control regressions passed ===\n`);

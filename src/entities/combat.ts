@@ -58,6 +58,43 @@ export interface PushPlan {
   /** A tree or rock in the destination lane within `PUSH_HAZARD_LOOKAHEAD_MS` of travel. */
   hazard: 'tree' | 'rock' | null;
 }
+/** What the single touch STRIKE button does on a press. `none` is a refused press. */
+export type StrikeKind = 'attack' | 'shove' | 'throw' | 'none';
+/** Touch button label for each outcome. SHOVE carries a "!" so the change is a word and a shape, not colour. */
+export const STRIKE_LABELS: Readonly<Record<StrikeKind, string>> = { attack: 'HIT', none: 'HIT', shove: 'SHOVE !', throw: 'THROW' };
+/** The facts `chooseStrike` decides from; every one is a plain query on `CombatSystem`. */
+export interface StrikeState {
+  /** A counter window is open on an attackable rival. */
+  counterReady: boolean;
+  /** A shove would land (target in reach, shove off cooldown). */
+  shoveAvailable: boolean;
+  /** A tree or rock waits in the lane that shove would send the rival to. */
+  shoveHazard: boolean;
+  /** An ordinary attack would land (target in reach, attack off cooldown). */
+  attackAvailable: boolean;
+  /** A snowball is held and a throw would hit. */
+  throwAvailable: boolean;
+}
+/**
+ * The single touch button's decision, in priority order:
+ *  1. counter window open        -> attack (the counter);
+ *  2. shove with a hazard waiting -> shove (the "!" arrow moment);
+ *  3. melee attack available      -> attack;
+ *  4. snowball throw available    -> throw;
+ *  5. otherwise nothing. In particular a shove with NO hazard is never fired
+ *     for the player: it costs a 400 ms steering lock and a 900 ms cooldown for
+ *     no payoff, and it could only be reached in the sliver after a hit when the
+ *     attack is still recharging, i.e. from a double-tap. G / L still shoves.
+ * Pure, so the press handler and the button label read the same answer.
+ */
+export function chooseStrike(s: StrikeState): StrikeKind {
+  if (s.counterReady) return 'attack';
+  if (s.shoveAvailable && s.shoveHazard) return 'shove';
+  if (s.attackAvailable) return 'attack';
+  if (s.throwAvailable) return 'throw';
+  return 'none';
+}
+
 /** Separate feedback stream: legacy scoring still receives one ordinary hit,
  * never duplicate counter points. The scene drains this after HUD/audio. */
 export type SkillCombatEvent = {
@@ -314,6 +351,28 @@ export class CombatSystem {
     this.resolveExchange(rider, nowMs, true, 'player', false, true);
     this.throwEvents.push({ rider, fromLane });
     return true;
+  }
+
+  /** What the single touch STRIKE button would do right now, given the steer key held. */
+  strikeIntent(heldDirection: -1 | 0 | 1 = 0): StrikeKind {
+    const pushTarget = this.pushTarget;
+    return chooseStrike({
+      counterReady: this.counterReady,
+      shoveAvailable: pushTarget !== null,
+      shoveHazard: pushTarget !== null && this.pushPlan(pushTarget, heldDirection).hazard !== null,
+      attackAvailable: this.target !== null,
+      throwAvailable: this.throwTarget !== null
+    });
+  }
+
+  /** Perform the strike `strikeIntent` names. Returns whether anything started. */
+  attemptStrike(nowMs: number, heldDirection: -1 | 0 | 1 = 0): boolean {
+    switch (this.strikeIntent(heldDirection)) {
+      case 'attack': return this.attemptAttack(nowMs);
+      case 'shove': return this.attemptPush(nowMs, heldDirection);
+      case 'throw': return this.attemptThrow(nowMs);
+      default: return false;
+    }
   }
 
   /** Where a shove at `rider` would send it, given the steer key held. */

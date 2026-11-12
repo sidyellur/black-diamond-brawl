@@ -3,7 +3,7 @@ import { Player } from './player';
 import { oncePerKeyEvent } from '../input/keyboardEvents';
 import { APP_ACTIVE, APP_INACTIVE, isAppActive } from '../input/appLifecycle';
 
-export type PlayerAction = 'left' | 'right' | 'jump' | 'attack' | 'push' | 'boost';
+export type PlayerAction = 'left' | 'right' | 'jump' | 'attack' | 'push' | 'strike' | 'boost';
 /** Concise alias for UI bindings. */
 export type InputAction = PlayerAction;
 
@@ -25,6 +25,9 @@ export interface PlayerInput {
   attackJustPressed(): boolean;
   /** The directional SHOVE (G / L): edge-triggered exactly like the jab. */
   pushJustPressed(): boolean;
+  /** The single touch STRIKE button: edge-triggered like the others. Keys never
+   * produce it, so F / K stay a plain attack and G / L a plain shove. */
+  strikeJustPressed(): boolean;
   /** Steer direction currently held (-1 left, 1 right, 0 none or both). A
    * same-lane shove pushes toward it. */
   heldDirection(): -1 | 0 | 1;
@@ -54,6 +57,8 @@ export class PlayerInputController implements PlayerInput {
   private attackReady = false;
   private pushPressedAt: number | null = null;
   private pushReady = false;
+  private strikePressedAt: number | null = null;
+  private strikeReady = false;
   private repeatDirection: -1 | 0 | 1 = 0;
   private repeatInMs = STEER_REPEAT_DELAY_MS;
 
@@ -89,6 +94,8 @@ export class PlayerInputController implements PlayerInput {
       this.attackPressedAt = at;
     } else if (action === 'push') {
       this.pushPressedAt = at;
+    } else if (action === 'strike') {
+      this.strikePressedAt = at;
     }
     // 'boost' is read from the held sources each frame; there is no edge to record.
   }
@@ -96,6 +103,7 @@ export class PlayerInputController implements PlayerInput {
   update(deltaMs: number, frameElapsedMs = deltaMs): void {
     this.attackReady = false;
     this.pushReady = false;
+    this.strikeReady = false;
     if (!this.enabled || !this.focused || this.destroyed || this.player.wipedOut) return;
     const now = this.now();
     const delta = Math.max(0, Number.isFinite(deltaMs) ? deltaMs : 0);
@@ -157,6 +165,16 @@ export class PlayerInputController implements PlayerInput {
       this.pushReady = now - this.pushPressedAt <= freshAgeLimit;
       this.pushPressedAt = null;
     }
+    if (this.strikePressedAt !== null) {
+      this.strikeReady = now - this.strikePressedAt <= freshAgeLimit;
+      this.strikePressedAt = null;
+    }
+  }
+
+  strikeJustPressed(): boolean {
+    const pressed = this.enabled && this.focused && !this.destroyed && this.strikeReady;
+    this.strikeReady = false;
+    return pressed;
   }
 
   pushJustPressed(): boolean {
@@ -211,6 +229,8 @@ export class PlayerInputController implements PlayerInput {
     this.attackReady = false;
     this.pushPressedAt = null;
     this.pushReady = false;
+    this.strikePressedAt = null;
+    this.strikeReady = false;
     this.repeatDirection = 0;
     this.repeatInMs = STEER_REPEAT_DELAY_MS;
     this.player.clearInputBuffer();
@@ -310,6 +330,7 @@ export function bindPlayerInput(
     update: (delta, frameElapsed) => controller.update(delta, frameElapsed),
     attackJustPressed: () => controller.attackJustPressed(),
     pushJustPressed: () => controller.pushJustPressed(),
+    strikeJustPressed: () => controller.strikeJustPressed(),
     heldDirection: () => controller.heldDirection(),
     boostHeld: () => controller.boostHeld(),
     setEnabled: (enabled) => controller.setEnabled(enabled),
