@@ -92,6 +92,7 @@ try {
       ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs'],
       ['WebKit iPhone acceptance', 'scripts/mobileAcceptance.mjs'],
       ['expanded gameplay acceptance', 'scripts/expansionAcceptance.mjs'],
+      ['feel pass acceptance (slow motion, music, Sound Check)', 'scripts/feelAcceptance.mjs'],
       ['cup daily locker menus', 'scripts/verifyMenus.mjs']
     ]) {
       try {

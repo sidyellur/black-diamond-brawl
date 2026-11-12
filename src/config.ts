@@ -449,7 +449,7 @@ export const FEEL = {
   PUSH_MS: 420,
   /** Heavy crash: extra zoom kick, vignette strength and length. */
   CRASH_ZOOM: 0.05,
-  CRASH_VIGNETTE: 0.62,
+  CRASH_VIGNETTE: 0.78,
   CRASH_PULSE_MS: 620,
   /** Boost: scale on the projection's camera depth (below 1 widens the view), eased over this long. */
   BOOST_DEPTH_SCALE: 0.93,
@@ -465,5 +465,5 @@ export const FEEL = {
   /** Mix levels ahead of the limiter. */
   MASTER_GAIN: 0.9,
   MUSIC_GAIN: 0.34,
-  WIND_GAIN: 0.22
+  WIND_GAIN: 0.15
 } as const;

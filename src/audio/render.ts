@@ -2,7 +2,7 @@ import { SOUNDS, type PlayOptions, type SoundKind } from './effects';
 import { buildMasterChain } from './graph';
 import { scheduleMusic } from './music';
 import { RideLayers, type RideState } from './ride';
-import { createNoiseBuffer, seededRandom, Voice } from './voice';
+import { createNoiseBuffer, Voice } from './voice';
 
 /**
  * Offline renders of the same recipes the game plays, through the same output
@@ -44,4 +44,3 @@ export async function renderRide(state: RideState, seconds = 2): Promise<Float32
 }
 
 export const SAMPLE_RATE_HZ = SAMPLE_RATE;
-export { seededRandom };

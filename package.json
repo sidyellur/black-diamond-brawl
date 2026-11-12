@@ -29,6 +29,7 @@
     "verify:chute": "node --import tsx scripts/verifyChute.ts",
     "verify:feel": "node --import tsx scripts/verifyFeel.ts",
     "verify:audio": "node scripts/measureAudio.mjs",
+    "verify:feel-browser": "node scripts/feelAcceptance.mjs",
     "verify:pacing": "node --import tsx scripts/verifyPacing.ts",
     "ios:sync": "npm run build && cap sync ios",
     "ios:open": "npm run ios:sync && cap open ios",

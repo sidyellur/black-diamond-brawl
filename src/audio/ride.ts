@@ -18,19 +18,18 @@ export interface RideTargets {
   edgeGain: number;
 }
 
-export function rideTargets(s: RideState): RideTargets {
+export function rideTargets(s: RideState, out: RideTargets = { windGain: 0, windFreq: 0, boardGain: 0, boardFreq: 0, edgeGain: 0 }): RideTargets {
   const sp = Math.max(0, Math.min(1.3, s.speed01));
   const powder = s.surface === 'powder';
   const ice = s.surface === 'ice';
   const air = s.airborne ? 0.7 : 1;
   const carve = s.carving ? 1.25 : 1;
-  return {
-    windGain: 0.34 * sp ** 3 * carve * air * (powder ? 0.65 : 1),
-    windFreq: (260 + 2700 * sp ** 1.6) * (s.carving ? 1.15 : 1) * (powder ? 0.6 : 1) * (s.boosting ? 1.1 : 1),
-    boardGain: s.airborne ? 0 : 0.3 * sp ** 2.4 * (s.carving ? 1.6 : 1) * (powder ? 0.45 : 1),
-    boardFreq: (900 + 1500 * sp) * (powder ? 0.6 : 1),
-    edgeGain: ice && !s.airborne ? 0.55 * sp ** 1.5 * (s.carving ? 1 : 0.35) : 0
-  };
+  out.windGain = 0.34 * sp ** 3 * carve * air * (powder ? 0.65 : 1);
+  out.windFreq = (260 + 2700 * sp ** 1.6) * (s.carving ? 1.15 : 1) * (powder ? 0.6 : 1) * (s.boosting ? 1.1 : 1);
+  out.boardGain = s.airborne ? 0 : 0.3 * sp ** 2.4 * (s.carving ? 1.6 : 1) * (powder ? 0.45 : 1);
+  out.boardFreq = (900 + 1500 * sp) * (powder ? 0.6 : 1);
+  out.edgeGain = ice && !s.airborne ? 0.55 * sp ** 1.5 * (s.carving ? 1 : 0.35) : 0;
+  return out;
 }
 
 export class RideLayers {
@@ -41,6 +40,8 @@ export class RideLayers {
   private readonly boardGain: GainNode;
   private readonly boardFilter: BiquadFilterNode;
   private readonly edgeGain: GainNode;
+  /** Reused every frame so the frame loop allocates nothing. */
+  private readonly targets: RideTargets = { windGain: 0, windFreq: 0, boardGain: 0, boardFreq: 0, edgeGain: 0 };
 
   constructor(ctx: BaseAudioContext, noise: AudioBuffer, out: AudioNode) {
     const layer = (type: BiquadFilterType, freq: number, q: number, offset: number) => {
@@ -65,7 +66,7 @@ export class RideLayers {
 
   /** `tau` is the smoothing time constant in seconds; 0 sets the values outright (offline renders). */
   set(state: RideState, now: number, tau = 0.1): void {
-    const t = rideTargets(state);
+    const t = rideTargets(state, this.targets);
     const go = (param: AudioParam, value: number, time = tau) => {
       if (time > 0) param.setTargetAtTime(value, now, time); else param.setValueAtTime(value, now);
     };

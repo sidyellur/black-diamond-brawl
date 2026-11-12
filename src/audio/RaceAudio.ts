@@ -33,7 +33,11 @@ export class RaceAudio {
   private musicWanted = false;
   private active = true;
   private resumeAttempt: Promise<void> = Promise.resolve();
+  /** Diagnostics for browser checks: how many effects have actually been started, and the last one. */
+  soundsPlayed = 0;
+  lastSound: SoundKind | null = null;
   private readonly effects = new Set<AudioScheduledSourceNode>();
+  private readonly rideState: RideState = { speed01: 0, airborne: false, carving: false, boosting: false };
 
   constructor() {
     this.muted = getStoredValue(STORAGE_KEYS.muted) === '1';
@@ -154,7 +158,9 @@ export class RaceAudio {
   ride(speed01: number, airborne = false, carving = false, boosting = false, surface?: RideState['surface']): void {
     if (!this.active || !this.context || !this.rideLayers) return;
     const now = this.context.currentTime;
-    this.rideLayers.set({ speed01, airborne, carving, boosting, surface }, now);
+    const state = this.rideState;
+    state.speed01 = speed01; state.airborne = airborne; state.carving = carving; state.boosting = boosting; state.surface = surface;
+    this.rideLayers.set(state, now);
     if (this.musicWanted) {
       if (this.musicAudible) this.syncMusic(); else this.haltMusic();
     }
@@ -168,6 +174,7 @@ export class RaceAudio {
     voice.level = options.intensity ?? 1;
     SOUNDS[kind].build(voice, options);
     voice.seal();
+    this.soundsPlayed++; this.lastSound = kind;
   }
 
   destroy(): void {

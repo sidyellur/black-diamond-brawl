@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SCREEN_W } from '../config';
-import { getRaceAudio } from '../audio/RaceAudio';
+import { getRaceAudio, type RaceAudio } from '../audio/RaceAudio';
 import { SOUND_KINDS, SOUNDS, type SoundGroup, type SoundKind } from '../audio/effects';
 import { renderMusic, renderRide, renderSound } from '../audio/render';
 import { UI } from '../render/palette';
@@ -25,12 +25,15 @@ const GRID_Y = 62;
  * Buttons are large because the 960x540 stage is scaled down to a phone.
  */
 export class SoundCheckScene extends Phaser.Scene {
+  /** The shared mixer (exposed so browser checks can read what was played). */
+  audio!: RaceAudio;
+
   constructor() {
     super({ key: 'SoundCheckScene' });
   }
 
   create(): void {
-    const audio = getRaceAudio();
+    const audio = this.audio = getRaceAudio();
     this.cameras.main.setBackgroundColor(0x131c27);
     menuText(this, 16, 12, 'SOUND CHECK', 26, UI.inkHigh, true);
     menuText(this, 220, 20, 'Tap a sound. Tell us which ones are wrong.', 13, UI.inkMid);
