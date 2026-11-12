@@ -6,6 +6,22 @@ import UIKit
 final class GameUITests: XCTestCase {
     private var app: XCUIApplication!
     private var status: XCUIElement { app.descendants(matching: .any).matching(identifier: "game.test.status").firstMatch }
+    /// True only while `launch()` waits for the app's first accessibility snapshot.
+    private var toleratingSnapshotTimeouts = false
+
+    /// On a cold simulator the accessibility service can take longer than
+    /// XCTest's internal query timeout to answer the first snapshot after a
+    /// launch. XCTest records that as a failure by itself, before the element
+    /// has had its 60 seconds to appear. During the launch wait only, that one
+    /// transient issue is logged and the wait retries; the test still fails if
+    /// the status element never appears before the deadline.
+    override func record(_ issue: XCTIssue) {
+        if toleratingSnapshotTimeouts && issue.compactDescription.contains("Failed to get matching snapshots") {
+            print("TRANSIENT snapshot timeout during launch, retrying: \(issue.compactDescription)")
+            return
+        }
+        super.record(issue)
+    }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -28,7 +44,14 @@ final class GameUITests: XCTestCase {
         app.launchArguments = ["--uitesting"]
         if reset { app.launchArguments += ["--reset-test-data", "--seed-test-records"] }
         app.launch()
-        XCTAssertTrue(status.waitForExistence(timeout: 60), "Native test status never appeared; app/WKWebView did not boot")
+        toleratingSnapshotTimeouts = true
+        let deadline = Date().addingTimeInterval(120)
+        var appeared = false
+        while !appeared && Date() < deadline {
+            appeared = status.waitForExistence(timeout: 15)
+        }
+        toleratingSnapshotTimeouts = false
+        XCTAssertTrue(appeared, "Native test status never appeared; app/WKWebView did not boot")
         return try waitFor("bundled title scene", timeout: 60) { state in
             self.scenes(state).contains("TitleScene") && state["loading"] as? Bool == false &&
             state["titleFadeComplete"] as? Bool == true && self.number(state, "titleSeed") == 202
