@@ -36,7 +36,7 @@ See [iPhone build and device guide](IPHONE.md). Physical-device signing and inst
 | `G` / `L` | Shove: push the marked rival one lane, in a direction you choose (see below) |
 | `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air, and rocks or lost fights drain it |
 | `Esc` / `P` | Pause / resume |
-| `M` | Toggle sound |
+| `M` | Toggle sound (on the title screen, `M` toggles the music) |
 | `R` while paused | Retry the current race or lesson |
 | `Tab` / `Shift+Tab`, `Enter` | Choose and activate a menu button |
 
@@ -180,7 +180,8 @@ are reconciled where possible, but localStorage is not a cross-process transacti
 
 - Attacks use text, shapes and progress bars as well as color
 - Menus support keyboard focus, mouse and touch
-- OS reduced-motion preference reduces camera roll, shake, flashes and decorative movement
+- OS reduced-motion preference reduces camera roll, shake, flashes, slow motion, zooms and decorative movement
+- Music (a code-generated loop whose layers follow your Flow chain) has its own on/off, on the title screen and the pause menu; audition every sound at `?soundcheck=1`
 - Sound can be muted; leaving the app/tab pauses and requires explicit Resume
 - Native controls respect the notch and home indicator
 - Canvas fallback works without WebGL; request it with `?renderer=canvas`

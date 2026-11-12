@@ -3,6 +3,7 @@ import { SCREEN_H, SCREEN_W } from './config';
 import { BootScene } from './scenes/BootScene';
 import { RaceScene } from './scenes/RaceScene';
 import { ResultScene } from './scenes/ResultScene';
+import { SoundCheckScene } from './scenes/SoundCheckScene';
 import { SpriteLabScene } from './scenes/SpriteLabScene';
 import { CupScene } from './scenes/CupScene';
 import { LockerScene } from './scenes/LockerScene';
@@ -29,7 +30,7 @@ const config: Phaser.Types.Core.GameConfig = {
   pixelArt: false,
   antialias: true,
   roundPixels: false,
-  scene: [BootScene, TitleScene, CupScene, LockerScene, RaceScene, ResultScene, SpriteLabScene]
+  scene: [BootScene, TitleScene, CupScene, LockerScene, RaceScene, ResultScene, SpriteLabScene, SoundCheckScene]
 };
 
 // Native Preferences is asynchronous. Hydrate it before menus/audio read

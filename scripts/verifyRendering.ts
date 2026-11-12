@@ -86,8 +86,10 @@ function testJuice(hz: number) {
   let powder = 0;
   let emitters = 0;
   const s:any = {
-    time:{now:100}, tweens:{killTweensOf:()=>{},add:()=>{}},
-    add:{graphics:()=>graphics,rectangle:()=>({setDepth:()=>{},setAlpha:()=>{}}),particles:()=>{
+    time:{now:100}, tweens:{killTweensOf:()=>{},add:()=>{}}, textures:{exists:()=>true},
+    add:{graphics:()=>graphics,rectangle:()=>({setDepth:()=>{},setAlpha:()=>{}}),
+      // The crash vignette: an image the Juice object creates once and keeps hidden.
+      image:()=>{const o:any={setDisplaySize:()=>o,setDepth:()=>o,setAlpha:()=>o,setVisible:()=>o};return o;},particles:()=>{
       const index = emitters++;
       return {setDepth:()=>{},setEmitterAngle:()=>{},emitParticleAt:(_x:number,_y:number,n:number)=>{if(index===0)powder+=n;}};
     }}};

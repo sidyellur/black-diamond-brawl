@@ -115,6 +115,7 @@ export class RaceHud {
   private readonly weaponText: Phaser.GameObjects.Text;
   private readonly shieldText: Phaser.GameObjects.Text;
   private readonly muteLabel: Phaser.GameObjects.Text;
+  private readonly musicLabel: Phaser.GameObjects.Text;
   private readonly touch: boolean;
   private readonly helpBg: Phaser.GameObjects.Rectangle;
   private strikeLabel: Phaser.GameObjects.Text | null = null;
@@ -132,6 +133,9 @@ export class RaceHud {
     restart: () => void;
     menu: () => void;
     mute: () => boolean;
+    /** Toggles the music preference; returns whether music is now on. */
+    music: () => boolean;
+    musicOn: boolean;
     control: (action: InputAction, down: boolean, source: string) => void;
   }) {
     this.touch = isTouchLayout(scene);
@@ -246,7 +250,7 @@ export class RaceHud {
     // its first render must not let an unrendered shade steal a button press.
     // Ordinary race controls are explicitly disabled while this is visible.
     const shade = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, SCREEN_W, SCREEN_H, UI.panel, 0.78);
-    const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2, 510, 354, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
+    const panel = scene.add.rectangle(SCREEN_W / 2, SCREEN_H / 2 + 15, 510, 384, UI.panel, 1).setStrokeStyle(2, UI.panelEdge);
     const heading = scene.add.text(SCREEN_W / 2, 140, 'TAKE A BREATHER', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '30px', fontStyle: 'bold', color: hex(UI.inkHigh) }).setOrigin(0.5);
     const sub = scene.add.text(SCREEN_W / 2, 181, 'The mountain can wait. Your race is frozen.', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '13px', color: hex(UI.inkMid) }).setOrigin(0.5);
     const controls = scene.add.text(SCREEN_W / 2, 217, this.touch ? 'HOLD ‹ ›  carve     TAP JUMP     TAP HIT (shoves at trees)     HOLD BOOST' : 'A D / ← →  carve  SPACE  jump  F / K  hit  G / L  shove  SHIFT  boost', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '12px', color: hex(UI.inkLow) }).setOrigin(0.5);
@@ -261,7 +265,13 @@ export class RaceHud {
       this.bindButton(b, callback);
       this.pauseOverlay.add([b, t]);
     }
-    this.pauseOverlay.add(scene.add.text(SCREEN_W / 2, 426, 'Clean hits, shoves, close calls and landings build Flow. Damage breaks it.', {
+    // Music on/off sits under the three main buttons, which keep their positions.
+    const musicButton = scene.add.rectangle(SCREEN_W / 2, 418, 340, 32, 0x1b2836).setStrokeStyle(1, UI.panelEdge).setInteractive({ useHandCursor: true });
+    this.musicLabel = scene.add.text(SCREEN_W / 2, 418, '', { fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '14px', color: hex(UI.inkHigh), fontStyle: 'bold' }).setOrigin(0.5);
+    this.setMusic(actions.musicOn);
+    this.bindButton(musicButton, () => this.setMusic(actions.music()));
+    this.pauseOverlay.add([musicButton, this.musicLabel]);
+    this.pauseOverlay.add(scene.add.text(SCREEN_W / 2, 454, 'Clean hits, shoves, close calls and landings build Flow. Damage breaks it.', {
       fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: hex(UI.inkLow)
     }).setOrigin(0.5));
     this.objects.push(this.pauseOverlay);
@@ -351,6 +361,7 @@ export class RaceHud {
     this.tauntName.setPosition(-width / 2 + 36, -14);
     this.tauntLine.setPosition(-width / 2 + 20, 11);
   }
+  setMusic(on: boolean): void { this.musicLabel.setText(on ? 'MUSIC   ON' : 'MUSIC   OFF'); }
   setMuted(muted: boolean): void { this.muteLabel.setText(this.touch ? (muted ? 'MUTED' : 'SOUND') : (muted ? 'M MUTED' : 'M SOUND')); }
 
   /** Boost bar: fill + a tick at the minimum-to-start level + text, so the

@@ -270,8 +270,8 @@ try {
   const stillPaused = await state();
   writeFileSync(`${OUT}/pause-state.json`, JSON.stringify({ before: paused, after: stillPaused }, null, 2));
   check('pause freezes race time and rider position', [stillPaused.elapsed, stillPaused.z], [paused.elapsed, paused.z]);
-  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01);
-  check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01));
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.rideLevel < 0.01);
+  check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.rideLevel < 0.01));
   await page.screenshot({ path: `${OUT}/06-pause.png` });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
