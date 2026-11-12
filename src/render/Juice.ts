@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
-import { MAX_SPEED, SCREEN_H, SCREEN_W, SNOWBALL_FLIGHT_MS } from '../config';
+import { FEEL, MAX_SPEED, SCREEN_H, SCREEN_W, SNOWBALL_FLIGHT_MS } from '../config';
+import { CameraFeel } from './CameraFeel';
+import type { CombatCueKind } from './feelCues';
+import { CUE_WEIGHT } from './feelCues';
+import { SlowMotion } from './slowMotion';
 import { DEPTH } from './depth';
 import { FLAKE_KEY, SNOW_PUFF_KEY, SPARK_KEY } from './particleArt';
 import { SNOW, UI } from './palette';
@@ -48,6 +52,13 @@ export class Juice {
    *  cheapest way to make a collision feel like it had mass. */
   private hitStopMs = 0;
   private readonly reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** Feel pass: slow-motion beat, camera push/settle/pull-back, and the crash vignette. */
+  private readonly slowMotion = new SlowMotion(this.reducedMotion);
+  private readonly cameraFeel: CameraFeel;
+  private vignette!: Phaser.GameObjects.Image;
+  private vignetteLife = 0;
+  private vignetteDuration = 1;
+  private vignetteStrength = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -56,6 +67,8 @@ export class Juice {
   ) {
     this.scene = scene;
     this.worldCam = worldCam;
+    this.cameraFeel = new CameraFeel(worldCam, this.reducedMotion);
+    this.cameraFeel.resetDepth();
 
     // Snow thrown off the board edge. Low gravity and a short life — powder
     // hangs briefly then drops, it does not arc like debris.
@@ -120,7 +133,61 @@ export class Juice {
     this.flash.setDepth(DEPTH.VFX + 2);
     this.flash.setAlpha(0);
 
-    [this.spray, this.burst, this.sparks, this.ambient, this.speedLines, this.snowballGfx, this.flash].forEach(register);
+    // Edge-darkening pulse for a heavy crash or a lost exchange.
+    const vignetteKey = 'feel-vignette';
+    if (!scene.textures.exists(vignetteKey)) {
+      const texture = scene.textures.createCanvas(vignetteKey, 256, 144);
+      const ctx = texture?.getContext();
+      if (texture && ctx) {
+        const gradient = ctx.createRadialGradient(128, 72, 34, 128, 72, 150);
+        gradient.addColorStop(0, 'rgba(30,0,4,0)');
+        gradient.addColorStop(1, 'rgba(30,0,4,0.95)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 144);
+        texture.refresh();
+      }
+    }
+    this.vignette = scene.add.image(SCREEN_W / 2, SCREEN_H / 2, vignetteKey).setDisplaySize(SCREEN_W * 1.04, SCREEN_H * 1.04)
+      .setDepth(DEPTH.VFX + 3).setAlpha(0).setVisible(false);
+
+    [this.spray, this.burst, this.sparks, this.ambient, this.speedLines, this.snowballGfx, this.flash, this.vignette].forEach(register);
+  }
+
+  /** Factor for real frame time before it reaches the fixed clock (1 outside a slow-motion beat). */
+  timeScale(realDeltaMs: number, simFrozen: boolean): number {
+    return this.slowMotion.advance(realDeltaMs, simFrozen);
+  }
+
+  get slowMotionStarts(): number { return this.slowMotion.started; }
+
+  /** The knockout beat: slow motion plus a camera push toward the struck rival. `at` may be null off-screen. */
+  knockoutBeat(at: { x: number; y: number } | null): void {
+    if (this.reducedMotion) return;
+    this.slowMotion.request();
+    if (at) this.cameraFeel.pushToward(at.x, at.y, FEEL.PUSH_ZOOM);
+  }
+
+  /** The player's own crash. Heavier than a hit: a harder kick and a dark pulse. `heavy` first tree also gets the slow beat. */
+  crashBeat(x: number, y: number, heavy: boolean): void {
+    if (this.reducedMotion) return;
+    if (heavy) this.slowMotion.request();
+    this.cameraFeel.pushToward(x, y, FEEL.CRASH_ZOOM, 520);
+    this.pulseVignette(FEEL.CRASH_VIGNETTE, FEEL.CRASH_PULSE_MS);
+  }
+
+  /** Losing an exchange: a duller, lower jolt and a faint dark pulse, unlike the sharp sparks of winning one. */
+  tookHit(x: number, y: number): void {
+    this.burst.emitParticleAt(x, y - 20, 8);
+    if (!this.reducedMotion) this.worldCam.shake(150, 0.007);
+    this.pulseVignette(0.3, 380);
+  }
+
+  private pulseVignette(strength: number, durationMs: number): void {
+    if (this.reducedMotion) return;
+    this.vignetteStrength = strength;
+    this.vignetteDuration = durationMs;
+    this.vignetteLife = durationMs;
+    this.vignette.setVisible(true);
   }
 
   /** True while the world should not advance — see `hitStopMs`. */
@@ -128,9 +195,17 @@ export class Juice {
     return this.hitStopMs > 0;
   }
 
-  tick(deltaMs: number): void {
+  tick(deltaMs: number, boosting = false): void {
     if (this.hitStopMs > 0) this.hitStopMs = Math.max(0, this.hitStopMs - deltaMs);
     for (const ring of this.rings) ring.life = Math.max(0, ring.life - deltaMs);
+    this.cameraFeel.setBoost(boosting);
+    this.cameraFeel.update(deltaMs);
+    if (this.vignetteLife > 0) {
+      this.vignetteLife = Math.max(0, this.vignetteLife - deltaMs);
+      const k = this.vignetteLife / this.vignetteDuration;
+      this.vignette.setAlpha(this.vignetteStrength * (k > 0.8 ? (1 - k) / 0.2 : Math.pow(k / 0.8, 1.5)));
+      if (this.vignetteLife === 0) this.vignette.setVisible(false);
+    }
   }
 
   /** Snow off the board while carving. Rate scales with speed, and hard turns
@@ -175,14 +250,17 @@ export class Juice {
    *  with the treed rival long out of view): the screen-space feedback,
    *  shake and hit-stop, still plays, but no particles are emitted at a
    *  stale or meaningless position. */
-  combatHit(at: { x: number; y: number } | null, knockdown = false): void {
+  combatHit(at: { x: number; y: number } | null, kind: CombatCueKind = 'hit'): void {
+    const w = CUE_WEIGHT[kind];
+    const knockdown = kind === 'knockdown' || kind === 'treeKnockout';
     if (at) {
-      this.sparks.emitParticleAt(at.x, at.y, knockdown ? 24 : 12);
-      this.burst.emitParticleAt(at.x, at.y, knockdown ? 16 : 6);
-      this.addRing(at.x, at.y, knockdown ? 72 : 44, UI.accentWarn, true);
+      this.sparks.emitParticleAt(at.x, at.y, Math.round(4 + w * 20));
+      this.burst.emitParticleAt(at.x, at.y, Math.round(2 + w * 14));
+      this.addRing(at.x, at.y, 30 + w * 42, kind === 'snowball' ? UI.accentInfo : UI.accentWarn, kind !== 'snowball');
     }
-    if (!this.reducedMotion) this.worldCam.shake(knockdown ? 180 : 110, knockdown ? 0.014 : 0.008);
-    this.hitStopMs = knockdown ? 110 : 55;
+    // Weight scales the shake; a snowball stings but does not shake the world.
+    if (!this.reducedMotion && kind !== 'snowball') this.worldCam.shake(60 + w * 130, 0.003 + w * 0.011);
+    this.hitStopMs = knockdown ? 110 : 20 + w * 50;
   }
 
   /** The shield breaking: a cool ring and a few sparks, no shake (nothing hurt). */
@@ -220,6 +298,7 @@ export class Juice {
   /** A landed trick. Celebratory, no shake — shaking on a reward would read
    *  as a penalty. */
   trickLanded(x: number, y: number): void {
+    this.cameraFeel.settle();
     this.sparks.emitParticleAt(x, y, 16);
     this.spray.emitParticleAt(x, y, 12);
     this.addRing(x, y, 64, UI.accentGood, false);
@@ -272,6 +351,23 @@ export class Juice {
           cx + dx * distance, cy + dy * distance,
           cx + dx * (distance + length), cy + dy * (distance + length)
         );
+      }
+    }
+
+    // Boost: streaks hug the left and right edges and lean toward the centre,
+    // fading in and out with the camera pull-back (about 200 ms each way).
+    const blend = this.cameraFeel.boostBlend;
+    if (blend > 0.01 && !this.reducedMotion) {
+      const cy = SCREEN_H * 0.52;
+      for (let i = 0; i < 16; i++) {
+        const phase = (this.motionPhase * 2.4 + i * 0.137) % 1;
+        const side = i % 2 === 0 ? -1 : 1;
+        const y = SCREEN_H * (0.1 + 0.8 * ((i * 0.381) % 1));
+        const x0 = side < 0 ? 0 : SCREEN_W;
+        const length = SCREEN_W * (0.06 + 0.1 * phase);
+        const reach = SCREEN_W * 0.03 * phase;
+        this.speedLines.lineStyle(i % 3 === 0 ? 3 : 2, SNOW.packed, blend * 0.55 * Math.sin(phase * Math.PI));
+        this.speedLines.lineBetween(x0 - side * reach, y, x0 - side * (reach + length), y + (cy - y) * 0.16);
       }
     }
 

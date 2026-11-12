@@ -45,6 +45,12 @@ export class BootScene extends Phaser.Scene {
       return;
     }
 
+    // `?soundcheck=1` opens the Sound Check screen: every sound effect and the music, one tap each.
+    if (new URLSearchParams(window.location.search).has('soundcheck')) {
+      this.scene.start('SoundCheckScene');
+      return;
+    }
+
     // Transition to the title screen (design-spec §2/§4.8 scene structure).
     this.scene.start('TitleScene');
   }

@@ -71,7 +71,7 @@ try {
   await step('interrupted mobile audio recovery', () => run('node', ['--import', 'tsx', 'scripts/verifyAudioRecovery.ts']));
   await step('native and browser storage', () => run('node', ['--import', 'tsx', 'scripts/verifyStorage.ts']));
   await step('persistent records', () => run('node', ['scripts/verifyRecords.mjs']));
-  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains', 'verifyProgression', 'verifyGhosts', 'verifyPractice', 'verifyNaturalRaceDriver', 'verifyBoost', 'verifyTreeStrikes', 'verifyStagger', 'verifyShove', 'verifyStrike', 'verifyPickups', 'verifyGrudges', 'verifyPowder', 'verifyIce', 'verifyChute']) {
+  for (const script of ['verifySkillCombat', 'verifyPersonalities', 'verifyMountains', 'verifyProgression', 'verifyGhosts', 'verifyPractice', 'verifyNaturalRaceDriver', 'verifyBoost', 'verifyTreeStrikes', 'verifyStagger', 'verifyShove', 'verifyStrike', 'verifyPickups', 'verifyGrudges', 'verifyPowder', 'verifyIce', 'verifyChute', 'verifyFeel']) {
     await step(script, () => run('node', ['--import', 'tsx', `scripts/${script}.ts`]));
   }
   await step('course solvability', () => run('npm', ['run', 'verify:solvability']));
@@ -92,6 +92,7 @@ try {
       ['browser controls and replay acceptance', 'scripts/browserAcceptance.mjs'],
       ['WebKit iPhone acceptance', 'scripts/mobileAcceptance.mjs'],
       ['expanded gameplay acceptance', 'scripts/expansionAcceptance.mjs'],
+      ['feel pass acceptance (slow motion, music, Sound Check)', 'scripts/feelAcceptance.mjs'],
       ['cup daily locker menus', 'scripts/verifyMenus.mjs']
     ]) {
       try {

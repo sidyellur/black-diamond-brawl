@@ -1,5 +1,10 @@
 import { CAMERA_DEPTH, ROAD_WIDTH, SCREEN_H, SCREEN_W } from '../config';
 
+/** View-width scale on the camera depth. 1 is the normal 100 degree view; below 1 widens it (the boost pull-back). Presentation only. */
+let depthScale = 1;
+export function setCameraDepthScale(scale: number): void { depthScale = scale; }
+export function getCameraDepthScale(): number { return depthScale; }
+
 export interface ProjectedPoint {
   screenX: number;
   screenY: number;
@@ -28,7 +33,7 @@ export function project(
     return null;
   }
 
-  const scale = CAMERA_DEPTH / dz;
+  const scale = CAMERA_DEPTH * depthScale / dz;
   const screenX = SCREEN_W / 2 + scale * (worldX - camX) * (SCREEN_W / 2);
   const screenY = SCREEN_H / 2 - scale * (worldY - camY) * (SCREEN_H / 2);
   const screenW = scale * ROAD_WIDTH * (SCREEN_W / 2);

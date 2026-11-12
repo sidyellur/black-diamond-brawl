@@ -434,3 +434,36 @@ export const GRUDGE_INTERVAL_FACTOR = 0.85;
 export const GRUDGE_HITS_TO_ANGER = 3;
 /** Hits a rival must land on the player in a race to leave a score to settle. */
 export const GRUDGE_HITS_TO_OWE = 2;
+
+// ---- Feel pass (presentation only; nothing here may change a simulation step) ----
+export const FEEL = {
+  /** Knockout / heavy-crash beat: real-time length, floor speed, and the share of it held at the floor before easing back. */
+  SLOWMO_MS: 350,
+  SLOWMO_SCALE: 0.35,
+  SLOWMO_HOLD_FRACTION: 0.4,
+  /** A beat cannot start within this long of the previous one starting, so
+   *  back-to-back knockouts never chain: at most SLOWMO_MS of slow time per cooldown. */
+  SLOWMO_COOLDOWN_MS: 1400,
+  /** Camera push toward the struck rival: zoom added at full weight, and its length. */
+  PUSH_ZOOM: 0.07,
+  PUSH_MS: 420,
+  /** Heavy crash: extra zoom kick, vignette strength and length. */
+  CRASH_ZOOM: 0.05,
+  CRASH_VIGNETTE: 0.78,
+  CRASH_PULSE_MS: 620,
+  /** Boost: scale on the projection's camera depth (below 1 widens the view), eased over this long. */
+  BOOST_DEPTH_SCALE: 0.93,
+  BOOST_EASE_MS: 200,
+  /** Trick landing: upward camera settle (px) and its length. */
+  SETTLE_PX: 9,
+  SETTLE_MS: 260,
+  /** Music tempo, the Flow chain length at which each layer comes in, and scheduling. */
+  MUSIC_BPM: 138,
+  MUSIC_FLOW_LEVELS: [0, 3, 6, 10] as readonly number[],
+  MUSIC_LOOKAHEAD_S: 0.45,
+  MUSIC_DUCK_GAIN: 0.3,
+  /** Mix levels ahead of the limiter. */
+  MASTER_GAIN: 0.9,
+  MUSIC_GAIN: 0.34,
+  WIND_GAIN: 0.15
+} as const;

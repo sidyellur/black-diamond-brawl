@@ -1,22 +1,58 @@
+import { FEEL } from '../config';
 import { getStoredValue, setStoredValue, STORAGE_KEYS } from '../platform/storage';
+import { SOUNDS, type PlayOptions, type SoundKind } from './effects';
+import { buildMasterChain, type MasterChain } from './graph';
+import { flowLevelFor, MusicSequencer } from './music';
+import { RideLayers, type RideState } from './ride';
+import { createNoiseBuffer, Voice } from './voice';
 
-/** Small procedural sound palette, activated only by a user gesture. No files or network. */
+export type { SoundKind, PlayOptions } from './effects';
+
+/** Never let a burst of events build an unbounded number of live sources. */
+const MAX_EFFECT_SOURCES = 90;
+
+/**
+ * The procedural mixer: effects, the speed/surface layers and the race music,
+ * all generated in code and all activated only by a user gesture.
+ *
+ * Lifecycle rules (see scripts/verifyAudioRecovery.ts): nothing is created
+ * before a gesture; a backgrounded or inactive app stops every pending source
+ * and silences the master at once; the context only resumes on a gesture; and
+ * music never restarts by itself after any of that. The race calls
+ * `startMusic()` again when play resumes.
+ */
 export class RaceAudio {
   private context: AudioContext | null = null;
-  private master: GainNode | null = null;
+  private chain: MasterChain | null = null;
   private muted = false;
+  private musicOn = true;
   private noiseBuffer: AudioBuffer | null = null;
-  private wind: AudioBufferSourceNode | null = null;
-  private windFilter: BiquadFilterNode | null = null;
-  private windGain: GainNode | null = null;
+  private rideLayers: RideLayers | null = null;
+  private music: MusicSequencer | null = null;
+  /** The race wants music right now (set by `startMusic`, cleared by `stopMusic` and by backgrounding). */
+  private musicWanted = false;
   private active = true;
+  private resumeAttempt: Promise<void> = Promise.resolve();
+  /** Diagnostics for browser checks: how many effects have actually been started, and the last one. */
+  soundsPlayed = 0;
+  lastSound: SoundKind | null = null;
   private readonly effects = new Set<AudioScheduledSourceNode>();
+  private readonly rideState: RideState = { speed01: 0, airborne: false, carving: false, boosting: false };
 
   constructor() {
     this.muted = getStoredValue(STORAGE_KEYS.muted) === '1';
+    this.musicOn = getStoredValue(STORAGE_KEYS.music) !== '0';
   }
 
   get isMuted(): boolean { return this.muted; }
+  get isMusicOn(): boolean { return this.musicOn; }
+  /** True while music notes are actually being scheduled. */
+  get musicPlaying(): boolean { return !!this.music?.isRunning; }
+  /** Combined level of the wind, board and edge layers; near zero when the ride sound is silent. */
+  get rideLevel(): number { return this.rideLayers?.level ?? 0; }
+  get isRunning(): boolean { return this.context?.state === 'running'; }
+
+  private get masterLevel(): number { return this.muted || !this.active ? 0 : FEEL.MASTER_GAIN; }
 
   unlock(): void {
     if (!this.active) return;
@@ -24,37 +60,29 @@ export class RaceAudio {
       // A closed context cannot resume. Rebuild only on a fresh gesture.
       if (this.context?.state === 'closed') this.destroy();
       if (!this.context) {
-        this.context = new AudioContext();
-        this.master = this.context.createGain();
-        this.master.gain.value = this.muted ? 0 : 0.16;
-        this.master.connect(this.context.destination);
-        this.noiseBuffer = this.context.createBuffer(1, this.context.sampleRate / 2, this.context.sampleRate);
-        const channel = this.noiseBuffer.getChannelData(0);
-        for (let i = 0; i < channel.length; i++) channel[i] = Math.random() * 2 - 1;
-        this.wind = this.context.createBufferSource();
-        this.wind.buffer = this.noiseBuffer;
-        this.wind.loop = true;
-        this.windFilter = this.context.createBiquadFilter();
-        this.windFilter.type = 'lowpass';
-        this.windFilter.frequency.value = 400;
-        this.windGain = this.context.createGain();
-        this.windGain.gain.value = 0;
-        this.wind.connect(this.windFilter); this.windFilter.connect(this.windGain);
-        this.windGain.connect(this.master); this.wind.start();
+        const context = new AudioContext();
+        this.context = context;
+        this.chain = buildMasterChain(context, this.masterLevel);
+        this.noiseBuffer = createNoiseBuffer(context);
+        this.rideLayers = new RideLayers(context, this.noiseBuffer, this.chain.ride);
+        this.music = new MusicSequencer(context, this.chain.music, this.noiseBuffer);
       }
-      this.master!.gain.setValueAtTime(this.muted ? 0 : 0.16, this.context.currentTime);
+      this.chain!.master.gain.setValueAtTime(this.masterLevel, this.context.currentTime);
       // iOS Safari/WKWebView reports "interrupted" after phone calls and
       // system UI. Test for any resumable non-running state, including that
       // WebKit state even with older TypeScript DOM declarations.
       if (this.context.state !== 'running') {
         const context = this.context;
-        void context.resume().then(() => {
+        this.resumeAttempt = context.resume().then(() => {
           // Backgrounding can race an in-flight resume request.
           if (!this.active && context.state !== 'closed') return context.suspend();
         }).catch(() => {});
       }
     } catch { /* Audio is enhancement; unsupported browsers remain playable. */ }
   }
+
+  /** Resolves once the last resume attempt has settled (a first gesture needs this before it can play). */
+  ready(): Promise<void> { return this.resumeAttempt; }
 
   /** Becoming active never produces audio by itself. The next user gesture
    * recovers the context, and the race still requires explicit Resume. */
@@ -63,75 +91,121 @@ export class RaceAudio {
     if (active || !this.context) return;
     const context = this.context;
     try {
-      // Suspending freezes audio time. Discard short effects so a hit from
-      // before the call cannot play again when the next gesture resumes it.
+      // Suspending freezes audio time. Discard short effects and queued music
+      // so nothing from before the call can play when the next gesture resumes it.
       this.stopEffects();
-      this.windGain?.gain.cancelScheduledValues(context.currentTime);
-      this.windGain?.gain.setValueAtTime(0, context.currentTime);
-      this.master?.gain.cancelScheduledValues(context.currentTime);
-      this.master?.gain.setValueAtTime(0, context.currentTime);
+      this.haltMusic();
+      this.musicWanted = false;
+      this.rideLayers?.silence(context.currentTime);
+      this.chain?.master.gain.cancelScheduledValues(context.currentTime);
+      this.chain?.master.gain.setValueAtTime(0, context.currentTime);
       if (context.state !== 'closed' && context.state !== 'suspended') void context.suspend().catch(() => {});
     } catch { /* Interruptions must not prevent pausing gameplay. */ }
   }
 
   toggle(): boolean {
     this.muted = !this.muted;
-    if (this.master && this.context) this.master.gain.setTargetAtTime(this.muted || !this.active ? 0 : 0.16, this.context.currentTime, 0.02);
+    if (this.chain && this.context) this.chain.master.gain.setTargetAtTime(this.masterLevel, this.context.currentTime, 0.02);
     setStoredValue(STORAGE_KEYS.muted, this.muted ? '1' : '0');
     this.unlock();
     return this.muted;
   }
 
-  /** Quiet powder/wind texture tracks motion instead of a fixed-volume loop. */
-  ride(speed01: number, airborne = false, carving = false, boosting = false): void {
-    if (!this.active || !this.context || !this.windGain || !this.windFilter) return;
-    const speed = Math.max(0, Math.min(1, speed01));
-    const now = this.context.currentTime;
-    this.windGain.gain.setTargetAtTime(speed * (airborne ? 0.10 : carving ? 0.25 : 0.14) * (boosting ? 1.5 : 1), now, 0.1);
-    this.windFilter.frequency.setTargetAtTime(250 + speed * (carving ? 1700 : 700) + (boosting ? 900 : 0), now, 0.12);
+  /** The music preference. Silences only the music; effects keep playing. */
+  toggleMusic(): boolean {
+    this.musicOn = !this.musicOn;
+    setStoredValue(STORAGE_KEYS.music, this.musicOn ? '1' : '0');
+    if (!this.musicOn) this.haltMusic();
+    else this.syncMusic();
+    return this.musicOn;
   }
 
-  play(kind: 'jump' | 'land' | 'hit' | 'crash' | 'pickup' | 'score' | 'go' | 'shield'): void {
-    const c = this.context;
-    if (!this.active || !c || !this.master || this.muted || c.state !== 'running') return;
-    const now = c.currentTime;
-    const tone = (frequency: number, end: number, duration: number, delay = 0) => {
-      const osc = c.createOscillator(); const gain = c.createGain();
-      osc.type = kind === 'hit' || kind === 'crash' ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(frequency, now + delay);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(20, end), now + delay + duration);
-      gain.gain.setValueAtTime(0.0001, now + delay);
-      gain.gain.exponentialRampToValueAtTime(0.45, now + delay + 0.009);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + duration);
-      osc.connect(gain); gain.connect(this.master!); osc.start(now + delay); osc.stop(now + delay + duration + 0.02);
-      this.effects.add(osc);
-      osc.onended = () => { this.effects.delete(osc); osc.disconnect(); gain.disconnect(); };
-    };
-    if (kind === 'pickup' || kind === 'go') {
-      [392, 494, 587].forEach((f, i) => tone(f, f, 0.16, i * 0.075));
-    } else if (kind === 'score') tone(740, 980, 0.10);
-    else if (kind === 'shield') { tone(880, 220, 0.16); tone(660, 140, 0.2, 0.05); }
-    else if (kind === 'jump') tone(180, 430, 0.17);
-    else if (kind === 'land') tone(130, 60, 0.13);
-    else {
-      tone(kind === 'hit' ? 190 : 90, 32, kind === 'hit' ? 0.18 : 0.4);
-      if (this.noiseBuffer) {
-        const src = c.createBufferSource(); const filter = c.createBiquadFilter(); const gain = c.createGain();
-        src.buffer = this.noiseBuffer; filter.type = 'lowpass'; filter.frequency.value = kind === 'hit' ? 1800 : 600;
-        gain.gain.setValueAtTime(0.6, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.21);
-        src.connect(filter); filter.connect(gain); gain.connect(this.master); src.start(); src.stop(now + 0.23);
-        this.effects.add(src);
-        src.onended = () => { this.effects.delete(src); src.disconnect(); filter.disconnect(); gain.disconnect(); };
-      }
+  /** The race (or Sound Check) wants the loop to play. It only does when music is on, sound is not muted and the context runs. */
+  startMusic(): void {
+    this.musicWanted = true;
+    this.syncMusic();
+  }
+
+  stopMusic(): void {
+    this.musicWanted = false;
+    this.haltMusic();
+  }
+
+  /** Flow chain length -> which layers play. Takes effect on the next scheduled step. */
+  setFlow(chain: number): void {
+    if (this.music) this.music.level = flowLevelFor(chain);
+  }
+
+  /** Sound Check: pick a layer level directly. */
+  setMusicLevel(level: number): void {
+    if (this.music) this.music.level = Math.max(0, Math.min(3, Math.round(level)));
+  }
+
+  get musicLevel(): number { return this.music?.level ?? 0; }
+
+  /** Dips the music under a big moment, then lets it back. */
+  duck(ms: number): void {
+    const context = this.context;
+    if (!context || !this.chain || !this.active) return;
+    const now = context.currentTime;
+    const gain = this.chain.music.gain;
+    gain.cancelScheduledValues(now);
+    gain.setTargetAtTime(FEEL.MUSIC_GAIN * FEEL.MUSIC_DUCK_GAIN, now, 0.03);
+    gain.setTargetAtTime(FEEL.MUSIC_GAIN, now + ms / 1000, 0.2);
+  }
+
+  /** Speed, surface and board layers. Also pumps the music schedule from the frame loop. */
+  ride(speed01: number, airborne = false, carving = false, boosting = false, surface?: RideState['surface']): void {
+    if (!this.active || !this.context || !this.rideLayers) return;
+    const now = this.context.currentTime;
+    const state = this.rideState;
+    state.speed01 = speed01; state.airborne = airborne; state.carving = carving; state.boosting = boosting; state.surface = surface;
+    this.rideLayers.set(state, now);
+    if (this.musicWanted) {
+      if (this.musicAudible) this.syncMusic(); else this.haltMusic();
     }
+  }
+
+  play(kind: SoundKind, options: PlayOptions & { delayMs?: number } = {}): void {
+    const c = this.context;
+    if (!this.active || !c || !this.chain || !this.noiseBuffer || this.muted || c.state !== 'running') return;
+    if (this.effects.size > MAX_EFFECT_SOURCES) return;
+    const voice = new Voice(c, this.chain.sfx, this.noiseBuffer, c.currentTime + (options.delayMs ?? 0) / 1000, Math.random, 0.05, this.effects);
+    voice.level = options.intensity ?? 1;
+    SOUNDS[kind].build(voice, options);
+    voice.seal();
+    this.soundsPlayed++; this.lastSound = kind;
   }
 
   destroy(): void {
     this.stopEffects();
-    try { this.wind?.stop(); } catch { /* Already stopped/closed by WebKit. */ }
+    this.haltMusic();
+    this.rideLayers?.dispose();
     if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => {});
-    this.context = null; this.master = null; this.noiseBuffer = null;
-    this.wind = null; this.windGain = null; this.windFilter = null;
+    this.context = null; this.chain = null; this.noiseBuffer = null;
+    this.rideLayers = null; this.music = null;
+  }
+
+  /** Pause: drop every effect still sounding or queued (a delayed snowball impact included). */
+  cutEffects(): void { this.stopEffects(); }
+
+  private get musicAudible(): boolean {
+    return this.active && this.musicOn && !this.muted && this.context?.state === 'running';
+  }
+
+  private syncMusic(): void {
+    if (!this.musicWanted || !this.music || !this.context || !this.chain) return;
+    if (!this.musicAudible) return;
+    if (!this.music.isRunning) {
+      this.chain.music.gain.cancelScheduledValues(this.context.currentTime);
+      this.chain.music.gain.setValueAtTime(FEEL.MUSIC_GAIN, this.context.currentTime);
+      this.music.start();
+    }
+    this.music.pump();
+  }
+
+  private haltMusic(): void {
+    this.music?.stop();
   }
 
   private stopEffects(): void {

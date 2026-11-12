@@ -22,6 +22,7 @@ export class TitleScene extends Phaser.Scene {
   private dailyDateText!: Phaser.GameObjects.Text;
   private lastDateCheck = 0;
   private dropInButton!: Phaser.GameObjects.Container;
+  private musicLabel!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'TitleScene' });
@@ -39,6 +40,7 @@ export class TitleScene extends Phaser.Scene {
     this.addBackdrop();
     this.addRiders();
     this.addTitle();
+    this.addMusicToggle();
     this.addModes();
     this.addControls();
     this.refreshCourse();
@@ -51,7 +53,29 @@ export class TitleScene extends Phaser.Scene {
       if (code === 'KeyD') this.startRace(dailyRace());
       if (code === 'KeyP') this.startRace({ ...createQuickRace(this.seed), mode: 'practice' });
       if (code === 'KeyL') this.openMenu('LockerScene');
+      if (code === 'KeyM') this.toggleMusic();
     });
+  }
+
+  /** The music preference, saved with the mute preference. Race music starts on DROP IN!, not here. */
+  private addMusicToggle(): void {
+    const audio = getRaceAudio();
+    const x = 560, y = 20, w = 168, h = 40;
+    const plate = this.add.rectangle(x, y, w, h, UI.panel, 0.94).setOrigin(0, 0).setStrokeStyle(1, UI.panelEdge).setInteractive({ useHandCursor: true });
+    this.musicLabel = menuText(this, x + w / 2, y + h / 2, '', 13, UI.inkHigh, true).setOrigin(0.5);
+    plate.on('pointerover', () => plate.setFillStyle(UI.panelEdge, 0.94));
+    plate.on('pointerout', () => plate.setFillStyle(UI.panel, 0.94));
+    plate.on('pointerdown', () => this.toggleMusic());
+    this.paintMusic(audio.isMusicOn);
+  }
+
+  private toggleMusic(): void {
+    const audio = getRaceAudio();
+    this.paintMusic(audio.toggleMusic());
+  }
+
+  private paintMusic(on: boolean): void {
+    this.musicLabel.setText(on ? 'MUSIC ON   M' : 'MUSIC OFF   M');
   }
 
   private addBackdrop(): void {

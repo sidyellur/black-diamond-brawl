@@ -31,6 +31,9 @@ There are five modes: Drop In (a quick race), Practice, a three-race Cup where r
 | Shove | `G` or `L` | HIT, when a rival is beside a tree or rock (the button reads SHOVE) |
 | Boost | `Shift`, `S` or `↓` | BOOST |
 | Pause | `Esc` or `P` | PAUSE |
+| Sound on / off | `M` | SOUND |
+
+Music has its own on/off on the title screen and in the pause menu. To audition every sound effect and the music layers, open the [Sound Check](https://sidyellur.github.io/black-diamond-brawl/?soundcheck=1).
 
 ## Run it yourself
 

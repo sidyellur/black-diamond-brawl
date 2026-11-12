@@ -6,7 +6,8 @@ export const STORAGE_KEYS = {
   recordsV2: 'black-diamond-brawl:records:v2',
   career: 'black-diamond-brawl:career:v1',
   ghosts: 'black-diamond-brawl:ghosts:v1',
-  muted: 'bdb-muted'
+  muted: 'bdb-muted',
+  music: 'bdb-music'
 } as const;
 
 type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
@@ -72,7 +73,7 @@ export function createStorage(options: StorageOptions) {
         // Scalar settings keep a failed write effective for this session.
         // Record/career/ghost models own merge caches and must still see the
         // durable snapshot, including another tab's newer earned progress.
-        if (key === STORAGE_KEYS.muted && pendingBrowserWrites.has(key)) {
+        if ((key === STORAGE_KEYS.muted || key === STORAGE_KEYS.music) && pendingBrowserWrites.has(key)) {
           return memory.get(key) ?? null;
         }
         if (!pendingBrowserWrites.has(key)) {

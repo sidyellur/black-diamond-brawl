@@ -12,6 +12,7 @@ import {
   SCREEN_H,
   SCREEN_W,
   SEGMENT_LENGTH,
+  SNOWBALL_FLIGHT_MS,
   WAX_BOOST_GAIN
 } from '../config';
 import { AIRider } from '../entities/aiRider';
@@ -38,11 +39,12 @@ import { surfaceAtZ, surfaceEntryCue } from '../track/surface';
 import { chuteAhead, chuteEntryCue, inChute } from '../track/chute';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
+import { classifyCombat, CUE_LEVEL, CUE_SOUND, type CombatCue } from '../render/feelCues';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { RIVAL_SUITS, UI } from '../render/palette';
 import { isTouchLayout, RaceHud } from '../ui/RaceHud';
 import { SceneryRenderer } from '../render/SceneryRenderer';
-import { getRaceAudio, RaceAudio } from '../audio/RaceAudio';
+import { getRaceAudio, RaceAudio, type SoundKind } from '../audio/RaceAudio';
 import { projectEntity, softClampWidth } from '../render/projectEntity';
 import { DrawnSegment, RoadRenderer } from '../render/RoadRenderer';
 import { horizonFogColor, SkyRenderer } from '../render/SkyRenderer';
@@ -75,6 +77,10 @@ interface RaceSceneData extends Partial<RaceOptions> {
    *  directly without going through Title (e.g. manual testing). */
   seed?: number;
 }
+
+const PICKUP_SOUND: Record<PickupKind, SoundKind> = {
+  pole: 'pickupPole', shield: 'pickupShield', wax: 'pickupWax', snowball: 'pickupSnowball'
+};
 
 const PICKUP_MESSAGES: Record<PickupKind, string> = {
   pole: 'SKI POLE · 3 POWER HITS',
@@ -146,6 +152,11 @@ export class RaceScene extends Phaser.Scene {
   private simulationHitStopMs = 0;
   private frameStruckRiders: AIRider[] = [];
   private reducedMotion = false;
+  // Feel pass: presentation-only state, read from the simulation and never written back to it.
+  private frameCues: Array<CombatCue<AIRider>> = [];
+  private feelCharges = 0;
+  private feelBoostActive = false;
+  private feelChain = 0;
   private boost!: BoostMeter;
   /** Surface under the player on the last simulated step, for the entry cue and HUD tag. */
   private playerSurface: Surface | undefined;
@@ -187,6 +198,10 @@ export class RaceScene extends Phaser.Scene {
     this.fixedClock.reset();
     this.simulationHitStopMs = 0;
     this.frameStruckRiders = [];
+    this.frameCues = [];
+    this.feelCharges = 0;
+    this.feelBoostActive = false;
+    this.feelChain = 0;
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.elapsedRaceMs = 0;
     this.paused = false;
@@ -331,6 +346,8 @@ export class RaceScene extends Phaser.Scene {
       restart: () => this.scene.restart({ ...retryRace(this.options), practiceLesson: this.practiceLesson }),
       menu: () => this.scene.start('TitleScene'),
       mute: () => this.audio.toggle(),
+      music: () => this.audio.toggleMusic(),
+      musicOn: this.audio.isMusicOn,
       control: (action, down, source) => this.playerInput.setAction(action, down, source)
     });
     this.hud.setMuted(this.audio.isMuted);
@@ -377,6 +394,7 @@ export class RaceScene extends Phaser.Scene {
       this.game.events.off(CANCEL_INPUT, cancel);
       this.game.events.off(APP_ACTIVE, foreground);
       this.playerInput.destroy();
+      this.audio.stopMusic();
       this.audio.ride(0);
     });
   }
@@ -390,12 +408,13 @@ export class RaceScene extends Phaser.Scene {
     this.paused = paused;
     this.fixedClock.discardPending();
     this.hud.setPaused(paused);
-    if (paused) this.audio.ride(0);
+    if (paused) { this.audio.stopMusic(); this.audio.cutEffects(); this.audio.ride(0); }
     this.playerInput.setEnabled(!paused && this.countdownMs === 0);
     if (!paused) {
       this.previousUpdateAt = performance.now();
       this.resumePending = true;
       this.audio.unlock();
+      if (this.countdownMs === 0) this.audio.startMusic();
     }
   }
 
@@ -428,14 +447,17 @@ export class RaceScene extends Phaser.Scene {
         this.hud.setTaunt(null);
         this.hud.showMessage('DROP IN!', UI.accentGood);
         this.audio.play('go');
+        this.audio.startMusic();
       }
       delta = 0;
     }
     const time = this.elapsedRaceMs;
     if (this.raceOver) return;
     this.frameStruckRiders = [];
+    this.frameCues = [];
     this.frameThrows = [];
-    this.fixedClock.advance(delta, (step) => {
+    // Slow motion scales how fast real time feeds the 60 Hz clock; a step itself is untouched.
+    this.fixedClock.advance(delta * this.juice.timeScale(delta, this.simulationHitStopMs > 0), (step) => {
       if (this.raceOver || this.paused || this.practiceComplete) return false;
       this.simulate(step, inputFrameElapsedMs);
       return !this.raceOver && !this.paused && !this.practiceComplete;
@@ -510,9 +532,9 @@ export class RaceScene extends Phaser.Scene {
       );
     }
     this.juice.renderSpeed(this.player.speed, time, this.boost.active);
-    this.juice.tick(delta);
+    this.juice.tick(delta, this.boost.active);
     this.updateHud();
-    this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0, this.boost.active);
+    this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0, this.boost.active, this.playerSurface);
 
   }
 
@@ -572,7 +594,7 @@ export class RaceScene extends Phaser.Scene {
         'TRICK LANDED! One more lesson to go.', 'SHOVED INTO THE ROCK! You are ready for the circuit.'][this.practiceLesson];
       this.practiceAdvanceAt = this.elapsedRaceMs + 1400;
       this.hud.showMessage('LESSON COMPLETE', UI.accentGood);
-      this.audio.play('score');
+      this.audio.play('trickLand');
     }
     if (this.practiceAdvanceAt && this.elapsedRaceMs >= this.practiceAdvanceAt) {
       if (this.practiceLesson < PRACTICE_LESSON_COUNT - 1) {
@@ -697,10 +719,12 @@ export class RaceScene extends Phaser.Scene {
     for (const event of this.combat.skillEvents.splice(0)) {
       if (event.type === 'counter') counterThisFrame = true;
       this.practiceObjective?.combat(event.type);
-      if (event.type === 'evade') { this.hud.showMessage('EVADED · COUNTER NOW!', UI.accentGood); this.audio.play('score'); }
+      if (event.type === 'evade') { this.hud.showMessage('EVADED · COUNTER NOW!', UI.accentGood); this.audio.play('evade'); }
       if (event.type === 'rival-hit') this.grudgeTracker?.rivalHit(`rival-${this.aiRiders.indexOf(event.rider)}`, !!event.absorbed);
       if (event.type === 'counter') { this.counterCount++; this.hud.showMessage('COUNTER HIT!', UI.accentGood); }
     }
+    // Feel: an armed hit is one that spent a pole charge this step (read before pickups can change it).
+    const armedHit = this.player.weaponCharges < this.feelCharges;
     if (this.practiceObjective && this.advancePractice()) return;
 
     // Ski-pole pickup (§4.6): collected by lane + Z, including while
@@ -708,12 +732,15 @@ export class RaceScene extends Phaser.Scene {
     const collected = collectPickups(this.player, this.pickups, this.boost);
     if (collected.length > 0) {
       this.hud.showMessage(PICKUP_MESSAGES[collected[collected.length - 1]], UI.accentWarn);
-      this.audio.play('pickup');
+      for (const kind of collected) this.audio.play(PICKUP_SOUND[kind]);
     }
-    this.frameThrows.push(...this.combat.throwEvents.splice(0));
+    this.feelCharges = this.player.weaponCharges;
+    const thrown = this.combat.throwEvents.splice(0);
+    for (let i = 0; i < thrown.length; i++) this.audio.play('throw');
+    this.frameThrows.push(...thrown);
     if (this.player.shieldBreakSerial > this.prevShieldBreaks) {
       this.hud.showMessage('SHIELD BROKE', UI.accentInfo);
-      this.audio.play('shield');
+      this.audio.play('shieldBreak');
       this.juice.shieldBreak(this.playerSprite.x, this.playerSprite.y);
     }
     this.prevShieldBreaks = this.player.shieldBreakSerial;
@@ -723,6 +750,15 @@ export class RaceScene extends Phaser.Scene {
     // data — but the riders must be captured here, because
     // `ScoreTracker.update()` below drains `combat.events`.
     this.frameStruckRiders.push(...this.combat.events.map((event) => event.rider));
+    // Feel: one cue per struck rider, so each kind of blow sounds and moves the camera differently.
+    if (this.combat.events.length) {
+      const cues = classifyCombat(this.combat.events, { counter: counterThisFrame, armed: armedHit, thrown: this.frameThrows.map(t => t.rider) });
+      for (const cue of cues) {
+        this.frameCues.push(cue);
+        this.audio.play(CUE_SOUND[cue.kind], { intensity: CUE_LEVEL[cue.kind], delayMs: cue.kind === 'snowball' ? SNOWBALL_FLIGHT_MS : 0 });
+        if (cue.kind === 'knockdown' || cue.kind === 'treeKnockout') this.audio.duck(900);
+      }
+    }
     if (this.combat.events.length) this.simulationHitStopMs = Math.max(this.simulationHitStopMs, 50);
     // A knockdown is a heavier hit than a shove: longer freeze, bigger burst.
     if (this.combat.events.some((event) => event.type === 'knockout' && event.rider.knockedDown)) {
@@ -742,11 +778,12 @@ export class RaceScene extends Phaser.Scene {
     const feedback = this.scoreTracker.feedback;
     this.boost.addFeedback(feedback.flatMap(e => e.kind === 'settled' ? [] : [e.kind]), counterThisFrame);
     this.boost.observe(this.player);
+    this.routeFeel();
     if (feedback.length > 0) {
       const primary = feedback.find(e => e.kind === 'settled') ?? feedback.find(e => e.kind === 'knockout') ?? feedback.find(e => e.kind === 'hit' || e.kind === 'push') ?? feedback[feedback.length - 1];
       const total = feedback.reduce((sum, e) => sum + e.points, 0);
       this.hud.showMessage(`${primary.label}  +${total}${this.scoreTracker.chain >= 3 ? `   ${this.scoreTracker.chain} EVENT FLOW` : ''}`, primary.kind === 'near' ? UI.accentInfo : UI.accentWarn);
-      if (primary.kind === 'near' || primary.kind === 'trick') this.audio.play('score');
+      if (primary.kind === 'near') this.audio.play('nearMiss');
     }
 
     if (!this.practiceObjective) {
@@ -855,6 +892,18 @@ export class RaceScene extends Phaser.Scene {
       chainRemaining: this.scoreTracker.chainRemaining,
       rivals: this.aiRiders.map(r => ({ progress: (r.worldZ - PLAYER_START_Z) / courseLength, color: RIVAL_SUITS[r.params.paletteIndex], out: r.wipedOut }))
     });
+  }
+
+  /** Feel: music layers, the Flow-step blip and the boost start/end sounds. Reads state, writes none of it. */
+  private routeFeel(): void {
+    const chain = this.scoreTracker.chain;
+    this.audio.setFlow(chain);
+    if (chain > this.feelChain && chain >= 2) this.audio.play('flowStep', { step: chain });
+    this.feelChain = chain;
+    if (this.boost.active !== this.feelBoostActive) {
+      this.audio.play(this.boost.active ? 'boostStart' : 'boostEnd');
+      this.feelBoostActive = this.boost.active;
+    }
   }
 
   private ghostPose(): { worldZ: number; laneOffset: number; jumpHeight: number; lean: number } {
@@ -1079,7 +1128,6 @@ export class RaceScene extends Phaser.Scene {
     camZ: number,
     drawnSegments: Map<number, DrawnSegment>
   ): void {
-    if (struckRiders.length > 0) this.audio.play('hit');
     for (const thrown of this.frameThrows) {
       this.juice.launchSnowball({ x: this.playerSprite.x, y: this.playerSprite.y - this.playerSprite.displayHeight * 0.5 },
         thrown.rider);
@@ -1102,12 +1150,12 @@ export class RaceScene extends Phaser.Scene {
       });
       // Mid-body: sprites are square with a bottom-centre origin, so half the
       // drawn width up from the base. Same width fraction the renderer uses.
-      this.juice.combatHit(
-        projected
-          ? { x: projected.screenX, y: projected.screenY - projected.screenW * PLAYER_WIDTH_FRACTION * 0.5 }
-          : null,
-        rider.knockedDown
-      );
+      const at = projected
+        ? { x: projected.screenX, y: projected.screenY - projected.screenW * PLAYER_WIDTH_FRACTION * 0.5 }
+        : null;
+      const kind = this.frameCues.find(cue => cue.rider === rider)?.kind ?? (rider.knockedDown ? 'knockdown' : 'hit');
+      this.juice.combatHit(at, kind);
+      if (kind === 'knockdown' || kind === 'treeKnockout') this.juice.knockoutBeat(at);
     }
   }
 
@@ -1126,26 +1174,31 @@ export class RaceScene extends Phaser.Scene {
     // Tree, second strike: run-ending. The heaviest hit in the game, so it gets the most.
     if (this.player.wipedOut && !this.prevWiped) {
       this.juice.impact(x, y, 1);
-      this.audio.play('crash');
+      this.juice.crashBeat(x, y, false);
+      this.audio.play('wipeout');
+      this.audio.duck(1400);
     } else if (this.player.heavyCrashing && this.player.treeCrashSerial > this.prevTreeCrashes) {
       // Tree, first strike: the strongest non-fatal impact, recoverable once.
       this.juice.impact(x, y, 0.85);
-      this.audio.play('crash');
+      this.juice.crashBeat(x, y, true);
+      this.audio.play('treeCrash');
+      this.audio.duck(1100);
       this.hud.showMessage('TREE HIT · LAST CHANCE', UI.accentBad);
     } else if (this.player.tumbling && !this.prevTumbling) {
       // Rock: a hard knockdown, recoverable.
       this.juice.impact(x, y, 0.62);
-      this.audio.play('crash');
+      this.audio.play('rockHit');
       this.hud.showMessage('ROCK HIT · RECOVERING', UI.accentBad);
     } else if (this.player.stumbling && !this.prevStumbling) {
       // Mogul: a bump, not a crash — spray and a nudge, no flash.
       this.juice.impact(x, y, 0.18);
-      this.audio.play('land');
+      this.audio.play('bump');
     }
 
     if (this.player.airborne && !this.prevAirborne) this.audio.play('jump');
     if (this.player.hitReacting && !this.previousHitReaction) {
-      this.audio.play('hit');
+      this.audio.play('takeHit');
+      this.juice.tookHit(x, y);
       this.hud.showMessage('RIVAL HIT · FIGHT BACK', UI.accentBad);
     }
     this.previousHitReaction = this.player.hitReacting;
@@ -1153,10 +1206,11 @@ export class RaceScene extends Phaser.Scene {
     // Landing. An extended (trick) landing is a reward, so it sparkles rather
     // than shakes.
     if (!this.player.airborne && this.prevAirborne && !this.player.wipedOut) {
-      this.audio.play('land');
       if (this.player.extendedJump) {
+        this.audio.play('trickLand');
         this.juice.trickLanded(x, y);
       } else {
+        this.audio.play('land');
         this.juice.emitCarve(x, y, 1, true);
       }
     }

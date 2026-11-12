@@ -270,16 +270,26 @@ try {
   const stillPaused = await state();
   writeFileSync(`${OUT}/pause-state.json`, JSON.stringify({ before: paused, after: stillPaused }, null, 2));
   check('pause freezes race time and rider position', [stillPaused.elapsed, stillPaused.z], [paused.elapsed, paused.z]);
-  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01);
-  check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.windGain.gain.value < 0.01));
+  await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').audio.rideLevel < 0.01);
+  check('pause settles procedural riding audio to silence', await page.evaluate(() => window.__game.scene.getScene('RaceScene').audio.rideLevel < 0.01));
   await page.screenshot({ path: `${OUT}/06-pause.png` });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !window.__game.scene.getScene('RaceScene').paused);
   await page.waitForTimeout(350);
   check('a key held across resume cannot become a new steer', (await state()).lane, 4);
   await page.keyboard.up('ArrowLeft');
+  // The game discards a press older than MAX_FRESH_FRAME_MS (500 ms) by design,
+  // so on a very slow runner one long frame can swallow this single press.
+  // Record the longest frame gap around it: a timeout here then names its cause.
+  await page.evaluate(() => {
+    const probe = window.__qaFrameGap = { max: 0, frames: 0, last: performance.now(), stop: false };
+    const tick = (t) => { probe.max = Math.max(probe.max, t - probe.last); probe.last = t; probe.frames++; if (!probe.stop) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
   await page.keyboard.press('ArrowLeft');
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').player.laneIndex === 3);
+  const freshGap = await page.evaluate(() => { const probe = window.__qaFrameGap; probe.stop = true; return { maxMs: Math.round(probe.max), frames: probe.frames }; });
+  console.log(`  INFO  fresh-input step: longest frame gap ${freshGap.maxMs} ms over ${freshGap.frames} frames (a press older than 500 ms is discarded by design)`);
   check('fresh input works after resume', (await state()).lane, 3);
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
@@ -567,6 +577,22 @@ try {
 } catch (error) {
   failure = `FAIL during ${phase}: ${error.stack || error.message || String(error)}`;
   console.error(failure);
+  // What the race was doing when the step gave up, so a timeout names its cause.
+  if (page && !page.isClosed()) {
+    const diagnosis = await page.evaluate(() => {
+      const sc = window.__game?.scene.getScene('RaceScene');
+      const p = sc?.player;
+      if (!p) return null;
+      return { scenes: window.__game.scene.getScenes(true).map((s) => s.scene.key), paused: sc.paused, raceOver: sc.raceOver,
+        countdownMs: sc.countdownMs, elapsedRaceMs: Math.round(sc.elapsedRaceMs), hitStopMs: Math.round(sc.simulationHitStopMs),
+        lane: p.laneIndex, lean: p.leanDirection, speed: Math.round(p.speed), worldZ: Math.round(p.worldZ),
+        airborne: p.airborne, tumbling: p.tumbling, heavyCrashing: p.heavyCrashing, swinging: p.swinging, wipedOut: p.wipedOut,
+        treeStrikes: p.treeStrikes, timeScale: sc.juice?.slowMotion?.scale ?? null, fps: Math.round(window.__game.loop.actualFps),
+        hasFocus: window.__game.hasFocus, docFocus: document.hasFocus(),
+        frameGapMaxMs: window.__qaFrameGap ? Math.round(window.__qaFrameGap.max) : null, rawDeltaMs: Math.round(window.__game.loop.rawDelta) };
+    }).catch((e) => ({ error: String(e) }));
+    console.error(`STATE at failure: ${JSON.stringify(diagnosis)}`);
+  }
   if (page && !page.isClosed()) await page.screenshot({ path: `${OUT}/acceptance-failure.png` }).catch(() => {});
 } finally {
   clearTimeout(deadline);
