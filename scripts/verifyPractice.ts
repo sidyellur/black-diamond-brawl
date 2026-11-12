@@ -11,7 +11,11 @@ import { generateTrack } from '../src/track/generator';
 const dt = 1000 / 60;
 assert.equal(PRACTICE_LESSON_COUNT, 4);
 assert.ok(PRACTICE_LESSONS.every((l, i) => l.title.startsWith(`${i + 1} / 4`)), 'titles read n / 4');
-for (const lesson of [0, 1, 2, 3]) {
+// The touch layout has no separate SHOVE button, so its lesson wording must not tell the player to press one.
+assert.ok(!/G \/ L/.test(PRACTICE_LESSONS[3].touchInstruction ?? '') && /SHOVE/.test(PRACTICE_LESSONS[3].touchInstruction ?? '') && /button/i.test(PRACTICE_LESSONS[3].touchInstruction ?? ''), 'lesson 4 touch text describes the one button');
+assert.ok(!/G \/ L/.test(PRACTICE_LESSONS[3].touchHint ?? '') && !/G \/ L/.test(PRACTICE_LESSONS[3].touchRetry ?? ''), 'lesson 4 touch hint and retry text name no key');
+// Every lesson is completable with the keyboard actions and again with the single touch button.
+for (const touch of [false, true]) for (const lesson of [0, 1, 2, 3]) {
   const objective = new PracticeObjectives(lesson);
   const player = new Player(); player.speed = MAX_SPEED;
   const personality = (['bully', 'line-defender', 'daredevil', 'bully'] as const)[lesson];
@@ -36,13 +40,16 @@ for (const lesson of [0, 1, 2, 3]) {
   let launched = false, observedDaredevilAir = false;
   for (let time = dt; time <= 8500 && !objective.complete; time += dt) {
     if (lesson === 0 && rider.attackPhase === 'windup' && rider.attackProgress > 0.7 && player.canJump) player.requestJump();
-    if (lesson === 0 && combat.counterReady) combat.attemptAttack(time);
+    if (lesson === 0 && combat.counterReady) { if (touch) { assert.equal(combat.strikeIntent(0), 'attack', 'touch: a counter window reads HIT'); combat.attemptStrike(time, 0); } else combat.attemptAttack(time); }
     if (lesson === 1 && time < dt * 2) player.requestLaneShift(1);
     if (lesson === 2 && isMogulLaunchAvailable(player, obstacles) && player.canJump) player.jump(true);
     // Real play: wait for the "!" cue (tree/rock waiting in the destination lane), then press SHOVE.
     if (lesson === 3) {
       const target = combat.pushTarget;
-      if (target && combat.pushPlan(target, 0).hazard === 'rock') combat.attemptPush(time, 0);
+      if (target && combat.pushPlan(target, 0).hazard === 'rock') {
+        if (touch) { assert.equal(combat.strikeIntent(0), 'shove', 'touch: at the rock cue the one button is SHOVE'); combat.attemptStrike(time, 0); }
+        else combat.attemptPush(time, 0);
+      }
     }
     player.update(dt); rider.update(dt, obstacles, player);
     collisions.update(player, obstacles); rivalCollisions.update(rider, obstacles);
@@ -62,7 +69,7 @@ for (const lesson of [0, 1, 2, 3]) {
       if (objective.jumped && !player.airborne && player.worldZ > z && !player.stumbling) objective.landed = true;
     }
   }
-  assert.ok(objective.complete, `lesson ${lesson + 1} is completable through actual controls and model events`);
+  assert.ok(objective.complete, `lesson ${lesson + 1} is completable through actual ${touch ? 'single-button touch' : 'keyboard'} controls and model events`);
   if (lesson === 3) assert.ok(rider.rockHitSerial === 1 && rider.laneIndex === 0, 'the rival was pushed into the rock');
   if (lesson === 2) assert.ok(observedDaredevilAir, 'daredevil actually demonstrates a jump');
   assert.equal(player.wipedOut, false);

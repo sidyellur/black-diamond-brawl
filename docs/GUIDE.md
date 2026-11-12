@@ -40,7 +40,8 @@ See [iPhone build and device guide](IPHONE.md). Physical-device signing and inst
 | `R` while paused | Retry the current race or lesson |
 | `Tab` / `Shift+Tab`, `Enter` | Choose and activate a menu button |
 
-Touch controls (including BOOST and SHOVE buttons) appear on touch devices or with `?touch=1`. Landscape gives the largest controls.
+Touch controls appear on touch devices or with `?touch=1`: carve `‹` `›` on the left, and **BOOST**, **JUMP** and **HIT** on the right. Landscape gives the largest controls.
+There is one attack button on touch. **HIT** does the most useful thing at that moment: it takes an open counter, **shoves** when a rival is beside a tree or rock (the button then reads **SHOVE !** and the arrow cue shows the "!"), hits a rival in reach, or throws a held snowball (it then reads **THROW**). It never fires a shove with nothing to push the rival into. The keyboard is unchanged: `F` / `K` always hit and `G` / `L` always shove.
 
 Rivals visibly **wind up before striking**. Jump or carve late in the tell to earn a short green
 **COUNTER** window, then use the ordinary Attack button. A counter can beat a faster opponent,
@@ -85,7 +86,7 @@ lane is pushed to the side you are holding (toward the centre of the road if you
 at the road edge the push flips inward. A shove ignores the tree clamp, so you can push a rival
 into a tree or rock on purpose. A tree pays the usual knockout if it follows within 2 seconds. With
 the ski pole a shove pushes two lanes and spends a charge, but ends at the first tree in its path.
-The target marker shows a **small arrow** beside the chevron in the direction a shove would push,
+On touch the single HIT button turns into SHOVE exactly when that "!" is showing. The target marker shows a **small arrow** beside the chevron in the direction a shove would push,
 and a **"!"** on it, with TREE/ROCK AHEAD in the hint bar, when a tree or rock sits in that lane
 within about a second of the rival's travel. An alert rival can steer out of the way once its 350 ms
 hit reaction ends, so the shove rewards timing: it reliably lands a rival in a tree within about
