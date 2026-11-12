@@ -278,8 +278,18 @@ try {
   await page.waitForTimeout(350);
   check('a key held across resume cannot become a new steer', (await state()).lane, 4);
   await page.keyboard.up('ArrowLeft');
+  // The game discards a press older than MAX_FRESH_FRAME_MS (500 ms) by design,
+  // so on a very slow runner one long frame can swallow this single press.
+  // Record the longest frame gap around it: a timeout here then names its cause.
+  await page.evaluate(() => {
+    const probe = window.__qaFrameGap = { max: 0, frames: 0, last: performance.now(), stop: false };
+    const tick = (t) => { probe.max = Math.max(probe.max, t - probe.last); probe.last = t; probe.frames++; if (!probe.stop) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
   await page.keyboard.press('ArrowLeft');
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').player.laneIndex === 3);
+  const freshGap = await page.evaluate(() => { const probe = window.__qaFrameGap; probe.stop = true; return { maxMs: Math.round(probe.max), frames: probe.frames }; });
+  console.log(`  INFO  fresh-input step: longest frame gap ${freshGap.maxMs} ms over ${freshGap.frames} frames (a press older than 500 ms is discarded by design)`);
   check('fresh input works after resume', (await state()).lane, 3);
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.waitForFunction(() => window.__game.scene.getScene('RaceScene').paused);
@@ -578,7 +588,8 @@ try {
         lane: p.laneIndex, lean: p.leanDirection, speed: Math.round(p.speed), worldZ: Math.round(p.worldZ),
         airborne: p.airborne, tumbling: p.tumbling, heavyCrashing: p.heavyCrashing, swinging: p.swinging, wipedOut: p.wipedOut,
         treeStrikes: p.treeStrikes, timeScale: sc.juice?.slowMotion?.scale ?? null, fps: Math.round(window.__game.loop.actualFps),
-        hasFocus: window.__game.hasFocus, docFocus: document.hasFocus() };
+        hasFocus: window.__game.hasFocus, docFocus: document.hasFocus(),
+        frameGapMaxMs: window.__qaFrameGap ? Math.round(window.__qaFrameGap.max) : null, rawDeltaMs: Math.round(window.__game.loop.rawDelta) };
     }).catch((e) => ({ error: String(e) }));
     console.error(`STATE at failure: ${JSON.stringify(diagnosis)}`);
   }
