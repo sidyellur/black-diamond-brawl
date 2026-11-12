@@ -567,6 +567,21 @@ try {
 } catch (error) {
   failure = `FAIL during ${phase}: ${error.stack || error.message || String(error)}`;
   console.error(failure);
+  // What the race was doing when the step gave up, so a timeout names its cause.
+  if (page && !page.isClosed()) {
+    const diagnosis = await page.evaluate(() => {
+      const sc = window.__game?.scene.getScene('RaceScene');
+      const p = sc?.player;
+      if (!p) return null;
+      return { scenes: window.__game.scene.getScenes(true).map((s) => s.scene.key), paused: sc.paused, raceOver: sc.raceOver,
+        countdownMs: sc.countdownMs, elapsedRaceMs: Math.round(sc.elapsedRaceMs), hitStopMs: Math.round(sc.simulationHitStopMs),
+        lane: p.laneIndex, lean: p.leanDirection, speed: Math.round(p.speed), worldZ: Math.round(p.worldZ),
+        airborne: p.airborne, tumbling: p.tumbling, heavyCrashing: p.heavyCrashing, swinging: p.swinging, wipedOut: p.wipedOut,
+        treeStrikes: p.treeStrikes, timeScale: sc.juice?.slowMotion?.scale ?? null, fps: Math.round(window.__game.loop.actualFps),
+        hasFocus: window.__game.hasFocus, docFocus: document.hasFocus() };
+    }).catch((e) => ({ error: String(e) }));
+    console.error(`STATE at failure: ${JSON.stringify(diagnosis)}`);
+  }
   if (page && !page.isClosed()) await page.screenshot({ path: `${OUT}/acceptance-failure.png` }).catch(() => {});
 } finally {
   clearTimeout(deadline);
