@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
-import { BOOST_MAX, BOOST_MIN_TO_START, SCREEN_H, SCREEN_W } from '../config';
+import { BOOST_MAX, BOOST_MIN_TO_START, SCREEN_H, SCREEN_W, TOUCH_BUTTON, TOUCH_STEER } from '../config';
 import { UI } from '../render/palette';
 import { formatTime } from '../frontend/menu';
 import type { InputAction } from '../entities/input';
 import { STRIKE_LABELS, type StrikeKind } from '../entities/combat';
 import { isAppActive } from '../input/appLifecycle';
+import { SteerZoneTracker, applySteerOps, touchHitAreas, type SteerOp } from '../input/steerZones';
 import type { Surface } from '../track/segment';
 import { SURFACE_LABELS, surfaceTagDetail } from '../track/surface';
 
@@ -78,10 +79,15 @@ export function isTouchLayout(scene: Phaser.Scene): boolean {
   return scene.sys.game.device.input.touch || new URLSearchParams(location.search).has('touch');
 }
 
-/** Touch buttons are 72x66 and keep that whole area tappable; the drawn face is a
- *  translucent rounded outline so the slope shows through. */
-const TOUCH_W = 72;
-const TOUCH_H = 66;
+/** The BOOST / JUMP / HIT faces are 72x66 translucent rounded outlines so the slope shows
+ *  through; their live area is larger (see `TOUCH_BUTTON` and `touchHitAreas`). */
+const TOUCH_W = TOUCH_BUTTON.FACE_W;
+const TOUCH_H = TOUCH_BUTTON.FACE_H;
+
+/** Pace readout, surface tag and boost bar in the touch layout: above the steer faces, in the
+ *  empty band over the zones, so nothing of theirs sits under a thumb-sized face. */
+const TOUCH_PACE_Y = 368;
+const TOUCH_TAG_Y = 396;
 
 /** Screen-space cockpit. Every object belongs exclusively to the UI camera. */
 export class RaceHud {
@@ -189,15 +195,22 @@ export class RaceHud {
     this.muteLabel = this.button(687, 30, 74, 23, this.touch ? 'SOUND' : 'M SOUND', () => this.setMuted(actions.mute()), 10);
 
     if (this.touch) {
-      if (scene.input.manager.pointersTotal < 4) scene.input.addPointer(4 - scene.input.manager.pointersTotal);
-      const held = (x: number, label: string, action: InputAction, y = SCREEN_H - 43) => {
-        // The input target is an invisible rectangle (it keeps the full tap area);
-        // the face is a translucent rounded outline drawn over it.
-        const g = scene.add.rectangle(x, y, TOUCH_W, TOUCH_H, UI.panel, 0).setDepth(10002).setInteractive();
+      // Mouse + five touches: steer, BOOST held and a jump or hit are three thumbs and fingers
+      // at once, and a fourth must not be dropped for want of a pointer.
+      if (scene.input.manager.pointersTotal < 6) scene.input.addPointer(6 - scene.input.manager.pointersTotal);
+      this.buildSteerZones(actions.control);
+      const centers = [726, 812, 898];
+      const areas = touchHitAreas(centers);
+      const held = (index: number, label: string, action: InputAction, y = TOUCH_BUTTON.CENTER_Y) => {
+        const x = centers[index], area = areas[index];
+        // The input target is an invisible rectangle, bigger than the face and not overlapping
+        // its neighbours; the face is a translucent rounded outline drawn over it.
+        const g = scene.add.rectangle((area.left + area.right) / 2, (area.top + area.bottom) / 2, area.right - area.left, area.bottom - area.top, UI.panel, 0)
+          .setDepth(10002).setInteractive();
+        g.name = `touch-${action}`;
         const face = scene.add.graphics().setDepth(10002);
-        const steer = action === 'left' || action === 'right';
-        const t = this.text(x, y, label, steer ? 26 : 12, UI.inkHigh, false).setOrigin(0.5).setDepth(10003).setAlpha(0.92);
-        t.setStroke(hex(UI.panel), steer ? 4 : 3);
+        const t = this.text(x, y, label, 12, UI.inkHigh, false).setOrigin(0.5).setDepth(10003).setAlpha(0.92);
+        t.setStroke(hex(UI.panel), 3);
         const pointers = new Set<number>();
         const draw = () => {
           const down = pointers.size > 0;
@@ -216,26 +229,32 @@ export class RaceHud {
         draw();
         const press = (p: Phaser.Input.Pointer) => {
           if (!isAppActive(scene.game)) return;
+          // A stale hold under this pointer id (a release that never arrived) would swallow the press, so clear it first.
+          actions.control(action, false, `touch:${p.id}`);
           pointers.add(p.id); actions.control(action, true, `touch:${p.id}`); draw();
         };
+        // Only a lift lets go: a thumb that rolls or slides off the button keeps its hold. The scene
+        // level events also fire when the lift lands outside the button or the canvas.
         const release = (p: Phaser.Input.Pointer) => {
-          pointers.delete(p.id); actions.control(action, false, `touch:${p.id}`);
+          if (!pointers.delete(p.id)) return;
+          actions.control(action, false, `touch:${p.id}`);
           if (pointers.size === 0) draw();
         };
         this.releaseTouchControls.push(() => {
           for (const id of pointers) actions.control(action, false, `touch:${id}`);
           pointers.clear(); draw();
         });
-        g.on('pointerdown', press).on('pointerup', release).on('pointerout', release);
+        g.on('pointerdown', press);
+        scene.input.on('pointerup', release).on('pointerupoutside', release);
         this.objects.push(g, face, t);
         this.raceControls.push(g);
         if (action === 'strike') { this.strikeLabel = t; this.drawStrike = draw; }
       };
       // One attack button: `strike` hits, shoves into a hazard or throws, whichever
       // `CombatSystem.strikeIntent` says, and the label follows the same answer.
-      held(58, '‹', 'left'); held(142, '›', 'right'); held(726, 'BOOST', 'boost'); held(812, 'JUMP', 'jump'); held(898, 'HIT', 'strike');
-      this.speed.setPosition(30, SCREEN_H - 104);
-      this.surfaceTag.setPosition(30, SCREEN_H - 122); // above the pace readout: the steer buttons sit below it
+      held(0, 'BOOST', 'boost'); held(1, 'JUMP', 'jump'); held(2, 'HIT', 'strike');
+      this.speed.setPosition(30, TOUCH_PACE_Y);
+      this.surfaceTag.setPosition(30, TOUCH_TAG_Y); // under the pace readout, still above the steer faces
       helpBg.setSize(420, 30);
     } else {
       this.text(30, SCREEN_H - 42, 'ARROWS / A D  STEER', 10, UI.panel, true);
@@ -275,6 +294,54 @@ export class RaceHud {
       fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: hex(UI.inkLow)
     }).setOrigin(0.5));
     this.objects.push(this.pauseOverlay);
+  }
+
+  /** Two big steer zones in the bottom-left corner. One interactive pad covers both; the finger's x
+   *  (see `SteerZoneTracker`) picks left or right, so a slide across the split switches direction
+   *  with no lift and a drifting thumb keeps its hold until it lifts. */
+  private buildSteerZones(control: (action: InputAction, down: boolean, source: string) => void): void {
+    const scene = this.scene;
+    const { SPLIT_X, RIGHT_X, TOP_Y, OVERSHOOT, FACE_W, FACE_H, FACE_CENTER_Y } = TOUCH_STEER;
+    const tracker = new SteerZoneTracker();
+    const pad = scene.add.rectangle(-OVERSHOOT, TOP_Y, RIGHT_X + OVERSHOOT, SCREEN_H + OVERSHOOT - TOP_Y, UI.panel, 0)
+      .setOrigin(0, 0).setDepth(10002).setInteractive();
+    pad.name = 'steer-zone';
+    const face = scene.add.graphics().setDepth(10002);
+    const faces = [
+      { dir: -1 as const, cx: SPLIT_X / 2 },
+      { dir: 1 as const, cx: (SPLIT_X + RIGHT_X) / 2 }
+    ];
+    const draw = () => {
+      face.clear();
+      for (const { dir, cx } of faces) {
+        const down = tracker.held === dir;
+        const left = cx - FACE_W / 2, top = FACE_CENTER_Y - FACE_H / 2;
+        // Same quiet style as the other buttons: a faint wash and thin outline, a stronger wash and bold outline when held.
+        face.fillStyle(UI.panel, down ? 0.6 : 0.16).fillRoundedRect(left, top, FACE_W, FACE_H, 18);
+        face.lineStyle(1.5, UI.panel, 0.5).strokeRoundedRect(left - 1.5, top - 1.5, FACE_W + 3, FACE_H + 3, 19.5);
+        face.lineStyle(down ? 3.5 : 1.5, UI.inkHigh, down ? 1 : 0.7).strokeRoundedRect(left, top, FACE_W, FACE_H, 18);
+        // A big chevron: dark under-stroke first so it reads on bright snow, then the light stroke.
+        const reach = 15, half = 22;
+        const x0 = cx - dir * reach * 0.5, x1 = cx + dir * reach * 0.5;
+        face.lineStyle(11, UI.panel, down ? 0.9 : 0.55).beginPath().moveTo(x0, FACE_CENTER_Y - half).lineTo(x1, FACE_CENTER_Y).lineTo(x0, FACE_CENTER_Y + half).strokePath();
+        face.lineStyle(7, UI.inkHigh, down ? 1 : 0.92).beginPath().moveTo(x0, FACE_CENTER_Y - half).lineTo(x1, FACE_CENTER_Y).lineTo(x0, FACE_CENTER_Y + half).strokePath();
+      }
+    };
+    draw();
+    const apply = (ops: SteerOp[]) => {
+      applySteerOps(ops, control);
+      if (ops.length) draw();
+    };
+    pad.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (isAppActive(scene.game)) apply(tracker.press(p.id, p.x, p.y));
+    });
+    // Scene-level events keep tracking a finger that leaves the pad, and see its lift wherever it lands.
+    scene.input.on('pointermove', (p: Phaser.Input.Pointer) => apply(tracker.move(p.id, p.x, p.y)));
+    const lift = (p: Phaser.Input.Pointer) => apply(tracker.release(p.id));
+    scene.input.on('pointerup', lift).on('pointerupoutside', lift);
+    this.releaseTouchControls.push(() => apply(tracker.releaseAll()));
+    this.objects.push(pad, face);
+    this.raceControls.push(pad);
   }
 
   private text(x: number, y: number, value: string, size: number, color: number, bold = false): Phaser.GameObjects.Text {
