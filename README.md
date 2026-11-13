@@ -14,7 +14,7 @@ On a phone, turn it to landscape. On an iPhone you can tap Share → Add to Home
 
 - **Race** four rivals down a different mountain every time, or replay one with its seed.
 - **Fight.** Hit rivals to stagger them, counter their attacks, or shove them into rocks and trees.
-- **Boost.** Near misses, tricks and hits fill a meter you can burn for extra speed.
+- **Boost.** Near misses, tricks and hits fill a meter you can burn for extra speed, with twin rocket flames out the back of the board.
 - **Grab pickups:** a ski pole, a shield, speed wax and a snowball to throw.
 - **Read the terrain:** powder slows you unless you jump it, ice makes you slide, and the tree chute squeezes everyone into three lanes.
 - **Mind the trees.** The first one is a heavy crash. The second ends your run.

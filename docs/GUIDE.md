@@ -34,7 +34,7 @@ See [iPhone build and device guide](IPHONE.md). Physical-device signing and inst
 | `Space` / `↑` / `W` | Jump; time a mogul for extended trick air |
 | `F` / `K` | Hit: attack the marked rival, or take an earned counter |
 | `G` / `L` | Shove: push the marked rival one lane, in a direction you choose (see below) |
-| `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air, and rocks or lost fights drain it |
+| `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air (the flames sputter out on takeoff and relight on landing if you are still holding it), and rocks or lost fights drain it. While it burns, twin rocket flames pour out behind the board and the screen-edge streaks turn warm; with reduced motion set, you get two steady flames and nothing flickers |
 | `Esc` / `P` | Pause / resume |
 | `M` | Toggle sound (on the title screen, `M` toggles the music) |
 | `R` while paused | Retry the current race or lesson |

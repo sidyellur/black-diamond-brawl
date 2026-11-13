@@ -8,6 +8,9 @@ import { DEPTH } from './depth';
 import { FLAKE_KEY, SNOW_PUFF_KEY, SPARK_KEY } from './particleArt';
 import { SNOW, UI } from './palette';
 
+/** Edge streaks while boosting: warm amber instead of snow white. */
+const BOOST_STREAK = 0xffb866;
+
 /**
  * Impact and speed feedback.
  *
@@ -346,7 +349,7 @@ export class Juice {
         const dy = SCREEN_H * (0.25 + (i % 4) * 0.08);
         const length = 0.035 + strength * 0.085;
         const alpha = Math.sin(phase * Math.PI) * strength * 0.3;
-        this.speedLines.lineStyle(i % 3 === 0 ? 2 : 1, SNOW.packed, alpha);
+        this.speedLines.lineStyle(i % 3 === 0 ? 2 : 1, boosting ? BOOST_STREAK : SNOW.packed, alpha);
         this.speedLines.lineBetween(
           cx + dx * distance, cy + dy * distance,
           cx + dx * (distance + length), cy + dy * (distance + length)
@@ -366,7 +369,8 @@ export class Juice {
         const x0 = side < 0 ? 0 : SCREEN_W;
         const length = SCREEN_W * (0.06 + 0.1 * phase);
         const reach = SCREEN_W * 0.03 * phase;
-        this.speedLines.lineStyle(i % 3 === 0 ? 3 : 2, SNOW.packed, blend * 0.55 * Math.sin(phase * Math.PI));
+        // Warm while boosting, so the whole screen reads hot (the rocket flames are the other half).
+        this.speedLines.lineStyle(i % 3 === 0 ? 3 : 2, BOOST_STREAK, blend * 0.7 * Math.sin(phase * Math.PI));
         this.speedLines.lineBetween(x0 - side * reach, y, x0 - side * (reach + length), y + (cy - y) * 0.16);
       }
     }
