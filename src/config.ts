@@ -14,6 +14,41 @@ export const ROAD_WIDTH = 2000; // world-space road half-width
 export const CAMERA_HEIGHT = 1350; // fixed camera elevation above the road surface
 
 /**
+ * Touch steering (game units on the 960x540 canvas). Two large zones fill the
+ * bottom-left corner of the screen, edge to edge with no dead border; the
+ * finger's x position, not which rectangle it entered or left, picks the
+ * direction. The faces drawn inside are smaller than the zones: the whole zone
+ * is live. Zones deliberately reach a little past the screen edges so a thumb
+ * on the very edge pixel still counts.
+ */
+export const TOUCH_STEER = {
+  /** Left zone spans x 0..SPLIT_X, right zone SPLIT_X..RIGHT_X. */
+  SPLIT_X: 116,
+  RIGHT_X: 232,
+  TOP_Y: 360,
+  /** Half-width of the band around the split where a finger keeps its direction. */
+  DEAD_BAND: 6,
+  /** How far the live area extends past the left and bottom screen edges. */
+  OVERSHOOT: 24,
+  /** Visible face of each zone. */
+  FACE_W: 96,
+  FACE_H: 84,
+  FACE_CENTER_Y: 488
+} as const;
+
+/** Touch action buttons (BOOST, JUMP, HIT): the drawn face and how far the invisible hit area reaches past it. */
+export const TOUCH_BUTTON = {
+  FACE_W: 72,
+  FACE_H: 66,
+  CENTER_Y: SCREEN_H - 43,
+  /** Extra live height above the face, and how far the area runs below and beyond the screen edge. */
+  PAD_UP: 54,
+  PAD_OUT: 24,
+  /** Extra live width on the outer (left) side of the first button. */
+  PAD_SIDE: 24
+} as const;
+
+/**
  * How far BEHIND the player the camera sits, in world units.
  *
  * A positive trailing offset is load-bearing; its value is tuned together

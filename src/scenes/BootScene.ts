@@ -3,6 +3,7 @@ import { generateObstacleSpriteSheet } from '../entities/obstacleSprites';
 import { generatePickupSpriteSheet } from '../entities/pickupSprite';
 import { generateAIRiderSpriteSheets, generatePlayerSpriteSheet } from '../entities/playerSprite';
 import { generateParticleTextures } from '../render/particleArt';
+import { generateFlameTextures } from '../render/flameArt';
 import { generateShadowTexture } from '../render/shadowSprite';
 import { generateSkyTexture } from '../render/SkyRenderer';
 import { guardTouchCancel } from '../input/touchCancel';
@@ -37,6 +38,7 @@ export class BootScene extends Phaser.Scene {
     generateSkyTexture(this);
     generateShadowTexture(this);
     generateParticleTextures(this);
+    generateFlameTextures(this);
 
     // `?spritelab=1` opens the sprite contact sheet instead of the game — the
     // authoring feedback loop for all generated art (see scripts/spriteLab.mjs).

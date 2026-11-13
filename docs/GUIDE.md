@@ -34,13 +34,13 @@ See [iPhone build and device guide](IPHONE.md). Physical-device signing and inst
 | `Space` / `↑` / `W` | Jump; time a mogul for extended trick air |
 | `F` / `K` | Hit: attack the marked rival, or take an earned counter |
 | `G` / `L` | Shove: push the marked rival one lane, in a direction you choose (see below) |
-| `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air, and rocks or lost fights drain it |
+| `Shift` / `S` / `↓` (hold) | Boost: burn the boost meter for 20% more top speed. The meter fills from near misses, trick landings, hits, counters and knockouts; needs 20 to start. Boost cuts out in the air (the flames sputter out on takeoff and relight on landing if you are still holding it), and rocks or lost fights drain it. While it burns, twin rocket flames pour out behind the board and the screen-edge streaks turn warm; with reduced motion set, you get two steady flames and nothing flickers |
 | `Esc` / `P` | Pause / resume |
 | `M` | Toggle sound (on the title screen, `M` toggles the music) |
 | `R` while paused | Retry the current race or lesson |
 | `Tab` / `Shift+Tab`, `Enter` | Choose and activate a menu button |
 
-Touch controls appear on touch devices or with `?touch=1`: carve `‹` `›` on the left, and **BOOST**, **JUMP** and **HIT** on the right. Landscape gives the largest controls.
+Touch controls appear on touch devices or with `?touch=1`. Carving is two big zones, `‹` and `›`, filling the bottom-left corner of the screen from edge to edge; the whole zone is live, not just the drawn face. Your thumb's position decides the direction: slide it across the middle to switch sides without lifting, and if it drifts off the zone it keeps its last direction until you lift. Tap to change one lane; hold to keep carving. **BOOST**, **JUMP** and **HIT** sit on the right and their tap areas reach beyond the drawn faces, so a near miss still counts, and a held BOOST survives the thumb rolling off the button. Landscape gives the largest controls.
 There is one attack button on touch. **HIT** does the most useful thing at that moment: it takes an open counter, **shoves** when a rival is beside a tree or rock (the button then reads **SHOVE !** and the arrow cue shows the "!"), hits a rival in reach, or throws a held snowball (it then reads **THROW**). It never fires a shove with nothing to push the rival into. The keyboard is unchanged: `F` / `K` always hit and `G` / `L` always shove.
 
 Rivals visibly **wind up before striking**. Jump or carve late in the tell to earn a short green

@@ -14,7 +14,7 @@ On a phone, turn it to landscape. On an iPhone you can tap Share → Add to Home
 
 - **Race** four rivals down a different mountain every time, or replay one with its seed.
 - **Fight.** Hit rivals to stagger them, counter their attacks, or shove them into rocks and trees.
-- **Boost.** Near misses, tricks and hits fill a meter you can burn for extra speed.
+- **Boost.** Near misses, tricks and hits fill a meter you can burn for extra speed, with twin rocket flames out the back of the board.
 - **Grab pickups:** a ski pole, a shield, speed wax and a snowball to throw.
 - **Read the terrain:** powder slows you unless you jump it, ice makes you slide, and the tree chute squeezes everyone into three lanes.
 - **Mind the trees.** The first one is a heavy crash. The second ends your run.
@@ -25,11 +25,11 @@ There are five modes: Drop In (a quick race), Practice, a three-race Cup where r
 
 | Action | Keyboard | Touch |
 | --- | --- | --- |
-| Carve left / right | `←` `→` or `A` `D` | `‹` `›` |
+| Carve left / right | `←` `→` or `A` `D` | Hold the big `‹` `›` zones in the bottom-left corner; slide a thumb across to switch |
 | Jump | `Space`, `↑` or `W` | JUMP |
 | Attack | `F` or `K` | HIT |
 | Shove | `G` or `L` | HIT, when a rival is beside a tree or rock (the button reads SHOVE) |
-| Boost | `Shift`, `S` or `↓` | BOOST |
+| Boost | `Shift`, `S` or `↓` | BOOST (hold) |
 | Pause | `Esc` or `P` | PAUSE |
 | Sound on / off | `M` | SOUND |
 

@@ -39,6 +39,7 @@ import { surfaceAtZ, surfaceEntryCue } from '../track/surface';
 import { chuteAhead, chuteEntryCue, inChute } from '../track/chute';
 import { DEPTH } from '../render/depth';
 import { Juice } from '../render/Juice';
+import { BoostFlames } from '../render/BoostFlames';
 import { classifyCombat, CUE_LEVEL, CUE_SOUND, type CombatCue } from '../render/feelCues';
 import { ShadowRenderer } from '../render/ShadowRenderer';
 import { RIVAL_SUITS, UI } from '../render/palette';
@@ -107,6 +108,7 @@ export class RaceScene extends Phaser.Scene {
   private sceneryRenderer!: SceneryRenderer;
   private shadows!: ShadowRenderer;
   private juice!: Juice;
+  private flames!: BoostFlames;
   /** Previous-frame collision/airborne state, so juice can fire on
    *  TRANSITIONS without collision or combat logic having to know that
    *  anything is watching. */
@@ -323,6 +325,7 @@ export class RaceScene extends Phaser.Scene {
     // Built after the HUD so the UI camera already exists — every juice
     // object registers as world-space and must be ignored by it.
     this.juice = new Juice(this, this.cameras.main, this.registerWorld);
+    this.flames = new BoostFlames(this, this.registerWorld, this.reducedMotion);
   }
 
   /**
@@ -533,6 +536,14 @@ export class RaceScene extends Phaser.Scene {
     }
     this.juice.renderSpeed(this.player.speed, time, this.boost.active);
     this.juice.tick(delta, this.boost.active);
+    // Rocket flames behind the board while boosting. Presentation only: reads the boost flag and the sprite's pose.
+    this.flames.update(delta, this.boost.active, {
+      x: this.playerSprite.x, y: this.playerSprite.y, width: this.playerSprite.displayWidth,
+      speed01: this.player.speed / MAX_SPEED, lean: this.player.leanDirection, airborne: this.player.airborne
+    });
+    if (this.flames.riderTint !== 0xffffff && !(this.player.hitReactionMsRemaining > HIT_REACTION_MS - HIT_FLASH_MS)) {
+      this.playerSprite.setTint(this.flames.riderTint);
+    }
     this.updateHud();
     this.audio.ride(this.player.speed / MAX_SPEED, this.player.airborne, this.player.leanDirection !== 0, this.boost.active, this.playerSurface);
 

@@ -14,6 +14,8 @@
     "measure:rocklock": "node --import tsx scripts/measureRockLock.ts",
     "lab": "node scripts/spriteLab.mjs",
     "verify:controls": "node --import tsx scripts/verifyControls.ts",
+    "verify:steer": "node --import tsx scripts/verifySteerZones.ts",
+    "verify:flames": "node --import tsx scripts/verifyFlames.ts",
     "verify:scoring": "node --import tsx scripts/verifyScoring.ts",
     "verify:rendering": "node --import tsx scripts/verifyRendering.ts",
     "verify:art": "node --import tsx scripts/verifyArt.ts",

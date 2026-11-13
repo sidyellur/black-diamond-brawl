@@ -432,7 +432,8 @@ try {
     input.setAction = (...args) => { record('setAction', { args }); return setAction(...args); };
     const update = input.update;
     input.update = (...args) => { record('before-update', { args }); const result = update(...args); record('after-update', { args }); return result; };
-    const right = sc.hud.objects.find((object) => object.input && object.x === 142 && object.y === 497);
+    // The two steer controls are one interactive zone pad now (left and right are decided by the finger's x).
+    const right = sc.hud.objects.find((object) => object.input && object.name === 'steer-zone');
     for (const event of ['pointerover', 'pointerdown', 'pointerup', 'pointerout']) {
       right?.on(event, (pointer) => record(event, { pointer: pointer.id, nativeEvent: pointer.event?.type, x: pointer.x, y: pointer.y }));
     }
